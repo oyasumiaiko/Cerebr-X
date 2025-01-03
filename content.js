@@ -81,7 +81,7 @@ class CerebrSidebar {
         states.sidebarStates = {};
       }
       states.sidebarStates[this.pageKey] = {
-        isVisible: this.isVisible,
+        // isVisible: this.isVisible,
         width: this.sidebarWidth
       };
       await chrome.storage.local.set(states);
@@ -95,7 +95,7 @@ class CerebrSidebar {
       const states = await chrome.storage.local.get('sidebarStates');
       if (states.sidebarStates && states.sidebarStates[this.pageKey]) {
         const state = states.sidebarStates[this.pageKey];
-        this.isVisible = state.isVisible;
+        // this.isVisible = state.isVisible;
         this.sidebarWidth = state.width;
 
         if (this.isVisible) {
