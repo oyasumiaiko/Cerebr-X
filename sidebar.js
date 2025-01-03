@@ -72,15 +72,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     };
 
-    // 监听标签页切换
-    chrome.tabs.onActivated.addListener(async (activeInfo) => {
-        console.log('标签页切换:', activeInfo);
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tab?.url) {
-            await loadWebpageSwitch('标签页切换');
-        }
-    });
-
     // 网答功能
     const webpageSwitch = document.getElementById('webpage-switch');
     let pageContent = null;
