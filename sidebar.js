@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 聊天历史记录变量
     let chatHistory = [];
     let responseContexts = new Map();  // 存储每个请求的上下文
+    let pageContent = null;  // 保留pageContent变量，但移除webpageSwitch相关代码
 
     // 添加公共的图片处理函数
     function processImageTags(content) {
@@ -72,10 +73,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     };
 
-    // 网答功能
-    const webpageSwitch = document.getElementById('webpage-switch');
-    let pageContent = null;
-
     // 获取网页内容
     async function getPageContent() {
         try {
@@ -86,138 +83,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             return response;
         } catch (error) {
             console.error('获取网页内容失败:', error);
-            return null;
-        }
-    }
-
-    // 修改 loadWebpageSwitch 函数
-    async function loadWebpageSwitch(call_name = 'loadWebpageSwitch') {
-        console.log(`loadWebpageSwitch 从 ${call_name} 调用`);
-
-        try {
-            const domain = await getCurrentDomain();
-            console.log('刷新后 网页问答 获取当前域名:', domain);
-            if (!domain) return;
-
-            const result = await chrome.storage.local.get('webpageSwitchDomains');
-            const domains = result.webpageSwitchDomains || {};
-            console.log('刷新后 网页问答存储中获取域名:', domains);
-
-            // 只在开关状态不一致时才更新
-            if (domains[domain] !== webpageSwitch.checked) {
-                webpageSwitch.checked = !!domains[domain];
-
-                if (webpageSwitch.checked) {
-                    document.body.classList.add('loading-content');
-
-                    try {
-                        const content = await getPageContent();
-                        if (content) {
-                            pageContent = content;
-                        } else {
-                            // 不再自动关闭开关，只显示提示消息
-                            // appendMessage('无法获取网页内容', 'ai', true);
-                            console.error('获取网页内容失败。');
-                        }
-                    } catch (error) {
-                        console.error('获取网页内容失败:', error);
-                        // 不再自动关闭开关，只显示提示消息
-                        // appendMessage('获取网页内容失败', 'ai', true);
-                    } finally {
-                        document.body.classList.remove('loading-content');
-                    }
-                } else {
-                    pageContent = null;
-                }
-            }
-        } catch (error) {
-            console.error('加载网页问答状态失败:', error);
-        }
-    }
-
-    // 修改网页问答开关监听器
-    webpageSwitch.addEventListener('change', async () => {
-        try {
-            const domain = await getCurrentDomain();
-            console.log('网页问答开关状态改变后，获取当前域名:', domain);
-
-            if (!domain) {
-                console.log('无法获取域名，保持开关状态不变');
-                webpageSwitch.checked = !webpageSwitch.checked; // 恢复开关状态
-                return;
-            }
-
-            console.log('网页问答开关状态改变后，获取网页问答开关状态:', webpageSwitch.checked);
-
-            if (webpageSwitch.checked) {
-                document.body.classList.add('loading-content');
-
-                try {
-                    const content = await getPageContent();
-                    if (content) {
-                        pageContent = content;
-                        await saveWebpageSwitch(domain, true);
-                        console.log('修改网页问答为已开启');
-                    } else {
-                        // 不再自动关闭开关，只显示提示消息
-                        // appendMessage('无法获取网页内容', 'ai', true);
-                        console.error('获取网页内容失败。');
-                    }
-                } catch (error) {
-                    console.error('获取网页内容失败:', error);
-                    // 不再自动关闭开关，只显示提示消息
-                    // appendMessage('获取网页内容失败', 'ai', true);
-                } finally {
-                    document.body.classList.remove('loading-content');
-                }
-            } else {
-                pageContent = null;
-                await saveWebpageSwitch(domain, false);
-                console.log('修改网页问答为已关闭');
-            }
-        } catch (error) {
-            console.error('处理网页问答开关变化失败:', error);
-            webpageSwitch.checked = !webpageSwitch.checked; // 恢复开关状态
-        }
-    });
-    // 在 DOMContentLoaded 事件处理程序中添加加载网页问答状态
-    await loadWebpageSwitch();
-
-    // 在文件开头添加函数用于获取当前域名
-    async function getCurrentDomain(retryCount = 0) {
-        const maxRetries = 3;
-        const retryDelay = 500;
-
-        try {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-            if (!tab?.url) {
-                console.log('未找到活动标签页');
-                return null;
-            }
-
-            // 处理本地文件
-            if (tab.url.startsWith('file://')) {
-                return 'local_pdf';
-            }
-
-            const hostname = new URL(tab.url).hostname;
-
-            // 规范化域名
-            const normalizedDomain = hostname
-                .replace(/^www\./, '')  // 移除www前缀
-                .toLowerCase();         // 转换为小写
-
-            console.log('规范化域名:', hostname, '->', normalizedDomain);
-            return normalizedDomain;
-        } catch (error) {
-            console.error(`获取当前域名失败 (尝试 ${retryCount + 1}/${maxRetries}):`, error);
-
-            if (retryCount < maxRetries) {
-                console.log(`等待 ${retryDelay}ms 后重试...`);
-                await new Promise(resolve => setTimeout(resolve, retryDelay));
-                return getCurrentDomain(retryCount + 1);
-            }
-
             return null;
         }
     }
@@ -243,16 +108,25 @@ document.addEventListener('DOMContentLoaded', async () => {
                 isValid: true
             });
 
+            // 获取网页内容
+            const pageContentResponse = await getPageContent();
+            if (pageContentResponse) {
+                pageContent = pageContentResponse;
+            } else {
+                pageContent = null;
+                console.error('获取网页内容失败。');
+            }
+
             // 构建消息内容
-            let content;
+            let messageContent;
             const images = [];
 
             // 如果有图片，构建包含文本和图片的数组格式
             if (imageTags.length > 0) {
-                content = [];
+                messageContent = [];
                 // 添加文本内容（如果有）
                 if (message) {
-                    content.push({
+                    messageContent.push({
                         type: "text",
                         text: message
                     });
@@ -261,7 +135,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 imageTags.forEach(tag => {
                     const base64Data = tag.getAttribute('data-image');
                     if (base64Data) {
-                        content.push({
+                        messageContent.push({
                             type: "image_url",
                             image_url: {
                                 url: base64Data
@@ -271,13 +145,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 });
             } else {
                 // 如果没有图片，直接使用文本内容
-                content = message;
+                messageContent = message;
             }
 
             // 构建用户消息
             const userMessage = {
                 role: "user",
-                content: content
+                content: messageContent
             };
 
             // 先添加用户消息到界面和历史记录
@@ -290,7 +164,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const systemMessage = {
                 role: "system",
                 content: `数学公式请使用LaTeX表示，行间公式请使用\\[...\\]表示，行内公式请使用\\(...\\)表示，禁止使用$美元符号包裹数学公式。用户语言是 ${navigator.language}。请优先使用 ${navigator.language} 语言回答用户问题。${
-                    webpageSwitch.checked && pageContent ?
+                    pageContent ?
                     `\n当前网页内容：\n标题：${pageContent.title}\nURL：${pageContent.url}\n内容：${pageContent.content}` :
                     ''
                 }`
@@ -508,41 +382,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.log('[收到URL变化]', event.data.url);
             // 加载新URL的聊天记录
             loadChatHistory(event.data.url);
-            
-            if (webpageSwitch.checked) {
-                console.log('[网页问答] URL变化，重新获取页面内容');
-                document.body.classList.add('loading-content');
-
-                getPageContent()
-                    .then(async content => {
-                        if (content) {
-                            pageContent = content;
-                            const domain = await getCurrentDomain();
-                            if (domain) {
-                                await saveWebpageSwitch(domain, true);
-                            }
-                        } else {
-                            webpageSwitch.checked = false;
-                            const domain = await getCurrentDomain();
-                            if (domain) {
-                                await saveWebpageSwitch(domain, false);
-                            }
-                            appendMessage('无法获取网页内容', 'ai', true);
-                        }
-                    })
-                    .catch(async error => {
-                        console.error('获取网页内容失败:', error);
-                        webpageSwitch.checked = false;
-                        const domain = await getCurrentDomain();
-                        if (domain) {
-                            await saveWebpageSwitch(domain, false);
-                        }
-                        appendMessage('获取网页内容失败', 'ai', true);
-                    })
-                    .finally(() => {
-                        document.body.classList.remove('loading-content');
-                    });
-            }
+            // 清空页面内容，等待下次发送消息时重新获取
+            pageContent = null;
         } else if (event.data.type === 'UPDATE_PLACEHOLDER') {
             console.log('收到更新placeholder消息:', event.data);
             if (messageInput) {
@@ -753,25 +594,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 初始化主题
     await initTheme();
 
-    // 修改 saveWebpageSwitch 函数，改进存储和错误处理
-    async function saveWebpageSwitch(domain, enabled) {
-        console.log('开始保存网页问答开关状态:', domain, enabled);
-
-        try {
-            const result = await chrome.storage.local.get('webpageSwitchDomains');
-            let domains = result.webpageSwitchDomains || {};
-
-            // 只在状态发生变化时才更新
-            if (domains[domain] !== enabled) {
-                domains[domain] = enabled;
-                await chrome.storage.local.set({ webpageSwitchDomains: domains });
-                console.log('网页问答状态已保存:', domain, enabled);
-            }
-        } catch (error) {
-            console.error('保存网页问答状态失败:', error, domain, enabled);
-        }
-    }
-
     // API 设置功能
     const apiSettings = document.getElementById('api-settings');
     const apiSettingsToggle = document.getElementById('api-settings-toggle');
@@ -960,7 +782,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         selection.addRange(range);
     });
 
-    // 快速总结的公共函数
+    // 修改快速总结功能
     async function performQuickSummary() {
         // 清空聊天记录
         chatContainer.innerHTML = '';
@@ -968,32 +790,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         // 关闭设置菜单
         settingsMenu.classList.remove('visible');
-
-        // 显示加载状态
-        appendMessage('正在准备页面内容...', 'ai', true);
-
-        // 如果网页问答没有开启，先开启它
-        if (!webpageSwitch.checked) {
-            webpageSwitch.checked = true;
-            const domain = await getCurrentDomain();
-            if (domain) {
-                await saveWebpageSwitch(domain, true);
-            }
-        }
-
-        // 获取页面内容
-        const content = await getPageContent();
-        if (!content) {
-            appendMessage('获取页面内容失败', 'ai', true);
-            return;
-        }
-
-        // 更新 pageContent
-        pageContent = content;
-
-        // 移除加载状态消息
-        chatContainer.innerHTML = '';
-        chatHistory = [];
 
         // 构建总结请求
         messageInput.textContent = `请总结这个页面的主要内容。`;
