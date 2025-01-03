@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 聊天历史记录变量
     let chatHistory = [];
+    let responseContexts = new Map();  // 存储每个请求的上下文
 
     // 添加公共的图片处理函数
     function processImageTags(content) {
@@ -55,17 +56,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         return msg;
     }
 
-    // 修改保存聊天历史记录的函数
-    async function saveChatHistory() {
-        try {
-            // 在保存之前处理消息格式
-            const processedHistory = chatHistory.map(processMessageContent);
-            await chrome.storage.local.set({ chatHistory: processedHistory });
-        } catch (error) {
-            console.error('保存聊天历史记录失败:', error);
-        }
-    }
-
     // 提取公共配置
     const MATH_DELIMITERS = {
         regex: /(\\\\\([^]+?\\\\\))|(\\\([^]+?\\\))|(\\\[[\s\S]+?\\\])/g,
@@ -82,73 +72,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     };
 
-    // 修改加载历史记录的函数
-    async function loadChatHistory() {
-        try {
-            const result = await chrome.storage.local.get('chatHistory');
-            if (result.chatHistory) {
-                // 处理历史记录中的消息格式
-                chatHistory = result.chatHistory.map(processMessageContent);
-
-                // 清空当前显示的消息
-                chatContainer.innerHTML = '';
-
-                // 创建文档片段来提高性能
-                const fragment = document.createDocumentFragment();
-
-                // 重新显示历史消息
-                chatHistory.forEach(msg => {
-                    if (Array.isArray(msg.content)) {
-                        // 处理包含图片的消息
-                        let messageHtml = '';
-                        msg.content.forEach(item => {
-                            if (item.type === "text") {
-                                messageHtml += item.text;
-                            } else if (item.type === "image_url") {
-                                const imageTag = createImageTag(item.image_url.url);
-                                messageHtml += imageTag.outerHTML;
-                            }
-                        });
-                        appendMessage(messageHtml, msg.role === 'user' ? 'user' : 'ai', true, fragment);
-                    } else {
-                        appendMessage(msg.content, msg.role === 'user' ? 'user' : 'ai', true, fragment);
-                    }
-                });
-
-                // 一次性添加所有消息
-                chatContainer.appendChild(fragment);
-
-                // 使用 requestAnimationFrame 来延迟显示动画
-                requestAnimationFrame(() => {
-                    // 获取所有新添加的消息元素
-                    const messages = chatContainer.querySelectorAll('.message.batch-load');
-
-                    // 使用 requestAnimationFrame 来确保在下一帧开始时添加 show 类
-                    requestAnimationFrame(() => {
-                        messages.forEach((message, index) => {
-                            // 使用 setTimeout 来创建级联动画效果
-                            setTimeout(() => {
-                                message.classList.add('show');
-                            }, index * 30); // 每个消息间隔 30ms
-                        });
-                    });
-                });
-            }
-        } catch (error) {
-            console.error('加载聊天历史记录失败:', error);
-        }
-    }
-
     // 监听标签页切换
     chrome.tabs.onActivated.addListener(async (activeInfo) => {
         console.log('标签页切换:', activeInfo);
-        await loadChatHistory();
-        await loadWebpageSwitch('标签页切');
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab?.url) {
+            await loadWebpageSwitch('标签页切换');
+        }
     });
-
-    // 初始加载历史记录
-    await loadChatHistory();
-
 
     // 网答功能
     const webpageSwitch = document.getElementById('webpage-switch');
@@ -313,6 +244,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         try {
+            // 生成新的请求ID
+            const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            // 创建该请求的上下文
+            responseContexts.set(requestId, {
+                aiResponse: '',
+                isValid: true
+            });
+
             // 构建消息内容
             let content;
             const images = [];
@@ -340,7 +279,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 });
             } else {
-                // 如果没有文本，直接使用文本内容
+                // 如果没有图片，直接使用文本内容
                 content = message;
             }
 
@@ -376,7 +315,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${config.apiKey}`
+                    'Authorization': `Bearer ${config.apiKey}`,
+                    'X-Request-Id': requestId  // 添加请求ID到header
                 },
                 body: JSON.stringify({
                     model: config.modelName || "gpt-4o",
@@ -392,30 +332,37 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             const reader = response.body.getReader();
-            let aiResponse = '';
 
             while (true) {
                 const {done, value} = await reader.read();
-                if (done) break;
+                if (done) {
+                    responseContexts.delete(requestId);
+                    break;
+                }
 
                 const chunk = new TextDecoder().decode(value);
                 const lines = chunk.split('\n');
 
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const content = line.slice(6);
-                        if (content.trim() === '[DONE]') continue;
+                const context = responseContexts.get(requestId);
+                if (context?.isValid) {
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const content = line.slice(6);
+                            if (content.trim() === '[DONE]') continue;
 
-                        try {
-                            const data = JSON.parse(content);
-                            if (data.choices?.[0]?.delta?.content) {
-                                aiResponse += data.choices[0].delta.content;
-                                updateAIMessage(aiResponse);
+                            try {
+                                const data = JSON.parse(content);
+                                if (data.choices?.[0]?.delta?.content) {
+                                    context.aiResponse += data.choices[0].delta.content;
+                                    updateAIMessage(context.aiResponse, requestId);
+                                }
+                            } catch (e) {
+                                console.error('解析响应出错:', e);
                             }
-                        } catch (e) {
-                            console.error('解析响应出错:', e);
                         }
                     }
+                } else {
+                    console.log('请求已过期，忽略响应内容');
                 }
             }
         } catch (error) {
@@ -423,7 +370,46 @@ document.addEventListener('DOMContentLoaded', async () => {
             appendMessage('发送失败: ' + error.message, 'ai', true);
             // 从 chatHistory 中移除最后一条记录（用户的问题）
             chatHistory.pop();
-            saveChatHistory();
+        }
+    }
+
+    function updateAIMessage(text, requestId) {
+        const context = responseContexts.get(requestId);
+        if (!context?.isValid) {
+            console.log('忽略过期响应:', requestId);
+            return;
+        }
+
+        const lastMessage = chatContainer.querySelector('.ai-message:last-child');
+        let rawText = text;
+
+        if (lastMessage) {
+            // 获取当前显示的文本
+            const currentText = lastMessage.getAttribute('data-original-text') || '';
+            // 如果新文本比当前文本长，说明有新内容需要更新
+            if (text.length > currentText.length) {
+                // 更新原始文本属性
+                lastMessage.setAttribute('data-original-text', text);
+
+                // 处理数学公式和Markdown
+                lastMessage.innerHTML = processMathAndMarkdown(text);
+
+                // 处理新渲染的链接
+                lastMessage.querySelectorAll('a').forEach(link => {
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                });
+
+                // 渲染LaTeX公式
+                renderMathInElement(lastMessage, MATH_DELIMITERS.renderConfig);
+
+                // 更新历史记录
+                if (chatHistory.length > 0) {
+                    chatHistory[chatHistory.length - 1].content = rawText;
+                }
+            }
+        } else {
+            appendMessage(rawText, 'ai');
         }
     }
 
@@ -529,6 +515,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             selection.addRange(range);
         } else if (event.data.type === 'URL_CHANGED') {
             console.log('[收到URL变化]', event.data.url);
+            // 加载新URL的聊天记录
+            loadChatHistory(event.data.url);
+            
             if (webpageSwitch.checked) {
                 console.log('[网页问答] URL变化，重新获取页面内容');
                 document.body.classList.add('loading-content');
@@ -578,41 +567,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    function updateAIMessage(text) {
-        const lastMessage = chatContainer.querySelector('.ai-message:last-child');
-        let rawText = text;
-
-        if (lastMessage) {
-            // 获取当前显示的文本
-            const currentText = lastMessage.getAttribute('data-original-text') || '';
-            // 如果新文本比当前文本长，说有新内容需要更新
-            if (text.length > currentText.length) {
-                // 更新原始文本属性
-                lastMessage.setAttribute('data-original-text', text);
-
-                // 处理数学公式和Markdown
-                lastMessage.innerHTML = processMathAndMarkdown(text);
-
-                // 处理新染的链接
-                lastMessage.querySelectorAll('a').forEach(link => {
-                    link.target = '_blank';
-                    link.rel = 'noopener noreferrer';
-                });
-
-                // 渲染LaTeX公式
-                renderMathInElement(lastMessage, MATH_DELIMITERS.renderConfig);
-
-                // 更新历史记录
-                if (chatHistory.length > 0) {
-                    chatHistory[chatHistory.length - 1].content = rawText;
-                    saveChatHistory();
-                }
-            }
-        } else {
-            appendMessage(rawText, 'ai');
-        }
-    }
-
     // 修改appendMessage函数，只在发送新消息时滚动
     function appendMessage(text, sender, skipHistory = false, fragment = null) {
         const messageDiv = document.createElement('div');
@@ -656,7 +610,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             fragment.appendChild(messageDiv);
         } else {
             chatContainer.appendChild(messageDiv);
-            // 只在发送新消息时自动滚动（不是加载历史记录）
+            // 只在发送新消息时自动滚动
             if (sender === 'user' && !skipHistory) {
                 requestAnimationFrame(() => {
                     chatContainer.scrollTo({
@@ -667,13 +621,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
-        // 只有在不跳过历史记录时才添加到历史记录
+        // 更新聊天历史
         if (!skipHistory) {
             chatHistory.push({
                 role: sender === 'user' ? 'user' : 'assistant',
                 content: processImageTags(text)
             });
-            saveChatHistory();
         }
     }
 
@@ -1001,10 +954,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     clearChat.addEventListener('click', () => {
         // 清空聊天容器
         chatContainer.innerHTML = '';
-        // 清空聊天历史记录
+        // 清空当前页面的聊天历史记录
         chatHistory = [];
-        saveChatHistory();
-        // 闭设置菜单
+        // 关闭设置菜单
         settingsMenu.classList.remove('visible');
         // 聚焦输入框并将光标移到末尾
         messageInput.focus();
@@ -1022,7 +974,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 清空聊天记录
         chatContainer.innerHTML = '';
         chatHistory = [];
-        saveChatHistory();
+        
         // 关闭设置菜单
         settingsMenu.classList.remove('visible');
 
