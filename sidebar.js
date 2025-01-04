@@ -269,6 +269,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     link.rel = 'noopener noreferrer';
                 });
 
+                // 处理代码块的语法高亮
+                lastMessage.querySelectorAll('pre code').forEach(block => {
+                    hljs.highlightElement(block);
+                });
+
                 // 渲染LaTeX公式
                 renderMathInElement(lastMessage, MATH_DELIMITERS.renderConfig);
 
@@ -423,6 +428,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         messageDiv.querySelectorAll('a').forEach(link => {
             link.target = '_blank';
             link.rel = 'noopener noreferrer';
+        });
+
+        // 处理代码块的语法高亮
+        messageDiv.querySelectorAll('pre code').forEach(block => {
+            hljs.highlightElement(block);
         });
 
         // 处理消息中的图片标签
