@@ -482,8 +482,8 @@ input:checked + .slider:before {
 .message blockquote {
     margin: 0.5em 0;
     padding-left: 12px;
-    border-left: 4px solid rgba(0, 0, 0, 0.2);
-    color: rgba(0, 0, 0, 0.7);
+    border-left: 4px solid  color-mix(in srgb, var(--cerebr-text-color) 20%, transparent);
+    color: color-mix(in srgb, var(--cerebr-text-color) 70%, transparent);
 }
 
 .message pre {
