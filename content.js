@@ -5,8 +5,8 @@ console.log('Document readyState:', document.readyState);
 class CerebrSidebar {
   constructor() {
     this.isVisible = false;
-    this.sidebarWidth = 30;  // 临时默认值，将在初始化时更新
-    this.scaleFactor = 1.0;  // 添加缩放因子
+    this.sidebarWidth = 430;  // 默认值改为像素
+    this.scaleFactor = 1.0;
     this.initialized = false;
     this.lastUrl = window.location.href;
     console.log('CerebrSidebar 实例创建');
@@ -79,7 +79,7 @@ class CerebrSidebar {
       
       // 从存储中加载宽度和缩放因子
       const result = await chrome.storage.sync.get(['sidebarWidth', 'scaleFactor']);
-      this.sidebarWidth = result.sidebarWidth || 30;
+      this.sidebarWidth = result.sidebarWidth || 430;
       this.scaleFactor = result.scaleFactor || 1.0;
       
       const container = document.createElement('cerebr-root');
@@ -107,7 +107,7 @@ class CerebrSidebar {
           position: fixed;
           top: calc(20px * var(--scale-ratio, 1));
           right: calc(20px * var(--scale-ratio, 1));
-          width: ${this.sidebarWidth}vw;
+          width: ${this.sidebarWidth}px;
           height: calc(100vh - calc(40px * var(--scale-ratio, 1)));
           background: var(--cerebr-bg-color, #ffffff);
           color: var(--cerebr-text-color, #000000);
@@ -229,11 +229,15 @@ class CerebrSidebar {
       window.addEventListener('message', (event) => {
         if (event.data.type === 'SIDEBAR_WIDTH_CHANGE') {
           this.sidebarWidth = event.data.width;
-          this.sidebar.style.width = `${this.sidebarWidth}vw`;
+          const scaledWidth = Math.round(this.sidebarWidth / this.scaleFactor);
+          this.sidebar.style.width = `${scaledWidth}px`;
           // 保存新的宽度值
           chrome.storage.sync.set({ sidebarWidth: this.sidebarWidth });
         } else if (event.data.type === 'SCALE_FACTOR_CHANGE') {
           this.scaleFactor = event.data.value;
+          // 更新宽度以适应新的缩放比例
+          const scaledWidth = Math.round(this.sidebarWidth / this.scaleFactor);
+          this.sidebar.style.width = `${scaledWidth}px`;
           this.updateScale();
           chrome.storage.sync.set({ scaleFactor: this.scaleFactor });
         }
@@ -251,9 +255,10 @@ class CerebrSidebar {
       startWidth = this.sidebarWidth;
 
       const handleMouseMove = (e) => {
-        const diff = (startX - e.clientX) / window.innerWidth * 100;
-        this.sidebarWidth = Math.min(Math.max(20, startWidth + diff), 60);
-        this.sidebar.style.width = `${this.sidebarWidth}vw`;
+        const diff = startX - e.clientX;
+        this.sidebarWidth = Math.min(Math.max(300, startWidth - diff), 600);
+        const scaledWidth = Math.round(this.sidebarWidth / this.scaleFactor);
+        this.sidebar.style.width = `${scaledWidth}px`;
         // 保存新的宽度值
         chrome.storage.sync.set({ sidebarWidth: this.sidebarWidth });
       };
@@ -271,7 +276,8 @@ class CerebrSidebar {
     window.addEventListener('message', (event) => {
       if (event.data.type === 'SIDEBAR_WIDTH_CHANGE') {
         this.sidebarWidth = event.data.width;
-        this.sidebar.style.width = `${this.sidebarWidth}vw`;
+        const scaledWidth = Math.round(this.sidebarWidth / this.scaleFactor);
+        this.sidebar.style.width = `${scaledWidth}px`;
         // 保存新的宽度值
         chrome.storage.sync.set({ sidebarWidth: this.sidebarWidth });
       }

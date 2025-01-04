@@ -1175,7 +1175,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const result = await chrome.storage.sync.get(['sidebarWidth', 'fontSize', 'scaleFactor']);
             if (result.sidebarWidth) {
-                document.documentElement.style.setProperty('--cerebr-sidebar-width', `${result.sidebarWidth}px`);
+                const scaledWidth = Math.round(result.sidebarWidth / (result.scaleFactor || 1.0));
+                document.documentElement.style.setProperty('--cerebr-sidebar-width', `${scaledWidth}px`);
                 sidebarWidth.value = result.sidebarWidth;
                 widthValue.textContent = `${result.sidebarWidth}px`;
             }
@@ -1207,17 +1208,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 监听侧栏宽度变化
     sidebarWidth.addEventListener('input', (e) => {
         const width = e.target.value;
-        widthValue.textContent = `${width}vw`;
+        widthValue.textContent = `${width}px`;
     });
 
     sidebarWidth.addEventListener('change', (e) => {
-        const width = e.target.value;
-        document.documentElement.style.setProperty('--cerebr-sidebar-width', `${width}vw`);
+        const width = parseInt(e.target.value);
+        const currentScaleFactor = parseFloat(scaleFactor.value) || 1.0;
+        const scaledWidth = Math.round(width / currentScaleFactor);
+        document.documentElement.style.setProperty('--cerebr-sidebar-width', `${scaledWidth}px`);
         saveSettings('sidebarWidth', width);
         // 通知父窗口宽度变化
         window.parent.postMessage({
             type: 'SIDEBAR_WIDTH_CHANGE',
-            width: parseInt(width)
+            width: width
         }, '*');
     });
 
