@@ -209,7 +209,7 @@ body {
     color: var(--cerebr-text-color);
     opacity: 0.5;
     cursor: text;
-    font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: inherit;
 }
 
 #message-input:focus {

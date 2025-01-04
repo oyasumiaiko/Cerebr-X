@@ -470,12 +470,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     function adjustTextareaHeight(textarea) {
         textarea.style.height = 'auto';
         const maxHeight = 200;
-        textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
-        if (textarea.scrollHeight > maxHeight) {
-            textarea.style.overflowY = 'auto';
-        } else {
-            textarea.style.overflowY = 'hidden';
-        }
+        const scrollHeight = textarea.scrollHeight;
+        textarea.style.height = Math.min(scrollHeight, maxHeight) + 'px';
+        textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
     }
 
     // 监听输入框变化
