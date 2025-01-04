@@ -871,3 +871,16 @@ input:checked + .slider:before {
     font-size: 12px;
     opacity: 0.8;
 }
+
+.content-length-footer {
+    font-size: 12px;
+    color: #888;
+    margin-top: 8px;
+    text-align: right;
+    padding-right: 4px;
+    font-style: italic;
+}
+
+.dark-theme .content-length-footer {
+    color: var(--cerebr-text-color);
+}

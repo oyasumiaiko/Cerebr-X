@@ -406,8 +406,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 修改appendMessage函数，只在发送新消息时滚动
     function appendMessage(text, sender, skipHistory = false, fragment = null) {
         const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${sender}-message`;
-
+        messageDiv.classList.add('message', `${sender}-message`);
+        
         // 如果是批量加载，添加特殊类名
         if (fragment) {
             messageDiv.classList.add('batch-load');
@@ -441,6 +441,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 渲染 LaTeX 公式
         renderMathInElement(messageDiv, MATH_DELIMITERS.renderConfig);
 
+        // Add content length footer for user messages if page content exists
+        if (sender === 'user' && pageContent) {
+            const contentLength = pageContent.content ? pageContent.content.length : 0;
+            const footer = document.createElement('div');
+            footer.classList.add('content-length-footer');
+            footer.textContent = `网页内容长度: ${contentLength.toLocaleString()}`;
+            messageDiv.appendChild(footer);
+        }
+
         // 如果提供了文档片段，添加到片段中；否则直接添加到聊天容器
         if (fragment) {
             fragment.appendChild(messageDiv);
@@ -464,6 +473,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 content: processImageTags(text)
             });
         }
+
+        return messageDiv;
     }
 
     // 自动调整文本框高度
