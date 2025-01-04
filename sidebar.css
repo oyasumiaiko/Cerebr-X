@@ -283,7 +283,7 @@ input:checked + .slider {
 }
 
 input:checked + .slider:before {
-    transform: translateX(16px);
+    transform: translateX(24px);
 }
 
 /* API设置页面样式 */
