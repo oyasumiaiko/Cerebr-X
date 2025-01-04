@@ -103,18 +103,18 @@ class CerebrSidebar {
         }
         .cerebr-sidebar {
           position: fixed;
-          top: 20px;
-          right: 20px;
+          top: calc(20px * var(--scale-ratio, 1));
+          right: calc(20px * var(--scale-ratio, 1));
           width: ${this.sidebarWidth}vw;
-          height: calc(100vh - 40px);
+          height: calc(100vh - calc(40px * var(--scale-ratio, 1)));
           background: var(--cerebr-bg-color, #ffffff);
           color: var(--cerebr-text-color, #000000);
           box-shadow: -2px 0 15px rgba(0,0,0,0.1);
           z-index: 2147483647;
-          border-radius: 12px;
+          border-radius: calc(12px * var(--scale-ratio, 1));
           overflow: hidden;
           visibility: hidden;
-          transform: translateX(calc(100% + 20px));
+          transform: translateX(calc(100% + calc(20px * var(--scale-ratio, 1))));
           pointer-events: none;
           contain: style layout size;
           isolation: isolate;
@@ -137,7 +137,7 @@ class CerebrSidebar {
         .cerebr-sidebar__content {
           height: 100%;
           overflow: hidden;
-          border-radius: 12px;
+          border-radius: calc(12px * var(--scale-ratio, 1));
           contain: style layout size;
         }
         .cerebr-sidebar__iframe {
@@ -180,6 +180,21 @@ class CerebrSidebar {
       this.sidebar.appendChild(header);
       this.sidebar.appendChild(resizer);
       this.sidebar.appendChild(content);
+
+      // 添加 ResizeObserver 监听大小变化
+      const scaleObserver = new ResizeObserver(entries => {
+        const container = entries[0].target;
+        const scale = 1 / window.devicePixelRatio; // 使用设备像素比来计算缩放
+        iframe.style.transformOrigin = 'top left';
+        iframe.style.transform = `scale(${scale})`;
+        iframe.style.width = `${100 / scale}%`; // 补偿缩放导致的宽度变化
+        iframe.style.height = `${100 / scale}%`; // 补偿缩放导致的高度变化
+        
+        // 更新 CSS 变量以调整圆角和边距
+        this.sidebar.style.setProperty('--scale-ratio', scale);
+      });
+
+      scaleObserver.observe(content);
 
       shadow.appendChild(style);
       shadow.appendChild(this.sidebar);
