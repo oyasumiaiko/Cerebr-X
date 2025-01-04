@@ -10,10 +10,9 @@ class CerebrSidebar {
     this.pageKey = window.location.origin + window.location.pathname;
     this.lastUrl = window.location.href;
     console.log('CerebrSidebar 实例创建');
-    // this.lastToggleTime = null; // 添加上次执行时间存储
     this.initializeSidebar();
     this.setupUrlChangeListener();
-    this.setupDragAndDrop(); // 添加拖放事件监听器
+    this.setupDragAndDrop();
   }
 
   setupUrlChangeListener() {
@@ -72,40 +71,6 @@ class CerebrSidebar {
 
     // 添加定期检查
     setInterval(handleUrlChange, 1000);
-  }
-
-  async saveState() {
-    try {
-      const states = await chrome.storage.local.get('sidebarStates') || { sidebarStates: {} };
-      if (!states.sidebarStates) {
-        states.sidebarStates = {};
-      }
-      states.sidebarStates[this.pageKey] = {
-        // isVisible: this.isVisible,
-        width: this.sidebarWidth
-      };
-      await chrome.storage.local.set(states);
-    } catch (error) {
-      console.error('保存侧边栏状态失败:', error);
-    }
-  }
-
-  async loadState() {
-    try {
-      const states = await chrome.storage.local.get('sidebarStates');
-      if (states.sidebarStates && states.sidebarStates[this.pageKey]) {
-        const state = states.sidebarStates[this.pageKey];
-        // this.isVisible = state.isVisible;
-        this.sidebarWidth = state.width;
-
-        if (this.isVisible) {
-          this.sidebar.classList.add('visible');
-        }
-        this.sidebar.style.width = `${this.sidebarWidth}vw`;
-      }
-    } catch (error) {
-      console.error('加载侧边栏状态失败:', error);
-    }
   }
 
   async initializeSidebar() {
@@ -215,9 +180,6 @@ class CerebrSidebar {
       shadow.appendChild(style);
       shadow.appendChild(this.sidebar);
 
-      // 先加载状态
-      await this.loadState();
-
       // 添加到文档并保护它
       const root = document.documentElement;
       root.appendChild(container);
@@ -291,19 +253,14 @@ class CerebrSidebar {
     if (!this.initialized) return;
 
     try {
-      // 在改变可见性之前保存旧状态
       const wasVisible = this.isVisible;
       this.isVisible = !this.isVisible;
 
-      // 更新DOM状态
       if (this.isVisible) {
         this.sidebar.classList.add('visible');
       } else {
         this.sidebar.classList.remove('visible');
       }
-
-      // 保存状态
-      this.saveState();
 
       // 如果从不可见变为可见，通知iframe并聚焦输入框
       if (!wasVisible && this.isVisible) {
