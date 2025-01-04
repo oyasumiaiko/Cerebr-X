@@ -6,6 +6,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const settingsButton = document.getElementById('settings-button');
     const settingsMenu = document.getElementById('settings-menu');
     const toggleTheme = document.getElementById('toggle-theme');
+    const sidebarWidth = document.getElementById('sidebar-width');
+    const fontSize = document.getElementById('font-size');
+    const widthValue = document.getElementById('width-value');
+    const fontSizeValue = document.getElementById('font-size-value');
     let currentMessageElement = null;
 
     // 聊天历史记录变量
@@ -1168,4 +1172,62 @@ document.addEventListener('DOMContentLoaded', async () => {
             e.stopPropagation();
         }
     });
+
+    // 初始化设置
+    async function initSettings() {
+        try {
+            const result = await chrome.storage.sync.get(['sidebarWidth', 'fontSize']);
+            if (result.sidebarWidth) {
+                document.documentElement.style.setProperty('--cerebr-sidebar-width', `${result.sidebarWidth}px`);
+                sidebarWidth.value = result.sidebarWidth;
+                widthValue.textContent = `${result.sidebarWidth}px`;
+            }
+            if (result.fontSize) {
+                document.documentElement.style.setProperty('--cerebr-font-size', `${result.fontSize}px`);
+                fontSize.value = result.fontSize;
+                fontSizeValue.textContent = `${result.fontSize}px`;
+            }
+        } catch (error) {
+            console.error('初始化设置失败:', error);
+        }
+    }
+
+    // 保存设置
+    async function saveSettings(key, value) {
+        try {
+            await chrome.storage.sync.set({ [key]: value });
+        } catch (error) {
+            console.error('保存设置失败:', error);
+        }
+    }
+
+    // 监听侧栏宽度变化
+    sidebarWidth.addEventListener('input', (e) => {
+        const width = e.target.value;
+        document.documentElement.style.setProperty('--cerebr-sidebar-width', `${width}px`);
+        widthValue.textContent = `${width}px`;
+        // 通知父窗口宽度变化
+        window.parent.postMessage({
+            type: 'SIDEBAR_WIDTH_CHANGE',
+            width: parseInt(width)
+        }, '*');
+    });
+
+    sidebarWidth.addEventListener('change', (e) => {
+        saveSettings('sidebarWidth', e.target.value);
+    });
+
+    // 监听字体大小变化
+    fontSize.addEventListener('input', (e) => {
+        const size = e.target.value;
+        document.documentElement.style.setProperty('--cerebr-font-size', `${size}px`);
+        fontSizeValue.textContent = `${size}px`;
+    });
+
+    fontSize.addEventListener('change', (e) => {
+        saveSettings('fontSize', e.target.value);
+    });
+
+    // 初始化设置
+    await initSettings();
 });

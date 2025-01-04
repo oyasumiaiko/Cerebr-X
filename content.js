@@ -135,18 +135,17 @@ class CerebrSidebar {
         .cerebr-sidebar {
           position: fixed;
           top: 20px;
-          right: -450px;
-          width: 430px;
+          right: 20px;
+          width: ${this.sidebarWidth}px;
           height: calc(100vh - 40px);
           background: var(--cerebr-bg-color, #ffffff);
           color: var(--cerebr-text-color, #000000);
           box-shadow: -2px 0 15px rgba(0,0,0,0.1);
           z-index: 2147483647;
           border-radius: 12px;
-          margin-right: 20px;
           overflow: hidden;
           visibility: hidden;
-          transform: translateX(0);
+          transform: translateX(calc(100% + 20px));
           pointer-events: none;
           contain: style layout size;
           isolation: isolate;
@@ -164,7 +163,7 @@ class CerebrSidebar {
           }
         }
         .cerebr-sidebar.visible {
-          transform: translateX(-450px);
+          transform: translateX(0);
         }
         .cerebr-sidebar__content {
           height: 100%;
@@ -266,6 +265,7 @@ class CerebrSidebar {
         const diff = startX - e.clientX;
         this.sidebarWidth = Math.min(Math.max(300, startWidth + diff), 800);
         this.sidebar.style.width = `${this.sidebarWidth}px`;
+        this.saveState();
       };
 
       const handleMouseUp = () => {
@@ -275,6 +275,15 @@ class CerebrSidebar {
 
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
+    });
+
+    // 监听来自 iframe 的消息
+    window.addEventListener('message', (event) => {
+      if (event.data.type === 'SIDEBAR_WIDTH_CHANGE') {
+        this.sidebarWidth = event.data.width;
+        this.sidebar.style.width = `${this.sidebarWidth}px`;
+        this.saveState();
+      }
     });
   }
 
