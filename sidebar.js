@@ -456,7 +456,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const contentLength = pageContent.content ? pageContent.content.length : 0;
             const footer = document.createElement('div');
             footer.classList.add('content-length-footer');
-            footer.textContent = `网页内容长度: ${contentLength.toLocaleString()}`;
+            footer.textContent = `↑ ${contentLength.toLocaleString()}`;
             messageDiv.appendChild(footer);
         }
 
