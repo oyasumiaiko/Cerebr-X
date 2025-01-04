@@ -406,9 +406,9 @@ class CerebrSidebar {
       const baseScale = 1 / window.devicePixelRatio;
       const scale = baseScale * this.scaleFactor;
       iframe.style.transformOrigin = 'top left';
-      iframe.style.transform = `scale(${scale})`;
-      iframe.style.width = `${100 / scale}%`;
-      iframe.style.height = `${100 / scale}%`;
+      iframe.style.zoom  = `${scale}`;
+      iframe.style.width = `${100}%`;
+      iframe.style.height = `${100}%`;
       this.sidebar.style.setProperty('--scale-ratio', scale);
     }
   }
