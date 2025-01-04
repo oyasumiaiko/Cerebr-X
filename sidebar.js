@@ -1204,8 +1204,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 监听侧栏宽度变化
     sidebarWidth.addEventListener('input', (e) => {
         const width = e.target.value;
-        document.documentElement.style.setProperty('--cerebr-sidebar-width', `${width}px`);
-        widthValue.textContent = `${width}px`;
+        document.documentElement.style.setProperty('--cerebr-sidebar-width', `${width}vw`);
+        widthValue.textContent = `${width}vw`;
         // 通知父窗口宽度变化
         window.parent.postMessage({
             type: 'SIDEBAR_WIDTH_CHANGE',

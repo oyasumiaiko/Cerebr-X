@@ -5,7 +5,7 @@ console.log('Document readyState:', document.readyState);
 class CerebrSidebar {
   constructor() {
     this.isVisible = false;
-    this.sidebarWidth = 430;
+    this.sidebarWidth = 30;
     this.initialized = false;
     this.pageKey = window.location.origin + window.location.pathname;
     this.lastUrl = window.location.href;
@@ -101,7 +101,7 @@ class CerebrSidebar {
         if (this.isVisible) {
           this.sidebar.classList.add('visible');
         }
-        this.sidebar.style.width = `${this.sidebarWidth}px`;
+        this.sidebar.style.width = `${this.sidebarWidth}vw`;
       }
     } catch (error) {
       console.error('加载侧边栏状态失败:', error);
@@ -136,7 +136,7 @@ class CerebrSidebar {
           position: fixed;
           top: 20px;
           right: 20px;
-          width: ${this.sidebarWidth}px;
+          width: ${this.sidebarWidth}vw;
           height: calc(100vh - 40px);
           background: var(--cerebr-bg-color, #ffffff);
           color: var(--cerebr-text-color, #000000);
@@ -262,9 +262,9 @@ class CerebrSidebar {
       startWidth = this.sidebarWidth;
 
       const handleMouseMove = (e) => {
-        const diff = startX - e.clientX;
-        this.sidebarWidth = Math.min(Math.max(300, startWidth + diff), 800);
-        this.sidebar.style.width = `${this.sidebarWidth}px`;
+        const diff = (startX - e.clientX) / window.innerWidth * 100;
+        this.sidebarWidth = Math.min(Math.max(20, startWidth + diff), 60);
+        this.sidebar.style.width = `${this.sidebarWidth}vw`;
         this.saveState();
       };
 
@@ -281,7 +281,7 @@ class CerebrSidebar {
     window.addEventListener('message', (event) => {
       if (event.data.type === 'SIDEBAR_WIDTH_CHANGE') {
         this.sidebarWidth = event.data.width;
-        this.sidebar.style.width = `${this.sidebarWidth}px`;
+        this.sidebar.style.width = `${this.sidebarWidth}vw`;
         this.saveState();
       }
     });
