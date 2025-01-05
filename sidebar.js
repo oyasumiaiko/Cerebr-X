@@ -191,7 +191,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     model: config.modelName || "gpt-4o",
                     messages: [...messages, userMessage],
                     stream: true,
-                    // max_tokens: 4096
+                    temperature: config.temperature || 1,
+                    top_p: 0.95,
+                    max_tokens: 4096,
+                    // frequency_penalty: 0,
+                    // presence_penalty: 0,
                 })
             });
 
@@ -683,7 +687,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 apiConfigs = [{
                     apiKey: '',
                     baseUrl: 'https://api.openai.com/v1/chat/completions',
-                    modelName: 'gpt-4o'
+                    modelName: 'gpt-4o',
+                    temperature: 1
                 }];
                 selectedConfigIndex = 0;
                 favoriteApis = [];
@@ -695,7 +700,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             apiConfigs = [{
                 apiKey: '',
                 baseUrl: 'https://api.openai.com/v1/chat/completions',
-                modelName: 'gpt-4o'
+                modelName: 'gpt-4o',
+                temperature: 1
             }];
             selectedConfigIndex = 0;
             favoriteApis = [];
@@ -758,12 +764,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         const apiKeyInput = template.querySelector('.api-key');
         const baseUrlInput = template.querySelector('.base-url');
         const modelNameInput = template.querySelector('.model-name');
+        const temperatureInput = template.querySelector('.temperature');
+        const temperatureValue = template.querySelector('.temperature-value');
         const apiForm = template.querySelector('.api-form');
         const favoriteBtn = template.querySelector('.favorite-btn');
 
         apiKeyInput.value = config.apiKey || '';
         baseUrlInput.value = config.baseUrl || 'https://api.openai.com/v1/chat/completions';
         modelNameInput.value = config.modelName || 'gpt-4o';
+        temperatureInput.value = config.temperature || 1;
+        temperatureValue.textContent = (config.temperature || 1).toFixed(1);
+
+        // 监听温度变化
+        temperatureInput.addEventListener('input', (e) => {
+            const value = parseFloat(e.target.value);
+            temperatureValue.textContent = value.toFixed(1);
+        });
 
         // 检查是否已收藏
         const isFavorite = favoriteApis.some(favConfig => 
@@ -781,7 +797,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             const currentConfig = {
                 apiKey: apiKeyInput.value,
                 baseUrl: baseUrlInput.value,
-                modelName: modelNameInput.value
+                modelName: modelNameInput.value,
+                temperature: temperatureInput.value
             };
 
             const existingIndex = favoriteApis.findIndex(favConfig => 
@@ -810,12 +827,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         template.querySelector('.card-actions').addEventListener('click', stopPropagation);
 
         // 输入变化时保存
-        [apiKeyInput, baseUrlInput, modelNameInput].forEach(input => {
+        [apiKeyInput, baseUrlInput, modelNameInput, temperatureInput].forEach(input => {
             input.addEventListener('change', () => {
                 apiConfigs[index] = {
                     apiKey: apiKeyInput.value,
                     baseUrl: baseUrlInput.value,
-                    modelName: modelNameInput.value
+                    modelName: modelNameInput.value,
+                    temperature: parseFloat(temperatureInput.value)
                 };
                 saveAPIConfigs();
             });
