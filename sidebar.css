@@ -212,17 +212,21 @@ body {
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
     padding: 8px;
-    display: none;
     min-width: 180px;
     margin-bottom: 8px;
     transform-origin: bottom right;
     backdrop-filter: blur(var(--cerebr-blur-radius));
     -webkit-backdrop-filter: blur(var(--cerebr-blur-radius));
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(4px);
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
 }
 
 #settings-menu.visible {
-    display: block;
-    animation: menuAppear 0.2s ease;
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
 }
 
 .menu-item {
@@ -881,4 +885,20 @@ input:checked + .slider:before {
     margin-bottom: -0.5rem;
     text-align: right;
     opacity: 0.7;
+}
+
+/* 确保设置按钮是相对定位，这样菜单才能正确定位 */
+#settings-button {
+    position: relative;
+}
+
+/* 添加一个透明的连接区域，防止鼠标移动时菜单关闭 */
+#settings-menu::before {
+    content: '';
+    position: absolute;
+    bottom: -16px;  /* 增加底部距离 */
+    left: -20px;    /* 向左扩展 */
+    right: -20px;   /* 向右扩展 */
+    height: 24px;   /* 增加高度 */
+    background: transparent;
 }

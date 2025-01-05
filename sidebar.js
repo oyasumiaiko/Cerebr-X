@@ -564,6 +564,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         settingsMenu.classList.remove('visible');
     });
 
+    let closeTimeout;
+
+    // 设置按钮悬停事件
+    settingsButton.addEventListener('mouseenter', () => {
+        settingsMenu.classList.add('visible');
+    });
+
+    // 设置按钮和菜单的鼠标离开事件
+    const handleMouseLeave = (e) => {
+        const toElement = e.relatedTarget;
+        if (!settingsButton.contains(toElement) && !settingsMenu.contains(toElement)) {
+            settingsMenu.classList.remove('visible');
+        }
+    };
+
+    settingsButton.addEventListener('mouseleave', handleMouseLeave);
+    settingsMenu.addEventListener('mouseleave', handleMouseLeave);
+
+    // 添加输入框的事件监听器
+    messageInput.addEventListener('focus', () => {
+        settingsMenu.classList.remove('visible');
+    });
+
     // 主题切换
     const themeSwitch = document.getElementById('theme-switch');
 
