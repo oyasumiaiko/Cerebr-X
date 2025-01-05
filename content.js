@@ -711,7 +711,8 @@ async function extractPageContent() {
       'script', 'style', 'nav', 'header', 'footer',
       'iframe', 'noscript', 'img', 'svg', 'video',
       '[role="complementary"]', '[role="navigation"]',
-      '.sidebar', '.nav', '.footer', '.header'
+      '.sidebar', '.nav', '.footer', '.header',
+      '.immersive-translate-target-inner',
   ];
 
   selectorsToRemove.forEach(selector => {
