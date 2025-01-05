@@ -545,37 +545,57 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
+    // 设置菜单开关函数
+    function toggleSettingsMenu(show) {
+        if (show === undefined) {
+            // 如果没有传参数，就切换当前状态
+            settingsMenu.classList.toggle('visible');
+        } else {
+            // 否则设置为指定状态
+            if (show) {
+                settingsMenu.classList.add('visible');
+            } else {
+                settingsMenu.classList.remove('visible');
+            }
+        }
+
+        // 每次打开菜单时重新渲染收藏的API列表
+        if (settingsMenu.classList.contains('visible')) {
+            renderFavoriteApis();
+        }
+    }
+
     // 修改点击事件监听器
     document.addEventListener('click', (e) => {
         // 如果点击的不是设置按钮本身和设置菜单，就关闭菜单
         if (!settingsButton.contains(e.target) && !settingsMenu.contains(e.target)) {
-            settingsMenu.classList.remove('visible');
+            toggleSettingsMenu(false);
         }
     });
 
     // 确保设置按钮的点击事件在文档点击事件之前处理
     settingsButton.addEventListener('click', (e) => {
         e.stopPropagation();
-        settingsMenu.classList.toggle('visible');
+        toggleSettingsMenu();
     });
 
     // 添加输入框的事件监听器
     messageInput.addEventListener('focus', () => {
-        settingsMenu.classList.remove('visible');
+        toggleSettingsMenu(false);
     });
 
     let closeTimeout;
 
     // 设置按钮悬停事件
     settingsButton.addEventListener('mouseenter', () => {
-        settingsMenu.classList.add('visible');
+        toggleSettingsMenu(true);
     });
 
     // 设置按钮和菜单的鼠标离开事件
     const handleMouseLeave = (e) => {
         const toElement = e.relatedTarget;
         if (!settingsButton.contains(toElement) && !settingsMenu.contains(toElement)) {
-            settingsMenu.classList.remove('visible');
+            toggleSettingsMenu(false);
         }
     };
 
@@ -852,9 +872,20 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
+        // 获取当前使用的API配置
+        const currentConfig = apiConfigs[selectedConfigIndex];
+
         favoriteApis.forEach((config) => {
             const item = document.createElement('div');
             item.className = 'favorite-api-item';
+            
+            // 检查是否是当前使用的API
+            if (currentConfig && 
+                currentConfig.apiKey === config.apiKey && 
+                currentConfig.baseUrl === config.baseUrl && 
+                currentConfig.modelName === config.modelName) {
+                item.classList.add('current');
+            }
             
             const apiName = document.createElement('span');
             apiName.className = 'api-name';
@@ -874,7 +905,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     selectedConfigIndex = configIndex;
                     saveAPIConfigs();
                     renderAPICards();
-                    settingsMenu.classList.remove('visible');
+                    toggleSettingsMenu(false);
                 }
             });
 
@@ -888,7 +919,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 显示/隐藏 API 设置
     apiSettingsToggle.addEventListener('click', () => {
         apiSettings.classList.add('visible');
-        settingsMenu.classList.remove('visible');
+        toggleSettingsMenu(false);
         // 确保每次打开设置时都重新渲染卡片
         renderAPICards();
     });
@@ -906,7 +937,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 清空当前页面的聊天历史记录
         chatHistory = [];
         // 关闭设置菜单
-        settingsMenu.classList.remove('visible');
+        toggleSettingsMenu(false);
         // 聚焦输入框并将光标移到末尾
         messageInput.focus();
         // 移动光标到末尾
@@ -925,7 +956,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         chatHistory = [];
         
         // 关闭设置菜单
-        settingsMenu.classList.remove('visible');
+        toggleSettingsMenu(false);
 
         // 构建总结请求
         messageInput.textContent = `请总结这个页面的主要内容。`;
