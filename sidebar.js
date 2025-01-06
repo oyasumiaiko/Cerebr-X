@@ -230,7 +230,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             if (!response.ok) {
                 const error = await response.text();
-                throw new Error(error);
+                // 更新加载状态消息显示具体的错误信息
+                if (loadingMessage) {
+                    let errorDisplay = `API错误 (${response.status}): `;
+                    try {
+                        // 尝试解析错误JSON
+                        const errorJson = JSON.parse(error);
+                        errorDisplay += errorJson.error?.message || errorJson.message || error;
+                    } catch {
+                        // 如果不是JSON，直接显示错误文本
+                        errorDisplay += error;
+                    }
+                    loadingMessage.textContent = errorDisplay;
+                    loadingMessage.classList.add('error-message');
+                }
+                throw new Error(`API错误 (${response.status}): ${error}`);
             }
 
             const reader = response.body.getReader();
