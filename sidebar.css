@@ -81,10 +81,11 @@ body {
     transform: translateY(8px) scale(0.98);
     animation: messageAppear 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     will-change: transform, opacity;
+    backdrop-filter: blur(var(--cerebr-blur-radius));
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
     transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
                 box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    /* border: 1px solid rgba(255, 255, 255, 0.1); */
 }
 
 .message:hover {
@@ -1009,7 +1010,7 @@ body::after {
 }
 
 body.temporary-mode::after {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.2);
 }
 
 :root.dark-theme body.temporary-mode::after {
