@@ -1,6 +1,6 @@
 /* 根变量（默认浅色主题） */
 :root {
-    --cerebr-opacity: 0.7;
+    --cerebr-opacity: 0.8;
     --cerebr-bg-color: rgba(255, 255, 255, var(--cerebr-opacity));
     --cerebr-text-color: #000000;
     --cerebr-message-user-bg: rgba(227, 242, 253, var(--cerebr-opacity));
@@ -81,7 +81,7 @@ body {
     transform: translateY(8px) scale(0.98);
     animation: messageAppear 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     will-change: transform, opacity;
-    backdrop-filter: blur(var(--cerebr-blur-radius));
+    /* backdrop-filter: blur(var(--cerebr-blur-radius)); */
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
     transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
                 box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
