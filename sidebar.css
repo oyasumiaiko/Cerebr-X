@@ -551,8 +551,6 @@ input:checked + .slider:before {
 /* LaTeX 式样式调整 */
 .katex-display {
     margin: 0.5em 0;
-    overflow-x: auto;
-    overflow-y: hidden;
 }
 
 .katex {
@@ -561,6 +559,10 @@ input:checked + .slider:before {
 
 .katex-display > .katex {
     font-size: 1.21em;
+}
+
+.katex-display>.katex {
+    white-space: pre-wrap;
 }
 
 /* 右键菜单样式 */
