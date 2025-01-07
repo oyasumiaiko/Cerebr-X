@@ -1095,8 +1095,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             const isSearchModel = currentModel.endsWith('-search');
             
             if (selectedText) {
-                if(isSearchModel) messageInput.textContent += `联网搜索，`;
-                messageInput.textContent += isQuestion ? `"${selectedText}"` : `简洁解释："${selectedText}"`;
+                // if(isSearchModel) messageInput.textContent += `搜索，`;
+                messageInput.textContent += isQuestion ? `"${selectedText}"` : `"${selectedText}"是什么？`;
             } else {
                 messageInput.textContent = `请总结这个页面的主要内容。`;
             }
