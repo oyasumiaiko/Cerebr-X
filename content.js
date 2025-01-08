@@ -27,53 +27,53 @@ class CerebrSidebar {
 
     // 检查URL是否发生实质性变化
     const hasUrlChanged = (currentUrl) => {
-        if (currentUrl === lastUrl) return false;
-        if (document.contentType === 'application/pdf') return false;
+      if (currentUrl === lastUrl) return false;
+      if (document.contentType === 'application/pdf') return false;
 
-        const oldUrl = new URL(lastUrl);
-        const newUrl = new URL(currentUrl);
-        return oldUrl.pathname !== newUrl.pathname || oldUrl.search !== newUrl.search;
+      const oldUrl = new URL(lastUrl);
+      const newUrl = new URL(currentUrl);
+      return oldUrl.pathname !== newUrl.pathname || oldUrl.search !== newUrl.search;
     };
 
     // 处理URL变化
     const handleUrlChange = () => {
-        const currentUrl = window.location.href;
-        if (hasUrlChanged(currentUrl)) {
-            console.log('URL变化:', '从:', lastUrl, '到:', currentUrl);
-            lastUrl = currentUrl;
+      const currentUrl = window.location.href;
+      if (hasUrlChanged(currentUrl)) {
+        console.log('URL变化:', '从:', lastUrl, '到:', currentUrl);
+        lastUrl = currentUrl;
 
-            // 获取iframe并发送消息
-            const iframe = this.sidebar?.querySelector('.cerebr-sidebar__iframe');
-            if (iframe) {
-                console.log('发送URL变化消息到iframe');
-                iframe.contentWindow.postMessage({
-                    type: 'URL_CHANGED',
-                    url: currentUrl
-                }, '*');
-            }
+        // 获取iframe并发送消息
+        const iframe = this.sidebar?.querySelector('.cerebr-sidebar__iframe');
+        if (iframe) {
+          console.log('发送URL变化消息到iframe');
+          iframe.contentWindow.postMessage({
+            type: 'URL_CHANGED',
+            url: currentUrl
+          }, '*');
         }
+      }
     };
 
     // 监听popstate事件
     window.addEventListener('popstate', () => {
-        console.log('popstate事件触发');
-        handleUrlChange();
+      console.log('popstate事件触发');
+      handleUrlChange();
     });
 
     // 重写history方法
     const originalPushState = history.pushState;
     const originalReplaceState = history.replaceState;
 
-    history.pushState = function() {
-        originalPushState.apply(this, arguments);
-        console.log('pushState被调用');
-        handleUrlChange();
+    history.pushState = function () {
+      originalPushState.apply(this, arguments);
+      console.log('pushState被调用');
+      handleUrlChange();
     };
 
-    history.replaceState = function() {
-        originalReplaceState.apply(this, arguments);
-        console.log('replaceState被调用');
-        handleUrlChange();
+    history.replaceState = function () {
+      originalReplaceState.apply(this, arguments);
+      console.log('replaceState被调用');
+      handleUrlChange();
     };
 
     // 添加定期检查
@@ -83,12 +83,12 @@ class CerebrSidebar {
   async initializeSidebar() {
     try {
       console.log('开始初始化侧边栏');
-      
+
       // 从存储中加载宽度和缩放因子
       const result = await chrome.storage.sync.get(['sidebarWidth', 'scaleFactor']);
       this.sidebarWidth = result.sidebarWidth || 430;
       this.scaleFactor = result.scaleFactor || 1.0;
-      
+
       const container = document.createElement('cerebr-root');
 
       // 防止外部JavaScript访问和修改我们的元素
@@ -269,20 +269,20 @@ class CerebrSidebar {
       document.addEventListener('mouseup', handleMouseUp);
     });
 
-    
+
     // 监听来自 iframe 的消息
     window.addEventListener('message', (event) => {
       switch (event.data.type) {
         case 'SIDEBAR_WIDTH_CHANGE':
           this.updateWidth(event.data.width);
           break;
-          
+
         case 'SCALE_FACTOR_CHANGE':
           this.scaleFactor = event.data.value;
           this.updateScale();
           chrome.storage.sync.set({ scaleFactor: this.scaleFactor });
           break;
-          
+
         case 'GET_SELECTED_TEXT':
           const selectedText = window.getSelection().toString();
           this.sidebar?.querySelector('.cerebr-sidebar__iframe')?.contentWindow.postMessage({
@@ -290,35 +290,42 @@ class CerebrSidebar {
             selectedText
           }, '*');
           break;
-          
+
         case 'CLOSE_SIDEBAR':
-          if (this.isVisible) {
-            this.toggle();
-          }
+          this.toggle(false);  // 明确传入 false 表示关闭
           break;
       }
     });
   }
 
-  toggle(forceShow = false) {
+  // 添加聚焦方法
+  focusInput() {
+    const iframe = this.sidebar?.querySelector('.cerebr-sidebar__iframe');
+    if (iframe) {
+      iframe.contentWindow.postMessage({ type: 'FOCUS_INPUT' }, '*');
+    }
+  }
+
+  toggle(forceShow = null) {
     if (!this.initialized) return;
 
     try {
       const wasVisible = this.isVisible;
-      this.isVisible = forceShow ? true : !this.isVisible;
+      // 如果 forceShow 为 null/undefined，则切换状态
+      // 如果 forceShow 为 true/false，则直接使用该值
+      this.isVisible = forceShow === null ? !this.isVisible : forceShow;
+
+      // 如果状态没有变化，只需要聚焦
+      if (wasVisible && this.isVisible) {
+        this.focusInput();
+        return;
+      }
 
       if (this.isVisible) {
         this.sidebar.classList.add('visible');
+        this.focusInput();
       } else {
         this.sidebar.classList.remove('visible');
-      }
-
-      // 如果从不可见变为可见，通知iframe并聚焦输入框
-      if ((!wasVisible && this.isVisible) || forceShow) {
-        const iframe = this.sidebar.querySelector('.cerebr-sidebar__iframe');
-        if (iframe) {
-          iframe.contentWindow.postMessage({ type: 'FOCUS_INPUT' }, '*');
-        }
       }
     } catch (error) {
       console.error('切换侧边栏失败:', error);
@@ -428,7 +435,7 @@ class CerebrSidebar {
       const baseScale = 1 / window.devicePixelRatio;
       const scale = baseScale * this.scaleFactor;
       iframe.style.transformOrigin = 'top left';
-      iframe.style.zoom  = `${scale}`;
+      iframe.style.zoom = `${scale}`;
       iframe.style.width = `${100}%`;
       iframe.style.height = `${100}%`;
       this.sidebar.style.setProperty('--scale-ratio', scale);
@@ -444,134 +451,71 @@ try {
 } catch (error) {
   console.error('创建侧边栏实例失败:', error);
 }
-
 // 修改消息监听器
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type != 'REQUEST_STARTED' && message.type != 'REQUEST_COMPLETED' &&
-        message.type != 'REQUEST_FAILED' && message.type != 'PING') {
-      console.log('content.js 收到消息:', message.type);
-    }
+  if (message.type != 'REQUEST_STARTED' && message.type != 'REQUEST_COMPLETED' &&
+    message.type != 'REQUEST_FAILED' && message.type != 'PING') {
+    console.log('content.js 收到消息:', message.type);
+  }
 
-    // 处理 PING 消息
-    if (message.type === 'PING') {
-      sendResponse(true);
-      return true;
-    }
+  // 处理 PING 消息
+  if (message.type === 'PING') {
+    sendResponse(true);
+    return true;
+  }
 
-    // 处理侧边栏切换命令
-    if (message.type === 'TOGGLE_SIDEBAR_onClicked') {
-        try {
-            if (sidebar) {
-                sidebar.toggle();  // 保持原样，因为这是普通的切换
-                sendResponse({ success: true, status: sidebar.isVisible });
-            } else {
-                console.error('侧边栏实例不存在');
-                sendResponse({ success: false, error: 'Sidebar instance not found' });
-            }
-        } catch (error) {
-            console.error('处理切换命令失败:', error);
-            sendResponse({ success: false, error: error.message });
-        }
-        return true;
-    }
+  // 检查侧边栏实例是否存在
+  if (!sidebar) {
+    console.error('侧边栏实例不存在');
+    sendResponse({ success: false, error: 'Sidebar instance not found' });
+    return true;
+  }
 
-    // 处理打开侧边栏命令
-    if (message.type === 'OPEN_SIDEBAR') {
-        try {
-            if (sidebar) {
-                if (!sidebar.isVisible) {
-                    sidebar.toggle(true);  // 使用 forceShow 参数
-                }
-                sendResponse({ success: true, status: sidebar.isVisible });
-            } else {
-                console.error('侧边栏实例不存在');
-                sendResponse({ success: false, error: 'Sidebar instance not found' });
-            }
-        } catch (error) {
-            console.error('处理打开命令失败:', error);
-            sendResponse({ success: false, error: error.message });
-        }
-        return true;
-    }
+  // 处理获取页面内容请求
+  if (message.type === 'GET_PAGE_CONTENT_INTERNAL') {
+    console.log('收到获取页面内容请求');
+    isProcessing = true;
 
-    // 处理关闭侧边栏命令
-    if (message.type === 'CLOSE_SIDEBAR') {
-        try {
-            if (sidebar) {
-                if (sidebar.isVisible) {
-                    sidebar.toggle();  // 保持原样，因为这是关闭操作
-                }
-                sendResponse({ success: true, status: sidebar.isVisible });
-            } else {
-                console.error('侧边栏实例不存在');
-                sendResponse({ success: false, error: 'Sidebar instance not found' });
-            }
-        } catch (error) {
-            console.error('处理关闭命令失败:', error);
-            sendResponse({ success: false, error: error.message });
-        }
-        return true;
-    }
-
-    // 处理清空聊天记录命令
-    if (message.type === 'CLEAR_CHAT') {
-        try {
-            const iframe = sidebar?.sidebar?.querySelector('.cerebr-sidebar__iframe');
-            if (iframe) {
-                iframe.contentWindow.postMessage({ type: 'CLEAR_CHAT_COMMAND' }, '*');
-                sendResponse({ success: true });
-            } else {
-                console.error('找不到侧边栏iframe');
-                sendResponse({ success: false, error: 'Iframe not found' });
-            }
-        } catch (error) {
-            console.error('处理清空聊天命令失败:', error);
-            sendResponse({ success: false, error: error.message });
-        }
-        return true;
-    }
-
-    // 处理快速总结命令
-    if (message.type === 'QUICK_SUMMARY') {
-        try {
-            // 如果侧边栏没有打开，先打开它并强制聚焦
-            if (sidebar && !sidebar.isVisible) {
-                sidebar.toggle(true);
-            }
-
-            const iframe = sidebar?.sidebar?.querySelector('.cerebr-sidebar__iframe');
-            if (iframe) {
-                iframe.contentWindow.postMessage({ type: 'QUICK_SUMMARY_COMMAND' }, '*');
-                sendResponse({ success: true });
-            } else {
-                console.error('找不到侧边栏iframe');
-                sendResponse({ success: false, error: 'Iframe not found' });
-            }
-        } catch (error) {
-            console.error('处理快速总结命令失败:', error);
-            sendResponse({ success: false, error: error.message });
-        }
-        return true;
-    }
-
-    // 处理获取页面内容请求
-    if (message.type === 'GET_PAGE_CONTENT_INTERNAL') {
-        console.log('收到获取页面内容请求');
-        isProcessing = true;
-
-        extractPageContent().then(content => {
-            isProcessing = false;
-            sendResponse(content);
-        }).catch(error => {
-            console.error('提取页面内容失败:', error);
-            isProcessing = false;
-            sendResponse(null);
-        });
-
-        return true;
-    }
+    extractPageContent().then(content => {
+      isProcessing = false;
+      sendResponse(content);
+    }).catch(error => {
+      console.error('提取页面内容失败:', error);
+      isProcessing = false;
+      sendResponse(null);
+    });
 
     return true;
+  }
+
+  try {
+    const iframe = sidebar.sidebar?.querySelector('.cerebr-sidebar__iframe');
+
+    switch (message.type) {
+      case 'TOGGLE_SIDEBAR_onClicked':
+        sidebar.toggle();  // 不传参数表示切换状态
+        break;
+      case 'OPEN_SIDEBAR':
+        sidebar.toggle(true);  // 明确传入 true 表示打开
+        break;
+      case 'CLOSE_SIDEBAR':
+        sidebar.toggle(false);  // 明确传入 false 表示关闭
+        break;
+      case 'QUICK_SUMMARY':
+        sidebar.toggle(true);  // 明确传入 true 表示打开
+        iframe?.contentWindow?.postMessage({ type: 'QUICK_SUMMARY_COMMAND' }, '*');
+        break;
+      case 'CLEAR_CHAT':
+        iframe?.contentWindow?.postMessage({ type: 'CLEAR_CHAT_COMMAND' }, '*');
+        break;
+    }
+
+    sendResponse({ success: true, status: sidebar.isVisible });
+  } catch (error) {
+    console.error(`处理${message.type}命令失败:`, error);
+    sendResponse({ success: false, error: error.message });
+  }
+  return true;
 });
 
 const port = chrome.runtime.connect({ name: 'cerebr-sidebar' });
@@ -619,115 +563,115 @@ window.addEventListener('unhandledrejection', (event) => {
 
 // 网络请求状态管理
 class RequestManager {
-    constructor() {
-        this.pendingRequests = new Set();
-        this.isInitialRequestsCompleted = false;
-        this.lastRequestCompletedTime = null;
-        this.requestCompletionTimer = null;
-        this.relayRequestCompletedTime = 300;
-    }
+  constructor() {
+    this.pendingRequests = new Set();
+    this.isInitialRequestsCompleted = false;
+    this.lastRequestCompletedTime = null;
+    this.requestCompletionTimer = null;
+    this.relayRequestCompletedTime = 300;
+  }
 
-    checkRequestsCompletion() {
-        const now = Date.now();
-        if (this.lastRequestCompletedTime && (now - this.lastRequestCompletedTime) >= this.relayRequestCompletedTime) {
-            this.isInitialRequestsCompleted = true;
-        }
+  checkRequestsCompletion() {
+    const now = Date.now();
+    if (this.lastRequestCompletedTime && (now - this.lastRequestCompletedTime) >= this.relayRequestCompletedTime) {
+      this.isInitialRequestsCompleted = true;
     }
+  }
 
-    resetCompletionTimer() {
-        if (this.requestCompletionTimer) {
-            clearTimeout(this.requestCompletionTimer);
-        }
-        this.lastRequestCompletedTime = Date.now();
-        this.requestCompletionTimer = setTimeout(() => this.checkRequestsCompletion(), this.relayRequestCompletedTime);
+  resetCompletionTimer() {
+    if (this.requestCompletionTimer) {
+      clearTimeout(this.requestCompletionTimer);
     }
+    this.lastRequestCompletedTime = Date.now();
+    this.requestCompletionTimer = setTimeout(() => this.checkRequestsCompletion(), this.relayRequestCompletedTime);
+  }
 
-    handleRequestStarted(requestId) {
-        this.pendingRequests.add(requestId);
+  handleRequestStarted(requestId) {
+    this.pendingRequests.add(requestId);
+  }
+
+  handleRequestCompleted(requestId, isInitialRequestsCompleted) {
+    this.pendingRequests.delete(requestId);
+    this.resetCompletionTimer();
+
+    if (isInitialRequestsCompleted) {
+      this.isInitialRequestsCompleted = true;
     }
+  }
 
-    handleRequestCompleted(requestId, isInitialRequestsCompleted) {
-        this.pendingRequests.delete(requestId);
-        this.resetCompletionTimer();
+  handleRequestFailed(requestId) {
+    this.pendingRequests.delete(requestId);
+    this.resetCompletionTimer();
+  }
 
-        if (isInitialRequestsCompleted) {
-            this.isInitialRequestsCompleted = true;
-        }
-    }
+  isRequestsCompleted() {
+    return this.lastRequestCompletedTime &&
+      (Date.now() - this.lastRequestCompletedTime) >= this.relayRequestCompletedTime;
+  }
 
-    handleRequestFailed(requestId) {
-        this.pendingRequests.delete(requestId);
-        this.resetCompletionTimer();
-    }
+  getPendingRequestsCount() {
+    return this.pendingRequests.size;
+  }
 
-    isRequestsCompleted() {
-        return this.lastRequestCompletedTime &&
-               (Date.now() - this.lastRequestCompletedTime) >= this.relayRequestCompletedTime;
-    }
-
-    getPendingRequestsCount() {
-        return this.pendingRequests.size;
-    }
-
-    getWaitTimeInSeconds() {
-        if (!this.lastRequestCompletedTime) return 0;
-        return Math.floor((this.relayRequestCompletedTime - (Date.now() - this.lastRequestCompletedTime)) / 1000);
-    }
+  getWaitTimeInSeconds() {
+    if (!this.lastRequestCompletedTime) return 0;
+    return Math.floor((this.relayRequestCompletedTime - (Date.now() - this.lastRequestCompletedTime)) / 1000);
+  }
 }
 
 const requestManager = new RequestManager();
 
 // 监听来自 background.js 的网络请求状态更新
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    // 处理网络请求状态更新
-    if (message.type === 'REQUEST_STARTED') {
-        requestManager.handleRequestStarted(message.requestId);
-    }
-    else if (message.type === 'REQUEST_COMPLETED') {
-        requestManager.handleRequestCompleted(message.requestId, message.isInitialRequestsCompleted);
-    }
-    else if (message.type === 'REQUEST_FAILED') {
-        requestManager.handleRequestFailed(message.requestId);
-        console.log('请求失败，待处理请求数:', requestManager.getPendingRequestsCount());
-    }
-    return true;
+  // 处理网络请求状态更新
+  if (message.type === 'REQUEST_STARTED') {
+    requestManager.handleRequestStarted(message.requestId);
+  }
+  else if (message.type === 'REQUEST_COMPLETED') {
+    requestManager.handleRequestCompleted(message.requestId, message.isInitialRequestsCompleted);
+  }
+  else if (message.type === 'REQUEST_FAILED') {
+    requestManager.handleRequestFailed(message.requestId);
+    console.log('请求失败，待处理请求数:', requestManager.getPendingRequestsCount());
+  }
+  return true;
 });
 
 async function waitForContent() {
-    return new Promise((resolve) => {
-        const checkContent = () => {
-            // 检查是否有主要内容元素
-            const mainElements = document.querySelectorAll('body, p, h2, article, [role="article"], [role="main"], [data-testid="tweet"]');
+  return new Promise((resolve) => {
+    const checkContent = () => {
+      // 检查是否有主要内容元素
+      const mainElements = document.querySelectorAll('body, p, h2, article, [role="article"], [role="main"], [data-testid="tweet"]');
 
-            // 检查网络请求是否都已完成
-            const requestsCompleted = requestManager.isRequestsCompleted();
+      // 检查网络请求是否都已完成
+      const requestsCompleted = requestManager.isRequestsCompleted();
 
-            if (mainElements.length > 0 && requestsCompleted) {
-                console.log(`页面内容已加载，网络请求已完成（已稳定${requestManager.relayRequestCompletedTime}秒无新请求）`);
-                resolve();
-            } else {
-                const reason = [];
-                if (mainElements.length === 0) reason.push('主要内容未找到');
-                if (!requestsCompleted) {
-                    const pendingCount = requestManager.getPendingRequestsCount();
-                    if (pendingCount > 0) {
-                        reason.push(`还有 ${pendingCount} 个网络请求未完成`);
-                    }
-                    const waitTime = requestManager.getWaitTimeInSeconds();
-                    if (waitTime > 0) {
-                        reason.push(`等待请求稳定，剩余 ${waitTime} 秒`);
-                    } else if (!requestManager.lastRequestCompletedTime) {
-                        reason.push('等待首个请求完成');
-                    }
-                }
-                console.log('等待页面加载...', reason.join(', '));
-                setTimeout(checkContent, 1000);
-            }
-        };
-
-        // 开始检查
+      if (mainElements.length > 0 && requestsCompleted) {
+        console.log(`页面内容已加载，网络请求已完成（已稳定${requestManager.relayRequestCompletedTime}秒无新请求）`);
+        resolve();
+      } else {
+        const reason = [];
+        if (mainElements.length === 0) reason.push('主要内容未找到');
+        if (!requestsCompleted) {
+          const pendingCount = requestManager.getPendingRequestsCount();
+          if (pendingCount > 0) {
+            reason.push(`还有 ${pendingCount} 个网络请求未完成`);
+          }
+          const waitTime = requestManager.getWaitTimeInSeconds();
+          if (waitTime > 0) {
+            reason.push(`等待请求稳定，剩余 ${waitTime} 秒`);
+          } else if (!requestManager.lastRequestCompletedTime) {
+            reason.push('等待首个请求完成');
+          }
+        }
+        console.log('等待页面加载...', reason.join(', '));
         setTimeout(checkContent, 1000);
-    });
+      }
+    };
+
+    // 开始检查
+    setTimeout(checkContent, 1000);
+  });
 }
 
 async function extractPageContent() {
@@ -755,30 +699,30 @@ async function extractPageContent() {
 
   // 移除不需要的元素
   const selectorsToRemove = [
-      'script', 'style', 'nav', 'header', 'footer',
-      'iframe', 'noscript', 'img', 'svg', 'video',
-      '[role="complementary"]', '[role="navigation"]',
-      '.sidebar', '.nav', '.footer', '.header',
-      '.immersive-translate-target-inner',
+    'script', 'style', 'nav', 'header', 'footer',
+    'iframe', 'noscript', 'img', 'svg', 'video',
+    '[role="complementary"]', '[role="navigation"]',
+    '.sidebar', '.nav', '.footer', '.header',
+    '.immersive-translate-target-inner',
   ];
 
   selectorsToRemove.forEach(selector => {
-      const elements = tempContainer.querySelectorAll(selector);
-      elements.forEach(element => element.remove());
+    const elements = tempContainer.querySelectorAll(selector);
+    elements.forEach(element => element.remove());
   });
 
   let mainContent = tempContainer.textContent;
 
   // 理文本
   mainContent = mainContent
-      .replace(/\s+/g, ' ')  // 替换多个空白字符为单个空格
-      .replace(/\n\s*\n/g, '\n')  // 替换多个换行为单个换行
-      .trim();
+    .replace(/\s+/g, ' ')  // 替换多个空白字符为单个空格
+    .replace(/\n\s*\n/g, '\n')  // 替换多个换行为单个换行
+    .trim();
 
   // 检查提取的内容是否足够
   if (mainContent.length < 40) {
-      console.log('提取的内容太少，返回 null');
-      return null;
+    console.log('提取的内容太少，返回 null');
+    return null;
   }
 
   console.log('=== 处理后的 mainContent ===');
@@ -789,9 +733,9 @@ async function extractPageContent() {
   // console.log('页面内容提取完成，内容长度:', mainContent.length);
 
   return {
-      title: document.title,
-      url: window.location.href,
-      content: mainContent
+    title: document.title,
+    url: window.location.href,
+    content: mainContent
   };
 }
 
@@ -875,7 +819,7 @@ async function extractTextFromPDF(url) {
     sendPlaceholderUpdate('正在解析PDF文件...');
 
     console.log('开始解析PDF文件');
-    const loadingTask = pdfjsLib.getDocument({data: completeData});
+    const loadingTask = pdfjsLib.getDocument({ data: completeData });
     const pdf = await loadingTask.promise;
     console.log('PDF加载成功，总页数:', pdf.numPages);
 
