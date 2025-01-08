@@ -1046,6 +1046,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 修改快速总结功能
     async function performQuickSummary() {
+        // 记录当前的临时模式状态
+        const wasTemporaryMode = isTemporaryMode;
+        if (wasTemporaryMode) {
+            exitTemporaryMode();
+        }
+
         // 检查焦点是否在侧栏内
         const isSidebarFocused = document.hasFocus();
         const sidebarSelection = window.getSelection().toString().trim();
@@ -1053,7 +1059,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 只有当焦点在侧栏内且有选中文本时，才使用侧栏的选中文本
         if (isSidebarFocused && sidebarSelection) {
             messageInput.textContent = sidebarSelection;
-            sendMessage();
+            await sendMessage();
+            // 如果之前是临时模式，恢复
+            if (wasTemporaryMode) {
+                enterTemporaryMode();
+            }
             return;
         }
 
@@ -1073,11 +1083,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // 向父窗口请求选中的文本
                 window.parent.postMessage({ type: 'GET_SELECTED_TEXT' }, '*');
             });
-
-            // 如果在临时模式下且没有选中文本，不执行总结
-            if (isTemporaryMode && !selectedText) {
-                return;
-            }
             
             // 清空聊天记录
             chatContainer.innerHTML = '';
@@ -1100,10 +1105,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else {
                 messageInput.textContent = `请总结这个页面的主要内容。`;
             }
-            // 直接发送消息
-            sendMessage();
+            // 发送消息
+            await sendMessage();
+            
+            // 如果之前是临时模式，恢复
+            if (wasTemporaryMode) {
+                enterTemporaryMode();
+            }
         } catch (error) {
             console.error('获取选中文本失败:', error);
+            // 发生错误时也要恢复临时模式
+            if (wasTemporaryMode) {
+                enterTemporaryMode();
+            }
         }
     }
 
