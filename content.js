@@ -451,6 +451,12 @@ try {
 } catch (error) {
   console.error('创建侧边栏实例失败:', error);
 }
+// 创建选择器实例
+const picker = new ElementPicker({
+  highlightColor: 'rgba(255, 0, 0, 0.3)',
+  zIndex: 10000
+});
+
 // 修改消息监听器
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type != 'REQUEST_STARTED' && message.type != 'REQUEST_COMPLETED' &&
@@ -503,7 +509,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
       case 'QUICK_SUMMARY':
         sidebar.toggle(true);  // 明确传入 true 表示打开
-        iframe?.contentWindow?.postMessage({ type: 'QUICK_SUMMARY_COMMAND' }, '*');
+        // 启动元素选择器
+        picker.startPicking(({element, selector}) => {
+          console.log('Selected element:', element);
+          console.log('CSS Selector:', selector);
+          
+          // 获取选中元素的内容
+          const selectedContent = element.innerText;
+          
+          // 发送选中的内容到iframe
+          iframe?.contentWindow?.postMessage({ 
+            type: 'QUICK_SUMMARY_COMMAND',
+            selectedContent: selectedContent
+          }, '*');
+        });
+
+        // 监听ESC键以取消选择
+        const escListener = (e) => {
+          if (e.key === 'Escape') {
+            picker.stopPicking();
+            document.removeEventListener('keydown', escListener);
+            // 如果用户取消选择，则进行整页总结
+            iframe?.contentWindow?.postMessage({ 
+              type: 'QUICK_SUMMARY_COMMAND'
+            }, '*');
+          }
+        };
+        document.addEventListener('keydown', escListener);
         break;
       case 'CLEAR_CHAT':
         iframe?.contentWindow?.postMessage({ type: 'CLEAR_CHAT_COMMAND' }, '*');

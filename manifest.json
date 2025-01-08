@@ -77,7 +77,11 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["lib/pdf.js", "content.js"],
+      "js": [
+        "lib/pdf.js",
+        "element-picker.js",
+        "content.js"
+      ],
       "run_at": "document_start"
     }
   ]

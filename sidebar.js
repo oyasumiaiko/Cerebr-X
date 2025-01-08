@@ -470,7 +470,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             }
         } else if (event.data.type === 'QUICK_SUMMARY_COMMAND') {
-            performQuickSummary();
+            performQuickSummary(event.data.selectedContent);
         }
     });
 
@@ -1045,7 +1045,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // 修改快速总结功能
-    async function performQuickSummary() {
+    async function performQuickSummary(selectedContent = null) {
         // 记录当前的临时模式状态
         const wasTemporaryMode = isTemporaryMode;
         if (wasTemporaryMode) {
@@ -1060,6 +1060,33 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (isSidebarFocused && sidebarSelection) {
             messageInput.textContent = sidebarSelection;
             await sendMessage();
+            // 如果之前是临时模式，恢复
+            if (wasTemporaryMode) {
+                enterTemporaryMode();
+            }
+            return;
+        }
+
+        // 如果有通过元素选择器选中的内容，直接使用
+        if (selectedContent) {
+            // 清空聊天记录
+            chatContainer.innerHTML = '';
+            chatHistory = [];
+            
+            // 关闭设置菜单
+            toggleSettingsMenu(false);
+
+            // 构建总结请求
+            const trimmedText = selectedContent.trim();
+            const isQuestion = trimmedText.endsWith('?') || 
+                             trimmedText.endsWith('？') || 
+                             trimmedText.endsWith('吗');
+            const currentModel = apiConfigs[selectedConfigIndex]?.modelName || '';
+            const isSearchModel = currentModel.endsWith('-search');
+            
+            messageInput.textContent = isQuestion ? `"${trimmedText}"` : `"${trimmedText}"是什么？`;
+            await sendMessage();
+            
             // 如果之前是临时模式，恢复
             if (wasTemporaryMode) {
                 enterTemporaryMode();
