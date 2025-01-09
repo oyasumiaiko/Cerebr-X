@@ -26,37 +26,18 @@
   },
   "commands": {
     "open_sidebar": {
-      "suggested_key": {
-        "default": "Alt+Z",
-        "mac": "MacCtrl+Z"
-      },
       "description": "打开 Cerebr 侧边栏"
     },
     "close_sidebar": {
-      "suggested_key": {
-        "default": "Alt+C",
-        "mac": "MacCtrl+C"
-      },
       "description": "关闭 Cerebr 侧边栏"
     },
     "clear_chat": {
-      "suggested_key": {
-        "default": "Alt+X",
-        "mac": "MacCtrl+X"
-      },
       "description": "清空聊天记录"
     },
     "quick_summary": {
-      "suggested_key": {
-        "default": "Alt+S",
-        "mac": "MacCtrl+S"
-      },
       "description": "快速总结当前页面"
     },
     "toggle_temp_mode": {
-      "suggested_key": {
-        "default": "Alt+T"
-      },
       "description": "切换临时模式"
     }
   },
