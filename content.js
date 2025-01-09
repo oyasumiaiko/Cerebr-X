@@ -512,8 +512,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         let selectedContent = window.getSelection().toString();
         iframe.contentWindow.postMessage({
             type: 'QUICK_SUMMARY_COMMAND',
-            selectedContent: selectedContent,
-            source: 'webpage'
+            selectedContent: selectedContent
         }, '*');
         break;
       case 'CLEAR_CHAT':
