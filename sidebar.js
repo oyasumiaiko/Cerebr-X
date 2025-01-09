@@ -471,6 +471,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         } else if (event.data.type === 'QUICK_SUMMARY_COMMAND') {
             performQuickSummary(event.data.selectedContent);
+        } else if (event.data.type === 'TOGGLE_TEMP_MODE_FROM_EXTENSION') {
+            // 调用已有的toggle逻辑
+            if (isTemporaryMode) {
+                exitTemporaryMode();
+            } else {
+                enterTemporaryMode();
+            }
         }
     });
 

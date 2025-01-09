@@ -519,6 +519,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'CLEAR_CHAT':
         iframe?.contentWindow?.postMessage({ type: 'CLEAR_CHAT_COMMAND' }, '*');
         break;
+      case 'TOGGLE_TEMP_MODE':
+        iframe?.contentWindow?.postMessage({ type: 'TOGGLE_TEMP_MODE_FROM_EXTENSION' }, '*');
+        break;
     }
 
     sendResponse({ success: true, status: sidebar.isVisible });

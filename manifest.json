@@ -52,6 +52,12 @@
         "mac": "MacCtrl+S"
       },
       "description": "快速总结当前页面"
+    },
+    "toggle_temp_mode": {
+      "suggested_key": {
+        "default": "Alt+T"
+      },
+      "description": "切换临时模式"
     }
   },
   "background": {
