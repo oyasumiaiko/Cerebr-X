@@ -479,7 +479,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
     });
-
+    
     // 修改appendMessage函数，移除初始字数显示
     function appendMessage(text, sender, skipHistory = false, fragment = null) {
         const messageDiv = document.createElement('div');
@@ -494,7 +494,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         messageDiv.setAttribute('data-original-text', text);
 
         // 处理数学公式和 Markdown
-        messageDiv.innerHTML = processMathAndMarkdown(text);
+        try {
+            messageDiv.innerHTML = processMathAndMarkdown(text);
+        } catch (error) {
+            console.error('处理数学公式和Markdown失败:', error);
+            messageDiv.innerHTML = text; // 出错时使用原始文本
+        }
 
         // 处理消息中的链接
         messageDiv.querySelectorAll('a').forEach(link => {
@@ -521,7 +526,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
 
         // 渲染 LaTeX 公式
-        renderMathInElement(messageDiv, MATH_DELIMITERS.renderConfig);
+        try {
+            renderMathInElement(messageDiv, MATH_DELIMITERS.renderConfig);
+        } catch (error) {
+            console.error('渲染LaTeX公式失败:', error);
+            // 渲染失败时保持原样
+        }
 
         // 如果提供了文档片段，添加到片段中；否则直接添加到聊天容器
         if (fragment) {
