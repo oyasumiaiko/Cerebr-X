@@ -73,9 +73,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         // regex: /(\$\$[\s\S]+?\$\$)|(\$[^\s$][^$]*?\$)|(\\\\\([^]+?\\\\\))|(\\\([^]+?\\\))|(\\\[[\s\S]+?\\\])/g,
         renderConfig: {
             delimiters: [
-                {left: '\\(', right: '\\)', display: false},  // 行内公式
-                {left: '\\\\(', right: '\\\\)', display: false},  // 行内公式
-                {left: '\\[', right: '\\]', display: true},   // 行间公式
+                { left: '\\(', right: '\\)', display: false },  // 行内公式
+                { left: '\\\\(', right: '\\\\)', display: false },  // 行内公式
+                { left: '\\[', right: '\\]', display: true },   // 行间公式
                 // {left: '$$', right: '$$', display: true},     // 行间公式（备用）
                 // {left: '$', right: '$', display: false}       // 行内公式（备用）
             ],
@@ -198,11 +198,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 添加系统消息
             const systemMessage = {
                 role: "system",
-                content: `数学公式请使用LaTeX表示，行间公式请使用\\[...\\]表示，行内公式请使用\\(...\\)表示，禁止使用$美元符号包裹数学公式。用户语言是 ${navigator.language}。请优先使用 ${navigator.language} 语言回答用户问题。${
-                    pageContent ?
+                content: `数学公式请使用LaTeX表示，行间公式请使用\\[...\\]表示，行内公式请使用\\(...\\)表示，禁止使用$美元符号包裹数学公式。用户语言是 ${navigator.language}。请优先使用 ${navigator.language} 语言回答用户问题。${pageContent ?
                     `\n当前网页内容：\n标题：${pageContent.title}\nURL：${pageContent.url}\n内容：${pageContent.content}` :
                     ''
-                }`
+                    }`
             };
 
             // 如果是第一条消息或第一条不是系统消息，添加系统消息
@@ -254,7 +253,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             let hasStartedResponse = false;
 
             while (true) {
-                const {done, value} = await reader.read();
+                const { done, value } = await reader.read();
                 if (done) {
                     responseContexts.delete(requestId);
                     break;
@@ -379,11 +378,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             breaks: true,
             gfm: true,
             sanitize: false,
-            highlight: function(code, lang) {
+            highlight: function (code, lang) {
                 if (lang && hljs.getLanguage(lang)) {
                     try {
                         return hljs.highlight(code, { language: lang }).value;
-                    } catch (err) {}
+                    } catch (err) { }
                 }
                 return hljs.highlightAuto(code).value;
             }
@@ -485,7 +484,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function appendMessage(text, sender, skipHistory = false, fragment = null) {
         const messageDiv = document.createElement('div');
         messageDiv.classList.add('message', `${sender}-message`);
-        
+
         // 如果是批量加载，添加特殊类名
         if (fragment) {
             messageDiv.classList.add('batch-load');
@@ -558,7 +557,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // 监听输入框变化
-    messageInput.addEventListener('input', function() {
+    messageInput.addEventListener('input', function () {
         adjustTextareaHeight(this);
 
         // 处理 placeholder 的显示
@@ -605,7 +604,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // 统一的键盘事件监听器
-    messageInput.addEventListener('keydown', function(e) {
+    messageInput.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             if (isComposing || isProcessingMessage) {
                 // 如果正在使用输入法或正在处理消息，不发送消息
@@ -866,9 +865,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
 
         // 检查是否已收藏
-        const isFavorite = favoriteApis.some(favConfig => 
-            favConfig.apiKey === config.apiKey && 
-            favConfig.baseUrl === config.baseUrl && 
+        const isFavorite = favoriteApis.some(favConfig =>
+            favConfig.apiKey === config.apiKey &&
+            favConfig.baseUrl === config.baseUrl &&
             favConfig.modelName === config.modelName
         );
         if (isFavorite) {
@@ -885,9 +884,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 temperature: temperatureInput.value
             };
 
-            const existingIndex = favoriteApis.findIndex(favConfig => 
-                favConfig.apiKey === currentConfig.apiKey && 
-                favConfig.baseUrl === currentConfig.baseUrl && 
+            const existingIndex = favoriteApis.findIndex(favConfig =>
+                favConfig.apiKey === currentConfig.apiKey &&
+                favConfig.baseUrl === currentConfig.baseUrl &&
                 favConfig.modelName === currentConfig.modelName
             );
 
@@ -926,7 +925,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 复制配置
         template.querySelector('.duplicate-btn').addEventListener('click', (e) => {
             e.stopPropagation();
-            apiConfigs.push({...config});
+            apiConfigs.push({ ...config });
             saveAPIConfigs();
             renderAPICards();
         });
@@ -980,29 +979,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         favoriteApis.forEach((config) => {
             const item = document.createElement('div');
             item.className = 'favorite-api-item';
-            
+
             // 检查是否是当前使用的API
-            if (currentConfig && 
-                currentConfig.apiKey === config.apiKey && 
-                currentConfig.baseUrl === config.baseUrl && 
+            if (currentConfig &&
+                currentConfig.apiKey === config.apiKey &&
+                currentConfig.baseUrl === config.baseUrl &&
                 currentConfig.modelName === config.modelName) {
                 item.classList.add('current');
             }
-            
+
             const apiName = document.createElement('span');
             apiName.className = 'api-name';
             apiName.textContent = config.modelName || config.baseUrl;
-            
+
             item.appendChild(apiName);
 
             // 点击切换到该API配置
             item.addEventListener('click', () => {
-                const configIndex = apiConfigs.findIndex(c => 
-                    c.apiKey === config.apiKey && 
-                    c.baseUrl === config.baseUrl && 
+                const configIndex = apiConfigs.findIndex(c =>
+                    c.apiKey === config.apiKey &&
+                    c.baseUrl === config.baseUrl &&
                     c.modelName === config.modelName
                 );
-                
+
                 if (configIndex !== -1) {
                     selectedConfigIndex = configIndex;
                     saveAPIConfigs();
@@ -1053,105 +1052,53 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 修改快速总结功能
     async function performQuickSummary(selectedContent = null) {
-        // 记录当前的临时模式状态
         const wasTemporaryMode = isTemporaryMode;
-        if (wasTemporaryMode) {
-            exitTemporaryMode();
-        }
-
-        // 检查焦点是否在侧栏内
-        const isSidebarFocused = document.hasFocus();
-        const sidebarSelection = window.getSelection().toString().trim();
-
-        console.log('isSidebarFocused:', isSidebarFocused);
-        console.log('sidebarSelection:', sidebarSelection);
-        
-        // 只有当焦点在侧栏内且有选中文本时，才使用侧栏的选中文本
-        if (isSidebarFocused && sidebarSelection) {
-            messageInput.textContent = sidebarSelection;
-            await sendMessage();
-            // 如果之前是临时模式，恢复
-            if (wasTemporaryMode) {
-                enterTemporaryMode();
-            }
-            return;
-        }
-
-        // 如果有通过元素选择器选中的内容，直接使用
-        if (selectedContent) {
-            // 清空聊天记录
-            chatContainer.innerHTML = '';
-            chatHistory = [];
-            
-            // 关闭设置菜单
-            toggleSettingsMenu(false);
-
-            // 构建总结请求
-            const trimmedText = selectedContent.trim();
-            const isQuestion = trimmedText.endsWith('?') || 
-                             trimmedText.endsWith('？') || 
-                             trimmedText.endsWith('吗');
-            const currentModel = apiConfigs[selectedConfigIndex]?.modelName || '';
-            const isSearchModel = currentModel.endsWith('-search');
-            
-            messageInput.textContent = isQuestion ? `"${trimmedText}"` : `"${trimmedText}"是什么？`;
-            await sendMessage();
-            
-            // 如果之前是临时模式，恢复
-            if (wasTemporaryMode) {
-                enterTemporaryMode();
-            }
-            return;
-        }
-
-        // 获取页面上选中的文本
         try {
-            // 创建一个 Promise 来等待选中文本的结果
-            const selectedText = await new Promise((resolve) => {
-                // 添加一次性的消息监听器
-                const messageHandler = (event) => {
-                    if (event.data.type === 'SELECTED_TEXT_RESULT') {
-                        window.removeEventListener('message', messageHandler);
-                        resolve(event.data.selectedText?.trim());
-                    }
-                };
-                window.addEventListener('message', messageHandler);
+            // 检查焦点是否在侧栏内
+            const isSidebarFocused = document.hasFocus();
+            const sidebarSelection = window.getSelection().toString().trim();
 
-                // 向父窗口请求选中的文本
-                window.parent.postMessage({ type: 'GET_SELECTED_TEXT' }, '*');
-            });
-            
+            console.log('isSidebarFocused:', isSidebarFocused);
+            console.log('sidebarSelection:', sidebarSelection);
+
+            // 只有当焦点在侧栏内且有选中文本时，才使用侧栏的选中文本
+            if (isSidebarFocused && sidebarSelection) {
+                messageInput.textContent = sidebarSelection;
+                await sendMessage();
+                return;
+            }
+
+            // 获取页面上选中的文本
             // 清空聊天记录
             chatContainer.innerHTML = '';
             chatHistory = [];
-            
+
             // 关闭设置菜单
             toggleSettingsMenu(false);
 
             // 构建总结请求
             const trimmedText = selectedText?.trim() || '';
-            const isQuestion = trimmedText.endsWith('?') || 
-                             trimmedText.endsWith('？') || 
-                             trimmedText.endsWith('吗');
+            const isQuestion = trimmedText.endsWith('?') ||
+                trimmedText.endsWith('？') ||
+                trimmedText.endsWith('吗');
             const currentModel = apiConfigs[selectedConfigIndex]?.modelName || '';
             const isSearchModel = currentModel.endsWith('-search');
-            
+
             if (selectedText) {
                 // if(isSearchModel) messageInput.textContent += `搜索，`;
                 messageInput.textContent += isQuestion ? `"${selectedText}"` : `"${selectedText}"是什么？`;
             } else {
+                if (wasTemporaryMode) {
+                    exitTemporaryMode();
+                }
                 messageInput.textContent = `请总结这个页面的主要内容。`;
             }
             // 发送消息
             await sendMessage();
-            
-            // 如果之前是临时模式，恢复
-            if (wasTemporaryMode) {
-                enterTemporaryMode();
-            }
         } catch (error) {
             console.error('获取选中文本失败:', error);
-            // 发生错误时也要恢复临时模式
+        } finally {
+            // 如果之前是临时模式，恢复
             if (wasTemporaryMode) {
                 enterTemporaryMode();
             }
@@ -1589,7 +1536,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 监听缩放比例变化
     const scaleFactor = document.getElementById('scale-factor');
     const scaleValue = document.getElementById('scale-value');
-    
+
     scaleFactor.addEventListener('input', (e) => {
         const value = parseFloat(e.target.value);
         scaleValue.textContent = `${value.toFixed(1)}x`;
