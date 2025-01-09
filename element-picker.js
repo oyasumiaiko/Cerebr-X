@@ -84,8 +84,8 @@ class ElementPicker {
           display: 'block',
           width: rect.width + 'px',
           height: rect.height + 'px',
-          left: rect.left + window.scrollX + 'px',
-          top: rect.top + window.scrollY + 'px'
+          left: rect.left + 'px',
+          top: rect.top + 'px'
       });
   }
 

@@ -1055,6 +1055,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 检查焦点是否在侧栏内
         const isSidebarFocused = document.hasFocus();
         const sidebarSelection = window.getSelection().toString().trim();
+
+        console.log('isSidebarFocused:', isSidebarFocused);
+        console.log('sidebarSelection:', sidebarSelection);
         
         // 只有当焦点在侧栏内且有选中文本时，才使用侧栏的选中文本
         if (isSidebarFocused && sidebarSelection) {

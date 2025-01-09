@@ -283,14 +283,6 @@ class CerebrSidebar {
           chrome.storage.sync.set({ scaleFactor: this.scaleFactor });
           break;
 
-        case 'GET_SELECTED_TEXT':
-          const selectedText = window.getSelection().toString();
-          this.sidebar?.querySelector('.cerebr-sidebar__iframe')?.contentWindow.postMessage({
-            type: 'SELECTED_TEXT_RESULT',
-            selectedText
-          }, '*');
-          break;
-
         case 'CLOSE_SIDEBAR':
           this.toggle(false);  // 明确传入 false 表示关闭
           break;
@@ -305,26 +297,34 @@ class CerebrSidebar {
       iframe.contentWindow.postMessage({ type: 'FOCUS_INPUT' }, '*');
     }
   }
-
   toggle(forceShow = null) {
     if (!this.initialized) return;
 
     try {
       const wasVisible = this.isVisible;
-      // 如果 forceShow 为 null/undefined，则切换状态
-      // 如果 forceShow 为 true/false，则直接使用该值
-      this.isVisible = forceShow === null ? !this.isVisible : forceShow;
 
-      // 如果状态没有变化，只需要聚焦
-      if (wasVisible && this.isVisible) {
-        this.focusInput();
-        return;
+      // 根据 forceShow 参数分别处理
+      if (forceShow === null) {
+        // 没有指定强制显示/隐藏时，切换当前状态
+        this.isVisible = !this.isVisible;
+      } else {
+        // 明确指定了显示/隐藏状态
+        this.isVisible = forceShow;
       }
 
+      // 如果之前和现在都是显示状态，无需操作
+      if (wasVisible && this.isVisible) return;
+
+      // 根据当前显示状态更新侧边栏
       if (this.isVisible) {
+        // 显示侧边栏
         this.sidebar.classList.add('visible');
-        this.focusInput();
+        // 如果之前是隐藏状态，则聚焦输入框
+        if (!wasVisible) {
+          this.focusInput();
+        }
       } else {
+        // 隐藏侧边栏
         this.sidebar.classList.remove('visible');
       }
     } catch (error) {
@@ -509,33 +509,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
       case 'QUICK_SUMMARY':
         sidebar.toggle(true);  // 明确传入 true 表示打开
-        // 启动元素选择器
-        picker.startPicking(({element, selector}) => {
-          console.log('Selected element:', element);
-          console.log('CSS Selector:', selector);
-          
-          // 获取选中元素的内容
-          const selectedContent = element.innerText;
-          
-          // 发送选中的内容到iframe
-          iframe?.contentWindow?.postMessage({ 
+        let selectedContent = window.getSelection().toString();
+        iframe.contentWindow.postMessage({
             type: 'QUICK_SUMMARY_COMMAND',
-            selectedContent: selectedContent
-          }, '*');
-        });
-
-        // 监听ESC键以取消选择
-        const escListener = (e) => {
-          if (e.key === 'Escape') {
-            picker.stopPicking();
-            document.removeEventListener('keydown', escListener);
-            // 如果用户取消选择，则进行整页总结
-            iframe?.contentWindow?.postMessage({ 
-              type: 'QUICK_SUMMARY_COMMAND'
-            }, '*');
-          }
-        };
-        document.addEventListener('keydown', escListener);
+            selectedContent: selectedContent,
+            source: 'webpage'
+        }, '*');
         break;
       case 'CLEAR_CHAT':
         iframe?.contentWindow?.postMessage({ type: 'CLEAR_CHAT_COMMAND' }, '*');
