@@ -1077,16 +1077,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             toggleSettingsMenu(false);
 
             // 构建总结请求
-            const trimmedText = selectedText?.trim() || '';
+            const trimmedText = selectedContent?.trim() || '';
             const isQuestion = trimmedText.endsWith('?') ||
                 trimmedText.endsWith('？') ||
                 trimmedText.endsWith('吗');
             const currentModel = apiConfigs[selectedConfigIndex]?.modelName || '';
             const isSearchModel = currentModel.endsWith('-search');
 
-            if (selectedText) {
-                // if(isSearchModel) messageInput.textContent += `搜索，`;
-                messageInput.textContent += isQuestion ? `"${selectedText}"` : `"${selectedText}"是什么？`;
+            if (trimmedText) {
+                if(isSearchModel) messageInput.textContent += `搜索，`;
+                messageInput.textContent += isQuestion ? `"${trimmedText}"` : `"${trimmedText}"是什么？`;
             } else {
                 if (wasTemporaryMode) {
                     exitTemporaryMode();
