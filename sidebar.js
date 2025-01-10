@@ -1095,8 +1095,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             const isSearchModel = currentModel.endsWith('-search');
 
             if (trimmedText) {
-                if(isSearchModel) messageInput.textContent += `搜索，`;
-                messageInput.textContent += isQuestion ? `"${trimmedText}"` : `"${trimmedText}"是什么？`;
+                if (isSearchModel) messageInput.textContent = `search, grounding, explain: "${trimmedText}"`;
+                else messageInput.textContent = isQuestion ? `"${trimmedText}"` : `"${trimmedText}"是什么？`;
             } else {
                 if (wasTemporaryMode) {
                     exitTemporaryMode();
