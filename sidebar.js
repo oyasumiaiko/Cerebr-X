@@ -765,26 +765,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 加载保存的 API 配置
     let apiConfigs = [];
     let selectedConfigIndex = 0;
-    let favoriteApis = [];  // 存储收藏的API配置
 
     // 从存储加载配置
     async function loadAPIConfigs() {
         try {
-            const result = await chrome.storage.sync.get(['apiConfigs', 'selectedConfigIndex', 'favoriteApis']);
+            const result = await chrome.storage.sync.get(['apiConfigs', 'selectedConfigIndex']);
             if (result.apiConfigs && result.apiConfigs.length > 0) {
                 apiConfigs = result.apiConfigs;
                 selectedConfigIndex = result.selectedConfigIndex || 0;
-                favoriteApis = result.favoriteApis || [];
             } else {
                 // 创建默认配置
                 apiConfigs = [{
                     apiKey: '',
                     baseUrl: 'https://api.openai.com/v1/chat/completions',
                     modelName: 'gpt-4o',
-                    temperature: 1
+                    temperature: 1,
+                    isFavorite: false  // 添加收藏状态字段
                 }];
                 selectedConfigIndex = 0;
-                favoriteApis = [];
                 await saveAPIConfigs();
             }
         } catch (error) {
@@ -794,10 +792,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 apiKey: '',
                 baseUrl: 'https://api.openai.com/v1/chat/completions',
                 modelName: 'gpt-4o',
-                temperature: 1
+                temperature: 1,
+                isFavorite: false  // 添加收藏状态字段
             }];
             selectedConfigIndex = 0;
-            favoriteApis = [];
         }
 
         // 确保一定会渲染卡片和收藏列表
@@ -810,8 +808,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             await chrome.storage.sync.set({
                 apiConfigs,
-                selectedConfigIndex,
-                favoriteApis
+                selectedConfigIndex
             });
         } catch (error) {
             console.error('保存 API 配置失败:', error);
@@ -875,38 +872,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
 
         // 检查是否已收藏
-        const isFavorite = favoriteApis.some(favConfig =>
-            favConfig.apiKey === config.apiKey &&
-            favConfig.baseUrl === config.baseUrl &&
-            favConfig.modelName === config.modelName
-        );
-        if (isFavorite) {
+        if (config.isFavorite) {
             favoriteBtn.classList.add('active');
         }
 
         // 收藏按钮点击事件
         favoriteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const currentConfig = {
-                apiKey: apiKeyInput.value,
-                baseUrl: baseUrlInput.value,
-                modelName: modelNameInput.value,
-                temperature: temperatureInput.value
-            };
-
-            const existingIndex = favoriteApis.findIndex(favConfig =>
-                favConfig.apiKey === currentConfig.apiKey &&
-                favConfig.baseUrl === currentConfig.baseUrl &&
-                favConfig.modelName === currentConfig.modelName
-            );
-
-            if (existingIndex === -1) {
-                // 添加到收藏
-                favoriteApis.push(currentConfig);
+            // 直接切换当前配置的收藏状态
+            apiConfigs[index].isFavorite = !apiConfigs[index].isFavorite;
+            
+            if (apiConfigs[index].isFavorite) {
                 favoriteBtn.classList.add('active');
             } else {
-                // 取消收藏
-                favoriteApis.splice(existingIndex, 1);
                 favoriteBtn.classList.remove('active');
             }
 
@@ -973,7 +951,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const favoriteApisList = document.querySelector('.favorite-apis-list');
         favoriteApisList.innerHTML = '';
 
-        if (favoriteApis.length === 0) {
+        // 过滤出收藏的API
+        const favoriteConfigs = apiConfigs.filter(config => config.isFavorite);
+
+        if (favoriteConfigs.length === 0) {
             const emptyMessage = document.createElement('div');
             emptyMessage.style.padding = '4px 8px';
             emptyMessage.style.opacity = '0.7';
@@ -986,7 +967,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 获取当前使用的API配置
         const currentConfig = apiConfigs[selectedConfigIndex];
 
-        favoriteApis.forEach((config) => {
+        favoriteConfigs.forEach((config) => {
             const item = document.createElement('div');
             item.className = 'favorite-api-item';
 
