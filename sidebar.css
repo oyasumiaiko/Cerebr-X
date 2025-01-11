@@ -453,6 +453,21 @@ input:checked + .slider:before {
     background-color: rgba(0, 0, 0, 0.1);
 }
 
+.card-button.active {
+    opacity: 1;
+}
+
+.select-btn.active {
+    color: #34c759;
+}
+
+/* 深色模式下的按钮样式 */
+@media (prefers-color-scheme: dark) {
+    .select-btn.active {
+        color: #32d74b;
+    }
+}
+
 .card-button svg {
     width: 16px;
     height: 16px;

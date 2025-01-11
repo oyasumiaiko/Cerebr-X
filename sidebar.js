@@ -863,6 +863,34 @@ document.addEventListener('DOMContentLoaded', async () => {
         const apiForm = template.querySelector('.api-form');
         const favoriteBtn = template.querySelector('.favorite-btn');
         const togglePasswordBtn = template.querySelector('.toggle-password-btn');
+        const selectBtn = template.querySelector('.select-btn');
+
+        // 更新选择按钮状态
+        if (index === selectedConfigIndex) {
+            selectBtn.classList.add('active');
+        }
+
+        // 选择按钮点击事件
+        selectBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // 移除其他卡片的选中状态
+            document.querySelectorAll('.api-card').forEach(card => {
+                card.classList.remove('selected');
+                card.querySelector('.select-btn')?.classList.remove('active');
+            });
+            // 设置当前卡片为选中状态
+            template.classList.add('selected');
+            selectBtn.classList.add('active');
+            selectedConfigIndex = index;
+            saveAPIConfigs();
+            // 关闭设置菜单
+            apiSettings.classList.remove('visible');
+        });
+
+        // 点击卡片只展开/折叠表单
+        template.addEventListener('click', () => {
+            template.classList.toggle('expanded');
+        });
 
         // 添加密码切换按钮的点击事件监听器
         togglePasswordBtn.addEventListener('click', (e) => {
@@ -902,6 +930,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         temperatureInput.addEventListener('input', (e) => {
             const value = parseFloat(e.target.value);
             temperatureValue.textContent = value.toFixed(1);
+            // 保存温度值
+            apiConfigs[index] = {
+                ...apiConfigs[index],
+                temperature: value
+            };
+            saveAPIConfigs();
         });
 
         // 检查是否已收藏
@@ -964,28 +998,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
                 saveAPIConfigs();
                 renderAPICards();
-            }
-        });
-
-        // 点击卡片事件
-        template.addEventListener('click', () => {
-            // 如果已经是选中状态，则切换展开/折叠
-            if (index === selectedConfigIndex) {
-                template.classList.toggle('expanded');
-            } else {
-                // 选择新的配置
-                selectedConfigIndex = index;
-                saveAPIConfigs();
-                // 更新所有卡片的选中状态
-                document.querySelectorAll('.api-card').forEach(card => {
-                    card.classList.remove('selected');
-                    // 如果不是当前卡片，折叠它
-                    if (card !== template) {
-                        card.classList.remove('expanded');
-                    }
-                });
-                template.classList.add('selected');
-                template.classList.add('expanded');
             }
         });
 
