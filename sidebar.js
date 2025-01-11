@@ -539,13 +539,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             fragment.appendChild(messageDiv);
         } else {
             chatContainer.appendChild(messageDiv);
-            // 根据自动滚动设置和消息类型决定是否滚动
-            if (!isAutoScrollEnabled) {
-                // 如果自动滚动被禁用，不执行任何滚动
-                return messageDiv;
-            }
-            if (sender === 'user') {
-                scrollToBottom(true); // 用户消息时强制滚动
+            // 只在发送新消息时强制滚动，其他情况根据shouldAutoScroll决定
+            if (sender === 'user' && !skipHistory) {
+                scrollToBottom(true); // 用户新消息强制滚动
             } else {
                 scrollToBottom(); // AI回复根据shouldAutoScroll决定
             }
