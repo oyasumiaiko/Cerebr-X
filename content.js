@@ -650,6 +650,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
+// PDF 内容缓存
+const pdfContentCache = new Map();
+
 async function waitForContent() {
   return new Promise((resolve) => {
     const checkContent = () => {
@@ -692,12 +695,29 @@ async function extractPageContent() {
 
   // 检查是否是PDF
   if (document.contentType === 'application/pdf') {
-    console.log('检测到PDF文件，尝试提取PDF内容');
-    const pdfText = await extractTextFromPDF(window.location.href);
-    if (pdfText) {
+    console.log('检测到PDF文件，尝试从缓存获取内容');
+    const url = window.location.href;
+    
+    // 检查缓存
+    if (pdfContentCache.has(url)) {
+      console.log('从缓存中获取PDF内容');
+      const cachedContent = pdfContentCache.get(url);
       return {
         title: document.title,
-        url: window.location.href,
+        url: url,
+        content: cachedContent
+      };
+    }
+
+    console.log('缓存中没有找到PDF内容，开始提取');
+    const pdfText = await extractTextFromPDF(url);
+    if (pdfText) {
+      // 将内容存入缓存
+      console.log('将PDF内容存入缓存');
+      pdfContentCache.set(url, pdfText);
+      return {
+        title: document.title,
+        url: url,
         content: pdfText
       };
     }
