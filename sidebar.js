@@ -1,4 +1,4 @@
-document.addEventListener('DOMContentLoaded', async () => {
+    document.addEventListener('DOMContentLoaded', async () => {
     const chatContainer = document.getElementById('chat-container');
     const messageInput = document.getElementById('message-input');
     const contextMenu = document.getElementById('context-menu');
@@ -336,6 +336,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const lastMessage = chatContainer.querySelector('.ai-message:last-child');
             if (lastMessage) {
                 lastMessage.classList.remove('updating');
+            }
         }
     }
 
