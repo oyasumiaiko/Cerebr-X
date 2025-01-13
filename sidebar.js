@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const messageInput = document.getElementById('message-input');
     const contextMenu = document.getElementById('context-menu');
     const copyMessageButton = document.getElementById('copy-message');
+    const stopUpdateButton = document.getElementById('stop-update');
     const settingsButton = document.getElementById('settings-button');
     const settingsMenu = document.getElementById('settings-menu');
     const toggleTheme = document.getElementById('toggle-theme');
@@ -18,6 +19,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     let isAutoScrollEnabled = true; // 添加自动滚动开关状态
     let lastUserScrollTime = 0; // 添加最后用户滚动时间
     let lastProgrammaticScroll = 0; // 添加最后程序滚动时间
+    let currentController = null;  // 用于存储当前的 AbortController
+
+    // 添加点击事件监听器，让点击侧边栏时自动聚焦到输入框
+    document.body.addEventListener('click', (e) => {
+        // 排除点击设置按钮、设置菜单、上下文菜单的情况
+        if (!settingsButton.contains(e.target) &&
+            !settingsMenu.contains(e.target) &&
+            !contextMenu.contains(e.target)) {
+            messageInput.focus();
+        }
+    });
 
     // 聊天历史记录变量
     let chatHistory = [];
@@ -228,7 +240,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     temperature: config.temperature || 1,
                     top_p: 0.95,
                     max_tokens: 4096,
-                })
+                }),
+                signal  // 添加 signal 到请求中
             });
 
             if (!response.ok) {
@@ -291,6 +304,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             }
         } catch (error) {
+            if (error.name === 'AbortError') {
+                console.log('用户手动停止更新');
+                return;
+            }
             console.error('发送消息失败:', error);
             // 更新加载状态消息显示错误
             if (loadingMessage) {
@@ -302,6 +319,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         } finally {
             // 无论成功还是失败，都重置处理状态
             isProcessingMessage = false;
+            const lastMessage = chatContainer.querySelector('.ai-message:last-child');
+            if (lastMessage) {
+                lastMessage.classList.remove('updating');
         }
     }
 
@@ -553,6 +573,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 role: sender === 'user' ? 'user' : 'assistant',
                 content: processImageTags(text)
             });
+            if (sender === 'ai') {
+                messageDiv.classList.add('updating');
+            }
         }
 
         return messageDiv;
@@ -1076,6 +1099,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 清空聊天记录功能
     const clearChat = document.getElementById('clear-chat');
     clearChat.addEventListener('click', () => {
+        // 如果有正在进行的请求，停止它
+        if (currentController) {
+            currentController.abort();
+            currentController = null;
+        }
         // 清空聊天容器
         chatContainer.innerHTML = '';
         // 清空当前页面的聊天历史记录
@@ -1176,6 +1204,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // 设置菜单位置
         contextMenu.style.display = 'block';
+
+        // 根据消息状态显示或隐藏停止更新按钮
+        if (messageElement.classList.contains('updating')) {
+            stopUpdateButton.style.display = 'flex';
+        } else {
+            stopUpdateButton.style.display = 'none';
+        }
+
         const menuWidth = contextMenu.offsetWidth;
         const menuHeight = contextMenu.offsetHeight;
 
@@ -1195,6 +1231,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         contextMenu.style.top = y + 'px';
     }
 
+    // 添加停止更新按钮的点击事件处理
+    stopUpdateButton.addEventListener('click', () => {
+        if (currentController) {
+            currentController.abort();  // 中止当前请求
+            currentController = null;
+            hideContextMenu();
+        }
+    });
     // 隐藏右键菜单
     function hideContextMenu() {
         contextMenu.style.display = 'none';

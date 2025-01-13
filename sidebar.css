@@ -1234,3 +1234,13 @@ body.temporary-mode::after {
 #collapse-button:hover {
     opacity: 0.6;
 }
+
+#stop-update svg {
+    fill: currentColor;
+    stroke: none;
+}
+
+#stop-update:hover {
+    background-color: var(--cerebr-message-user-bg);
+    color: #ff4d4d;
+}
