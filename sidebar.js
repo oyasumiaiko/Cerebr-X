@@ -866,22 +866,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         const togglePasswordBtn = template.querySelector('.toggle-password-btn');
         const selectBtn = template.querySelector('.select-btn');
 
-        // 更新选择按钮状态
-        if (index === selectedConfigIndex) {
-            selectBtn.classList.add('active');
-        }
-
         // 选择按钮点击事件
         selectBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             // 移除其他卡片的选中状态
             document.querySelectorAll('.api-card').forEach(card => {
                 card.classList.remove('selected');
-                card.querySelector('.select-btn')?.classList.remove('active');
             });
             // 设置当前卡片为选中状态
             template.classList.add('selected');
-            selectBtn.classList.add('active');
             selectedConfigIndex = index;
             saveAPIConfigs();
             // 关闭设置菜单
@@ -1623,7 +1616,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 添加检查是否在底部的函数
     function isNearBottom() {
-        const threshold = 100; // 距离底部的阈值，单位像素
+        const threshold = 300; // 距离底部的阈值，单位像素
         const scrollBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
         return scrollBottom <= threshold;
     }

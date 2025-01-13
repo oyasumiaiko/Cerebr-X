@@ -476,15 +476,18 @@ input:checked + .slider:before {
     opacity: 1;
 }
 
-.select-btn.active {
-    color: #34c759;
+.select-btn {
+    opacity: 0;
+    transition: opacity 0.2s ease;
 }
 
-/* 深色模式下的按钮样式 */
-@media (prefers-color-scheme: dark) {
-    .select-btn.active {
-        color: #32d74b;
-    }
+.api-card:hover .select-btn {
+    opacity: 0.3;
+}
+
+.api-card:hover .select-btn:hover {
+    opacity: 1;
+    background-color: rgba(0, 0, 0, 0.1);
 }
 
 .card-button svg {
