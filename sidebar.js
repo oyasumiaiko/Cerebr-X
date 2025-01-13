@@ -12,6 +12,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const widthValue = document.getElementById('width-value');
     const fontSizeValue = document.getElementById('font-size-value');
     const collapseButton = document.getElementById('collapse-button');
+    const feedbackButton = document.getElementById('feedback-button');
+    const fullscreenToggle = document.getElementById('fullscreen-toggle');
     let currentMessageElement = null;
     let isTemporaryMode = false; // 添加临时模式状态变量
     let isProcessingMessage = false; // 添加消息处理状态标志
@@ -20,6 +22,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     let lastUserScrollTime = 0; // 添加最后用户滚动时间
     let lastProgrammaticScroll = 0; // 添加最后程序滚动时间
     let currentController = null;  // 用于存储当前的 AbortController
+    let isFullscreen = false;
+
+    // 添加全屏切换功能
+    fullscreenToggle.addEventListener('click', async () => {
+        isFullscreen = !isFullscreen;
+        // 直接向父窗口发送消息
+        window.parent.postMessage({
+            type: 'TOGGLE_FULLSCREEN',
+            isFullscreen: isFullscreen
+        }, '*');
+        settingsMenu.classList.remove('visible');
+    });
 
     // 添加点击事件监听器，让点击侧边栏时自动聚焦到输入框
     document.body.addEventListener('click', (e) => {

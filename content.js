@@ -9,6 +9,7 @@ class CerebrSidebar {
     this.scaleFactor = 1.0;
     this.initialized = false;
     this.lastUrl = window.location.href;
+    this.isFullscreen = false;
     console.log('CerebrSidebar 实例创建');
     this.initializeSidebar();
     this.setupUrlChangeListener();
@@ -127,6 +128,7 @@ class CerebrSidebar {
           isolation: isolate;
           border: 1px solid rgba(255, 255, 255, 0.1);
           contain: layout style;
+          transition: all 0.3s ease;
         }
 
         .cerebr-sidebar__content {
@@ -139,6 +141,18 @@ class CerebrSidebar {
           contain: layout style;
         }
 
+        .cerebr-sidebar.fullscreen {
+          top: 0;
+          right: 0;
+          width: 100vw !important;
+          height: 100vh;
+          margin-right: 0;
+          border-radius: 0;
+          transform: translateX(0) !important;
+        }
+        .cerebr-sidebar.fullscreen.visible {
+          transform: translateX(0) !important;
+        }
         .cerebr-sidebar.initialized {
           visibility: visible;
           transition: transform 0.3s ease;
@@ -157,6 +171,18 @@ class CerebrSidebar {
           transform: translateX(0);
         }
 
+        .cerebr-sidebar.fullscreen.visible {
+          transform: translateX(0);
+        }
+        .cerebr-sidebar__content {
+          height: 100%;
+          overflow: hidden;
+          border-radius: 12px;
+          contain: style layout size;
+        }
+        .cerebr-sidebar.fullscreen .cerebr-sidebar__content {
+          border-radius: 0;
+        }
         .cerebr-sidebar__iframe {
           width: 100%;
           height: 100%;
@@ -250,10 +276,16 @@ class CerebrSidebar {
     let startX, startWidth;
 
     resizer.addEventListener('mousedown', (e) => {
+      // 如果是全屏模式，不允许调整大小
+      if (this.isFullscreen) return;
+
       startX = e.clientX;
       startWidth = this.sidebarWidth;
 
       const handleMouseMove = (e) => {
+        // 如果是全屏模式，不允许调整大小
+        if (this.isFullscreen) return;
+
         const diff = startX - e.clientX;
         const scale = this.scaleFactor / window.devicePixelRatio;
         const newWidth = Math.min(Math.max(500, startWidth - diff / scale), 1500);
@@ -285,6 +317,11 @@ class CerebrSidebar {
 
         case 'CLOSE_SIDEBAR':
           this.toggle(false);  // 明确传入 false 表示关闭
+          break;
+
+        case 'TOGGLE_FULLSCREEN':
+          console.log('处理全屏切换消息:', event.data.isFullscreen);
+          this.toggleFullscreen(event.data.isFullscreen);
           break;
       }
     });
@@ -440,6 +477,25 @@ class CerebrSidebar {
       iframe.style.height = `${100}%`;
       this.sidebar.style.setProperty('--scale-ratio', scale);
       this.updateWidth(this.sidebarWidth);
+    }
+  }
+
+  // 添加全屏模式切换方法
+  toggleFullscreen(isFullscreen) {
+    console.log('切换全屏模式:', isFullscreen);
+    this.isFullscreen = isFullscreen;
+    if (this.isFullscreen) {
+      this.sidebar.classList.add('fullscreen');
+      if (!this.isVisible) {
+        this.toggle();
+      }
+    } else {
+      this.sidebar.classList.remove('fullscreen');
+    }
+    // 如果是全屏模式，确保侧边栏可见
+    if (this.isFullscreen && !this.sidebar.classList.contains('visible')) {
+      this.sidebar.classList.add('visible');
+      this.isVisible = true;
     }
   }
 }
