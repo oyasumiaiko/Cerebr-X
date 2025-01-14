@@ -37,7 +37,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 聊天历史记录变量
     let chatHistory = [];
-    let responseContexts = new Map();  // 存储每个请求的上下文
     let pageContent = null;  // 保留pageContent变量，但移除webpageSwitch相关代码
 
     // 添加公共的图片处理函数
@@ -115,11 +114,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function sendMessage() {
-        // 如果正在处理消息，直接返回
-        if (isProcessingMessage) {
-            return;
-        }
-
         const message = messageInput.textContent.trim();
         const imageTags = messageInput.querySelectorAll('.image-tag');
 
@@ -132,16 +126,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         try {
+            // 如果存在之前的请求，先中止它
+            if (currentController) {
+                currentController.abort();
+                currentController = null;
+            }
+
             // 设置处理状态为true
             isProcessingMessage = true;
 
             // 生成新的请求ID
             const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            // 创建该请求的上下文
-            responseContexts.set(requestId, {
-                aiResponse: '',
-                isValid: true
-            });
 
             // 先添加用户消息到界面和历史记录
             const userMessageDiv = appendMessage(messageInput.innerHTML, 'user');
@@ -273,42 +268,35 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             const reader = response.body.getReader();
             let hasStartedResponse = false;
+            let aiResponse = '';
 
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) {
-                    responseContexts.delete(requestId);
-                    break;
-                }
+                if (done) break;
 
                 const chunk = new TextDecoder().decode(value);
                 const lines = chunk.split('\n');
 
-                const context = responseContexts.get(requestId);
-                if (context?.isValid) {
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const content = line.slice(6);
-                            if (content.trim() === '[DONE]') continue;
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const content = line.slice(6);
+                        if (content.trim() === '[DONE]') continue;
 
-                            try {
-                                const data = JSON.parse(content);
-                                if (data.choices?.[0]?.delta?.content) {
-                                    if (!hasStartedResponse) {
-                                        // 移除加载状态消息
-                                        loadingMessage.remove();
-                                        hasStartedResponse = true;
-                                    }
-                                    context.aiResponse += data.choices[0].delta.content;
-                                    updateAIMessage(context.aiResponse, requestId);
+                        try {
+                            const data = JSON.parse(content);
+                            if (data.choices?.[0]?.delta?.content) {
+                                if (!hasStartedResponse) {
+                                    // 移除加载状态消息
+                                    loadingMessage.remove();
+                                    hasStartedResponse = true;
                                 }
-                            } catch (e) {
-                                console.error('解析响应出错:', e);
+                                aiResponse += data.choices[0].delta.content;
+                                updateAIMessage(aiResponse);
                             }
+                        } catch (e) {
+                            console.error('解析响应出错:', e);
                         }
                     }
-                } else {
-                    console.log('请求已过期，忽略响应内容');
                 }
             }
         } catch (error) {
@@ -334,13 +322,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    function updateAIMessage(text, requestId) {
-        const context = responseContexts.get(requestId);
-        if (!context?.isValid) {
-            console.log('忽略过期响应:', requestId);
-            return;
-        }
-
+    function updateAIMessage(text) {
         const lastMessage = chatContainer.querySelector('.ai-message:last-child');
         let rawText = text;
 
@@ -649,7 +631,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 统一的键盘事件监听器
     messageInput.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) {
-            if (isComposing || isProcessingMessage) {
+            if (isComposing) {
                 // 如果正在使用输入法或正在处理消息，不发送消息
                 return;
             }
