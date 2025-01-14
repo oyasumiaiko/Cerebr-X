@@ -36,8 +36,64 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // 聊天历史记录变量
-    let chatHistory = [];
+    let chatHistory = {
+        messages: [],  // 所有消息的列表
+        root: null,    // 根节点ID
+        currentNode: null, // 当前节点ID
+    };
     let pageContent = null;  // 保留pageContent变量，但移除webpageSwitch相关代码
+
+    // 添加消息树节点的工具函数
+    function createMessageNode(role, content, parentId = null) {
+        const node = {
+            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            role,
+            content,
+            parentId,
+            children: []
+        };
+        return node;
+    }
+
+    // 在消息树中查找节点
+    function findMessageNode(nodeId) {
+        return chatHistory.messages.find(msg => msg.id === nodeId);
+    }
+
+    // 添加消息到树中
+    function addMessageToTree(role, content, parentId = null) {
+        const node = createMessageNode(role, content, parentId);
+        chatHistory.messages.push(node);
+        
+        if (parentId) {
+            const parentNode = findMessageNode(parentId);
+            if (parentNode) {
+                parentNode.children.push(node.id);
+            }
+        }
+
+        if (!chatHistory.root) {
+            chatHistory.root = node.id;
+        }
+
+        chatHistory.currentNode = node.id;
+        return node;
+    }
+
+    // 获取当前对话的消息链
+    function getCurrentConversationChain() {
+        const chain = [];
+        let currentId = chatHistory.currentNode;
+
+        while (currentId) {
+            const node = findMessageNode(currentId);
+            if (!node) break;
+            chain.unshift(node);
+            currentId = node.parentId;
+        }
+
+        return chain;
+    }
 
     // 添加公共的图片处理函数
     function processImageTags(content) {
@@ -208,8 +264,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 content: messageContent
             };
 
-            // 构建消息数组（不包括当前用户消息）
-            const messages = [...chatHistory.slice(0, -1)];  // 排除刚刚添加的用户消息
+            // 获取当前对话链
+            const conversationChain = getCurrentConversationChain();
 
             // 添加系统消息
             const systemMessage = {
@@ -220,10 +276,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }`
             };
 
+            // 构建消息数组
+            const messages = [];
             // 如果是第一条消息或第一条不是系统消息，添加系统消息
-            if (messages.length === 0 || messages[0].role !== "system") {
-                messages.unshift(systemMessage);
+            if (conversationChain.length === 0 || conversationChain[0].role !== "system") {
+                messages.push(systemMessage);
             }
+            // 添加对话链中的消息
+            messages.push(...conversationChain.map(node => ({
+                role: node.role,
+                content: node.content
+            })));
 
             // 更新加载状态消息
             loadingMessage.textContent = '正在等待 AI 回复...';
@@ -352,8 +415,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 renderMathInElement(lastMessage, MATH_DELIMITERS.renderConfig);
 
                 // 更新历史记录
-                if (chatHistory.length > 0) {
-                    chatHistory[chatHistory.length - 1].content = rawText;
+                if (chatHistory.currentNode) {
+                    const currentNode = findMessageNode(chatHistory.currentNode);
+                    if (currentNode) {
+                        currentNode.content = rawText;
+                    }
                 }
 
                 // 根据shouldAutoScroll决定是否滚动
@@ -560,10 +626,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // 更新聊天历史
         if (!skipHistory) {
-            chatHistory.push({
-                role: sender === 'user' ? 'user' : 'assistant',
-                content: processImageTags(text)
-            });
+            const processedContent = processImageTags(text);
+            const parentId = chatHistory.currentNode;
+            const node = addMessageToTree(
+                sender === 'user' ? 'user' : 'assistant',
+                processedContent,
+                parentId
+            );
+            
+            // 为消息div添加节点ID
+            messageDiv.setAttribute('data-message-id', node.id);
+            
             if (sender === 'ai') {
                 messageDiv.classList.add('updating');
             }
@@ -1097,7 +1170,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 清空聊天容器
         chatContainer.innerHTML = '';
         // 清空当前页面的聊天历史记录
-        chatHistory = [];
+        chatHistory = {
+            messages: [],
+            root: null,
+            currentNode: null
+        };
     }
 
     const clearChat = document.getElementById('clear-chat');
