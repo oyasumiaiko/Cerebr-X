@@ -1131,38 +1131,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // 修改快速总结功能
-    async function performQuickSummary(selectedContent = null) {
+    async function performQuickSummary(webpageSelection = null) {
         const wasTemporaryMode = isTemporaryMode;
         try {
             // 检查焦点是否在侧栏内
             const isSidebarFocused = document.hasFocus();
             const sidebarSelection = window.getSelection().toString().trim();
 
-            console.log('isSidebarFocused:', isSidebarFocused);
-            console.log('sidebarSelection:', sidebarSelection);
+            // 获取选中的文本内容
+            const selectedText = (isSidebarFocused && sidebarSelection) ? 
+                sidebarSelection : 
+                webpageSelection?.trim() || '';
 
-            // 只有当焦点在侧栏内且有选中文本时，才使用侧栏的选中文本
-            if (isSidebarFocused && sidebarSelection) {
-                messageInput.textContent = sidebarSelection;
-                await sendMessage();
-                return;
-            }
-
-
-            // 关闭设置菜单
-            toggleSettingsMenu(false);
-
-            // 构建总结请求
-            const trimmedText = selectedContent?.trim() || '';
-            const isQuestion = trimmedText.endsWith('?') ||
-                trimmedText.endsWith('？') ||
-                trimmedText.endsWith('吗');
             const currentModel = apiConfigs[selectedConfigIndex]?.modelName || '';
             const isSearchModel = currentModel.endsWith('-search');
 
-            if (trimmedText) {
-                if (isSearchModel) messageInput.textContent = `GoogleSearch, 解释: "${trimmedText}"`;
-                else messageInput.textContent = isQuestion ? `"${trimmedText}"` : `"${trimmedText}"是什么？`;
+            if (selectedText) {
+                messageInput.textContent = isSearchModel ? 
+                    `GoogleSearch, 解释: "${selectedText}"` : 
+                    `"${selectedText}"是什么？`;
             } else {
                 if (wasTemporaryMode) {
                     exitTemporaryMode();
