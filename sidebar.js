@@ -152,6 +152,140 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+
+    /**
+     * 为消息添加引用标记和来源信息
+     * @param {string} text - 原始消息文本
+     * @param {Object} groundingMetadata - 引用元数据对象
+     * @param {Array<Object>} groundingMetadata.groundingSupports - 引用支持数组
+     * @param {Object} groundingMetadata.groundingSupports[].segment - 文本片段对象
+     * @param {string} groundingMetadata.groundingSupports[].segment.text - 需要添加引用的文本
+     * @param {Array<number>} groundingMetadata.groundingSupports[].groundingChunkIndices - 引用块索引数组
+     * @param {Array<number>} groundingMetadata.groundingSupports[].confidenceScores - 置信度分数数组
+     * @param {Array<Object>} groundingMetadata.groundingChunks - 引用块数组
+     * @param {Object} groundingMetadata.groundingChunks[].web - 网页引用信息
+     * @param {string} groundingMetadata.groundingChunks[].web.title - 网页标题
+     * @param {string} groundingMetadata.groundingChunks[].web.uri - 网页URL
+     * @param {Array<string>} groundingMetadata.webSearchQueries - 网页搜索查询数组
+     * @returns {(string|Object)} 如果没有引用信息返回原文本，否则返回包含处理后文本和引用信息的对象
+     * @returns {string} returns.text - 处理后的文本，包含引用标记占位符
+     * @returns {Array<Object>} returns.htmlElements - HTML元素数组，用于替换占位符
+     * @returns {Array<Object>} returns.htmlElements[].placeholder - 占位符字符串
+     * @returns {string} returns.htmlElements[].html - 用于替换占位符的HTML字符串
+     * @returns {Array<Object>} returns.sources - 排序后的引用来源数组
+     * @returns {number} returns.sources[].refNumber - 引用编号
+     * @returns {string} returns.sources[].domain - 来源网站域名
+     * @returns {string} returns.sources[].url - 来源URL
+     * @returns {Array<string>} returns.webSearchQueries - 网页搜索查询数组
+     */
+    function addGroundingToMessage(text, groundingMetadata) {
+        if (!groundingMetadata?.groundingSupports) return text;
+
+        let markedText = text;
+        const htmlElements = [];
+        const orderedSources = [];
+        const webSearchQueries = groundingMetadata.webSearchQueries || [];
+        
+        // 创建URL到引用编号的映射
+        const urlToRefNumber = new Map();
+        let nextRefNumber = 1;
+
+        // 记录每个文本片段在原文中的位置
+        const textPositions = groundingMetadata.groundingSupports
+            .filter(support => support.segment?.text)
+            .map(support => {
+                const pos = text.indexOf(support.segment.text);
+                return {
+                    support,
+                    position: pos >= 0 ? pos : Number.MAX_SAFE_INTEGER
+                };
+            })
+            .sort((a, b) => a.position - b.position);
+
+        textPositions.forEach(({support}, index) => {
+            const placeholder = `😎REF_${index + 1}😎`;
+            
+            // 转义正则表达式特殊字符
+            const escapedText = support.segment.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(escapedText, 'g');
+            
+            // 收集引用信息
+            const sourceInfo = {
+                sources: [],
+                confidence: support.confidenceScores || []
+            };
+
+            // 收集来源信息
+            if (support.groundingChunkIndices?.length > 0) {
+                support.groundingChunkIndices.forEach(chunkIndex => {
+                    const chunk = groundingMetadata.groundingChunks[chunkIndex];
+                    if (chunk?.web) {
+                        sourceInfo.sources.push({
+                            title: chunk.web.title,
+                            url: chunk.web.uri
+                        });
+                    }
+                });
+            }
+
+            // 获取或分配引用编号
+            const firstUrl = sourceInfo.sources[0]?.url;
+            let refNumber;
+            if (firstUrl) {
+                if (!urlToRefNumber.has(firstUrl)) {
+                    urlToRefNumber.set(firstUrl, nextRefNumber++);
+                    // 添加到有序来源列表
+                    try {
+                        orderedSources.push({
+                            refNumber: urlToRefNumber.get(firstUrl),
+                            domain: sourceInfo.sources[0].title,
+                            url: firstUrl
+                        });
+                    } catch (e) {
+                        console.error('URL解析错误:', e);
+                    }
+                }
+                refNumber = urlToRefNumber.get(firstUrl);
+            } else {
+                refNumber = nextRefNumber++;
+            }
+            
+            const refMark = `[${refNumber}]`;
+
+            // 构建引用标记的HTML
+            const tooltipContent = `
+                <div class="reference-tooltip">
+                    ${sourceInfo.sources.map(source => `
+                        <a href="${source.url}" target="_blank">${source.title}</a>
+                    `).join('')}
+                    ${sourceInfo.confidence.length > 0 ? `
+                        <div class="tooltip-confidence">
+                            置信度: ${sourceInfo.confidence.map(score => 
+                                Math.round(score * 100) + '%'
+                            ).join(' | ')}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+
+            const refLink = `<a class="reference-mark" href="${sourceInfo.sources[0]?.url || '#'}" target="_blank">${refMark}${tooltipContent}</a>`;
+            
+            // 替换文本并添加引用标记
+            markedText = markedText.replace(regex, `$&${placeholder}`);
+            htmlElements.push({
+                placeholder,
+                html: refLink
+            });
+        });
+
+        return {
+            text: markedText,
+            htmlElements,
+            sources: orderedSources.sort((a, b) => a.refNumber - b.refNumber),
+            webSearchQueries
+        };
+    }
+
     async function sendMessage() {
         shouldAutoScroll = true; // 新消息开始时重置自动滚动状态
         const message = messageInput.textContent.trim();
@@ -338,7 +472,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                                     hasStartedResponse = true;
                                 }
                                 aiResponse += data.choices[0].delta.content;
-                                updateAIMessage(aiResponse);
+                                updateAIMessage(aiResponse, data.choices?.[0]?.groundingMetadata);
                             }
                         } catch (e) {
                             console.error('解析响应出错:', e);
@@ -369,7 +503,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    function updateAIMessage(text) {
+    /**
+     * 更新AI消息内容
+     * @param {string} text - 消息文本内容
+     * @param {Object|null} groundingMetadata - 引用元数据对象，包含引用信息
+     */
+    function updateAIMessage(text, groundingMetadata) {
         const lastMessage = chatContainer.querySelector('.ai-message:last-child');
         let rawText = text;
 
@@ -381,8 +520,21 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // 更新原始文本属性
                 lastMessage.setAttribute('data-original-text', text);
 
+                let processedText = text;
+                let htmlElements = [];
+
+                // 处理引用标记和来源信息(如果存在)
+                if (groundingMetadata) {
+                    const processedResult = addGroundingToMessage(text, groundingMetadata);
+                    if (typeof processedResult === 'object') {
+                        processedText = processedResult.text;
+                        htmlElements = processedResult.htmlElements;
+                    }
+                }
+
                 // 处理数学公式和Markdown
-                lastMessage.innerHTML = processMathAndMarkdown(text);
+                let renderedHtml = processMathAndMarkdown(processedText);
+                lastMessage.innerHTML = renderedHtml;
 
                 // 处理新渲染的链接
                 lastMessage.querySelectorAll('a').forEach(link => {
@@ -397,6 +549,36 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // 渲染LaTeX公式
                 renderMathInElement(lastMessage, MATH_DELIMITERS.renderConfig);
+
+
+                if (groundingMetadata) {
+                    // 替换引用标记占位符为HTML元素
+                    if (htmlElements && htmlElements.length > 0) {
+                        htmlElements.forEach(element => {
+                            const placeholder = element.placeholder;
+                            const html = element.html;
+                            lastMessage.innerHTML = lastMessage.innerHTML.replace(placeholder, html);
+                        });
+                    }
+
+                    // 添加引用来源列表
+                    const processedResult = addGroundingToMessage(text, groundingMetadata);
+                    if (typeof processedResult === 'object' && processedResult.sources && processedResult.sources.length > 0) {
+                        const sourcesList = document.createElement('div');
+                        sourcesList.className = 'sources-list';
+                        sourcesList.innerHTML = '<h4>参考来源：</h4>';
+                        const ul = document.createElement('ul');
+                        
+                        processedResult.sources.forEach(source => {
+                            const li = document.createElement('li');
+                            li.innerHTML = `[${source.refNumber}] <a href="${source.url}" target="_blank">${source.domain}</a>`;
+                            ul.appendChild(li);
+                        });
+                        
+                        sourcesList.appendChild(ul);
+                        lastMessage.appendChild(sourcesList);
+                    }
+                }
 
                 // 更新历史记录
                 if (chatHistory.currentNode) {

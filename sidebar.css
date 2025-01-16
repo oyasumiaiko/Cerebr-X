@@ -1244,3 +1244,99 @@ body.temporary-mode::after {
     background-color: var(--cerebr-message-user-bg);
     color: #ff4d4d;
 }
+
+/* 引用标记样式 */
+.reference-mark {
+    display: inline-flex;
+    align-items: center;
+    color: #0366d6;
+    text-decoration: none;
+    font-size: 0.85em;
+    position: relative;
+    margin: 0 1px;
+    padding: 0 2px;
+    border-radius: 3px;
+    background: color-mix(in srgb, #0366d6 10%, transparent);
+    transition: all 0.2s ease;
+}
+
+.reference-mark:hover {
+    background: color-mix(in srgb, #0366d6 20%, transparent);
+    text-decoration: none;
+}
+
+/* 工具提示样式 */
+.reference-tooltip {
+    position: fixed;
+    background: var(--cerebr-bg-color);
+    border: 1px solid color-mix(in srgb, var(--cerebr-text-color) 20%, transparent);
+    border-radius: 6px;
+    padding: 8px;
+    min-width: 200px;
+    max-width: 300px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease;
+    z-index: 1000;
+    backdrop-filter: blur(var(--cerebr-blur-radius));
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.reference-mark:hover .reference-tooltip {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* 添加JavaScript事件处理所需的类 */
+.reference-tooltip.visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+.reference-tooltip a {
+    color: #0366d6;
+    text-decoration: none;
+    padding: 4px 6px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    font-size: 0.9em;
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.reference-tooltip a:hover {
+    background: color-mix(in srgb, var(--cerebr-message-ai-bg) 70%, transparent);
+}
+
+.tooltip-confidence {
+    font-size: 0.85em;
+    color: color-mix(in srgb, var(--cerebr-text-color) 70%, transparent);
+    padding: 4px 6px;
+    border-top: 1px solid color-mix(in srgb, var(--cerebr-text-color) 10%, transparent);
+    margin-top: 2px;
+}
+
+/* 深色模式适配 */
+@media (prefers-color-scheme: dark) {
+    .reference-mark {
+        color: #58a6ff;
+        background: color-mix(in srgb, #58a6ff 10%, transparent);
+    }
+
+    .reference-mark:hover {
+        background: color-mix(in srgb, #58a6ff 20%, transparent);
+    }
+
+    .reference-tooltip a {
+        color: #58a6ff;
+    }
+
+    .reference-tooltip {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+}
