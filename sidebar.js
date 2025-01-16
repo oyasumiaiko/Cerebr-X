@@ -209,66 +209,71 @@ document.addEventListener('DOMContentLoaded', async () => {
             const escapedText = support.segment.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const regex = new RegExp(escapedText, 'g');
             
-            // 收集引用信息
-            const sourceInfo = {
-                sources: [],
-                confidence: support.confidenceScores || []
-            };
-
-            // 收集来源信息
+            // 收集该文本片段的所有引用源和对应的置信度
+            const sourceRefs = [];
             if (support.groundingChunkIndices?.length > 0) {
-                support.groundingChunkIndices.forEach(chunkIndex => {
+                support.groundingChunkIndices.forEach((chunkIndex, idx) => {
                     const chunk = groundingMetadata.groundingChunks[chunkIndex];
+                    const confidence = support.confidenceScores?.[idx] || 0;
+                    
                     if (chunk?.web) {
-                        sourceInfo.sources.push({
+                        const url = chunk.web.uri;
+                        if (!urlToRefNumber.has(url)) {
+                            urlToRefNumber.set(url, nextRefNumber++);
+                        }
+                        sourceRefs.push({
+                            refNumber: urlToRefNumber.get(url),
                             title: chunk.web.title,
-                            url: chunk.web.uri
+                            url: url,
+                            confidence: confidence
                         });
                     }
                 });
             }
-
-            // 获取或分配引用编号
-            const firstUrl = sourceInfo.sources[0]?.url;
-            let refNumber;
-            if (firstUrl) {
-                if (!urlToRefNumber.has(firstUrl)) {
-                    urlToRefNumber.set(firstUrl, nextRefNumber++);
-                    // 添加到有序来源列表
-                    try {
-                        orderedSources.push({
-                            refNumber: urlToRefNumber.get(firstUrl),
-                            domain: sourceInfo.sources[0].title,
-                            url: firstUrl
-                        });
-                    } catch (e) {
-                        console.error('URL解析错误:', e);
-                    }
-                }
-                refNumber = urlToRefNumber.get(firstUrl);
-            } else {
-                refNumber = nextRefNumber++;
-            }
             
-            const refMark = `[${refNumber}]`;
-
-            // 构建引用标记的HTML
+            // 按引用编号排序
+            sourceRefs.sort((a, b) => a.refNumber - b.refNumber);
+            
+            // 生成分别可点击的引用标记
+            const refMark = sourceRefs.map(ref => 
+                `<a href="${ref.url}" 
+                    class="reference-number" 
+                    target="_blank" 
+                    data-ref-number="${ref.refNumber}"
+                    title="${ref.title}">[${ref.refNumber}]</a>`
+            ).join('');
+            
+            // 构建包含所有源信息的tooltip
             const tooltipContent = `
                 <div class="reference-tooltip">
-                    ${sourceInfo.sources.map(source => `
-                        <a href="${source.url}" target="_blank">${source.title}</a>
-                    `).join('')}
-                    ${sourceInfo.confidence.length > 0 ? `
-                        <div class="tooltip-confidence">
-                            置信度: ${sourceInfo.confidence.map(score => 
-                                Math.round(score * 100) + '%'
-                            ).join(' | ')}
+                    ${sourceRefs.map(ref => `
+                        <div class="reference-source">
+                            <span class="ref-number">[${ref.refNumber}]</span>
+                            <a href="${ref.url}" target="_blank">${ref.title}</a>
+                            <span class="confidence">${Math.round(ref.confidence * 100)}%</span>
                         </div>
-                    ` : ''}
+                    `).join('')}
                 </div>
             `;
 
-            const refLink = `<a class="reference-mark" href="${sourceInfo.sources[0]?.url || '#'}" target="_blank">${refMark}${tooltipContent}</a>`;
+            // 包装引用标记组
+            const refLink = `
+                <span class="reference-mark-group">
+                    ${refMark}
+                    <span class="reference-tooltip-wrapper">${tooltipContent}</span>
+                </span>
+            `;
+            
+            // 添加到有序来源列表
+            sourceRefs.forEach(ref => {
+                if (!orderedSources.some(s => s.refNumber === ref.refNumber)) {
+                    orderedSources.push({
+                        refNumber: ref.refNumber,
+                        domain: ref.title,
+                        url: ref.url
+                    });
+                }
+            });
             
             // 替换文本并添加引用标记
             markedText = markedText.replace(regex, `$&${placeholder}`);
