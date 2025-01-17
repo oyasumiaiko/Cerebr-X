@@ -442,7 +442,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 },
                 body: JSON.stringify({
                     model: config.modelName || "gpt-4o",
-                    messages: [...messages, userMessage],
+                    messages: messages,  // 直接使用messages，不再添加userMessage
                     stream: true,
                     temperature: config.temperature || 1,
                     top_p: 0.95,
