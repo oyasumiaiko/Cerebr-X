@@ -556,7 +556,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // 渲染LaTeX公式
                 renderMathInElement(lastMessage, MATH_DELIMITERS.renderConfig);
 
-
                 if (groundingMetadata) {
                     // 替换引用标记占位符为HTML元素
                     if (htmlElements && htmlElements.length > 0) {
@@ -574,9 +573,65 @@ document.addEventListener('DOMContentLoaded', async () => {
                         sourcesList.innerHTML = '<h4>参考来源：</h4>';
                         const ul = document.createElement('ul');
                         
+                        // 计算每个来源的平均置信度
+                        const sourceConfidences = new Map();
+                        const sourceConfidenceCounts = new Map();
+                        
+                        groundingMetadata.groundingSupports.forEach(support => {
+                            if (support.groundingChunkIndices && support.confidenceScores) {
+                                support.groundingChunkIndices.forEach((chunkIndex, idx) => {
+                                    const chunk = groundingMetadata.groundingChunks[chunkIndex];
+                                    const confidence = support.confidenceScores[idx] || 0;
+                                    
+                                    if (chunk?.web?.uri) {
+                                        const url = chunk.web.uri;
+                                        sourceConfidences.set(url, (sourceConfidences.get(url) || 0) + confidence);
+                                        sourceConfidenceCounts.set(url, (sourceConfidenceCounts.get(url) || 0) + 1);
+                                    }
+                                });
+                            }
+                        });
+                        
                         processedResult.sources.forEach(source => {
                             const li = document.createElement('li');
-                            li.innerHTML = `[${source.refNumber}] <a href="${source.url}" target="_blank">${source.domain}</a>`;
+                            const totalConfidence = sourceConfidences.get(source.url) || 0;
+                            const count = sourceConfidenceCounts.get(source.url) || 1;
+                            const avgConfidence = (totalConfidence / count) * 100;
+                            
+                            // 创建置信度进度条容器
+                            const confidenceBar = document.createElement('div');
+                            confidenceBar.className = 'confidence-bar';
+                            
+                            // 创建进度条
+                            const progressBar = document.createElement('div');
+                            progressBar.className = 'progress-bar';
+                            progressBar.style.width = `${avgConfidence}%`;
+                            
+                            // 根据置信度设置颜色
+                            if (avgConfidence >= 80) {
+                                progressBar.classList.add('high-confidence');
+                            } else if (avgConfidence >= 50) {
+                                progressBar.classList.add('medium-confidence');
+                            } else {
+                                progressBar.classList.add('low-confidence');
+                            }
+                            
+                            // 添加进度条到容器
+                            confidenceBar.appendChild(progressBar);
+                            
+                            li.innerHTML = `
+                                <div class="source-item">
+                                    <div class="source-info">
+                                        [${source.refNumber}] <a href="${source.url}" target="_blank">${source.domain}</a>
+                                        <span class="confidence-text">${avgConfidence.toFixed(1)}%</span>
+                                    </div>
+                                </div>
+                            `;
+                            
+                            // 将进度条插入到source-item中
+                            const sourceItem = li.querySelector('.source-item');
+                            sourceItem.appendChild(confidenceBar);
+                            
                             ul.appendChild(li);
                         });
                         

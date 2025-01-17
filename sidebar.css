@@ -1414,3 +1414,86 @@ body.temporary-mode::after {
     background-color: var(--cerebr-hover-color);
     border-bottom-width: 2px;
 }
+
+.sources-list {
+    margin-top: 1em;
+    padding: 8px;
+    background: var(--cerebr-hover-color);
+    border-radius: 6px;
+}
+
+.sources-list h4 {
+    margin: 0 0 8px 0;
+    font-size: 0.9em;
+    opacity: 0.8;
+}
+
+.sources-list ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.sources-list li {
+    margin: 4px 0;
+}
+
+.source-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.source-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.confidence-text {
+    margin-left: auto;
+    font-size: 0.85em;
+    opacity: 0.8;
+}
+
+.confidence-bar {
+    height: 4px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 2px;
+}
+
+.progress-bar {
+    height: 100%;
+    transition: width 0.3s ease;
+}
+
+.progress-bar.high-confidence {
+    background: #34c759;
+}
+
+.progress-bar.medium-confidence {
+    background: #ff9500;
+}
+
+.progress-bar.low-confidence {
+    background: #ff3b30;
+}
+
+/* 深色主题适配 */
+:root.dark-theme .confidence-bar {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+:root.dark-theme .progress-bar.high-confidence {
+    background: #32d74b;
+}
+
+:root.dark-theme .progress-bar.medium-confidence {
+    background: #ff9f0a;
+}
+
+:root.dark-theme .progress-bar.low-confidence {
+    background: #ff453a;
+}
