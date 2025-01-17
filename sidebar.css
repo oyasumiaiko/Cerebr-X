@@ -635,6 +635,7 @@ input:checked + .slider:before {
 .message p {
     margin: 0;
     line-height: 1.5;
+    position: relative;
 }
 
 .message p + p {
@@ -1246,97 +1247,108 @@ body.temporary-mode::after {
 }
 
 /* 引用标记样式 */
-.reference-mark {
-    display: inline-flex;
-    align-items: center;
-    color: #0366d6;
-    text-decoration: none;
-    font-size: 0.85em;
+.reference-mark-group {
+    margin: 0px -0.25em;
     position: relative;
-    margin: 0 1px;
-    padding: 0 2px;
-    border-radius: 3px;
-    background: color-mix(in srgb, #0366d6 10%, transparent);
-    transition: all 0.2s ease;
 }
 
-.reference-mark:hover {
-    background: color-mix(in srgb, #0366d6 20%, transparent);
-    text-decoration: none;
-}
-
-/* 工具提示样式 */
-.reference-tooltip {
-    position: fixed;
-    background: var(--cerebr-bg-color);
-    border: 1px solid color-mix(in srgb, var(--cerebr-text-color) 20%, transparent);
-    border-radius: 6px;
-    padding: 8px;
-    min-width: 200px;
-    max-width: 300px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.2s ease;
-    z-index: 1000;
-    backdrop-filter: blur(var(--cerebr-blur-radius));
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.reference-mark:hover .reference-tooltip {
-    opacity: 1;
-    visibility: visible;
-}
-
-/* 添加JavaScript事件处理所需的类 */
-.reference-tooltip.visible {
-    opacity: 1;
-    visibility: visible;
-}
-
-.reference-tooltip a {
+.reference-number {
     color: #0366d6;
     text-decoration: none;
-    padding: 4px 6px;
-    border-radius: 4px;
-    transition: all 0.2s ease;
     font-size: 0.9em;
+}
+
+.reference-number:hover {
+    text-decoration: underline;
+    background-color: rgba(3, 102, 214, 0.1);
+}
+
+.reference-tooltip-wrapper {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-0.4em);
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 0px 2px rgba(0, 0, 0, 0.1);
+    padding: 0.1em 0.4em;
+    z-index: 1000;
+    font-size: 0.8em;
+}
+
+.reference-mark-group:hover .reference-tooltip-wrapper {
     display: block;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
-.reference-tooltip a:hover {
-    background: color-mix(in srgb, var(--cerebr-message-ai-bg) 70%, transparent);
+.reference-source {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
 }
 
-.tooltip-confidence {
-    font-size: 0.85em;
-    color: color-mix(in srgb, var(--cerebr-text-color) 70%, transparent);
-    padding: 4px 6px;
-    border-top: 1px solid color-mix(in srgb, var(--cerebr-text-color) 10%, transparent);
-    margin-top: 2px;
+.reference-source:not(:last-child) {
+    border-bottom: 1px solid #eee;
 }
 
-/* 深色模式适配 */
+.ref-number {
+    color: #666;
+}
+
+.confidence {
+    color: #888;
+    margin-left: auto;
+    min-width: 3.5em;
+    text-align: end;
+}
+
+/* 暗色主题支持 */
 @media (prefers-color-scheme: dark) {
-    .reference-mark {
+    .reference-tooltip-wrapper {
+        background: #1f1f1f;
+        border-color: #333;
+    }
+    
+    .reference-source:not(:last-child) {
+        border-bottom-color: #333;
+    }
+    
+    .reference-number {
         color: #58a6ff;
-        background: color-mix(in srgb, #58a6ff 10%, transparent);
     }
+    
+    .ref-number {
+        color: #999;
+    }
+}
 
-    .reference-mark:hover {
-        background: color-mix(in srgb, #58a6ff 20%, transparent);
-    }
+.reference-quote {
+    display: block;
+    padding: 8px;
+    margin-bottom: 8px;
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 4px;
+    font-size: 0.9em;
+    color: var(--cerebr-text-color);
+    border-left: 3px solid rgba(0, 122, 255, 0.5);
+}
 
-    .reference-tooltip a {
-        color: #58a6ff;
+/* 深色主题支持 */
+@media (prefers-color-scheme: dark) {
+    .reference-quote {
+        background: rgba(255, 255, 255, 0.05);
     }
+}
 
-    .reference-tooltip {
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    }
+.reference-number.superscript {
+    font-size: 0.75em;
+    display: inline-block;
+    position: relative;
+    transform: translateY(-0.5em);
+    text-decoration: none;
+}
+
+.reference-number.superscript:hover {
+    text-decoration: underline;
 }

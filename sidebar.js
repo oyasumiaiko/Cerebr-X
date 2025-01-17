@@ -203,7 +203,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             .sort((a, b) => a.position - b.position);
 
         textPositions.forEach(({support}, index) => {
-            const placeholder = `😎REF_${index + 1}😎`;
+            const placeholder = ` 😎REF_${index}😎`;
             
             // 转义正则表达式特殊字符
             const escapedText = support.segment.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -234,35 +234,42 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 按引用编号排序
             sourceRefs.sort((a, b) => a.refNumber - b.refNumber);
             
-            // 生成分别可点击的引用标记
+            // 生成引用标记
             const refMark = sourceRefs.map(ref => 
-                `<a href="${ref.url}" 
-                    class="reference-number" 
+                `<a href="${encodeURI(ref.url)}" 
+                    class="reference-number superscript" 
                     target="_blank" 
                     data-ref-number="${ref.refNumber}"
-                    title="${ref.title}">[${ref.refNumber}]</a>`
+                    >[${ref.refNumber}]</a>`
             ).join('');
             
             // 构建包含所有源信息的tooltip
             const tooltipContent = `
-                <div class="reference-tooltip">
+                <span class="reference-tooltip">
                     ${sourceRefs.map(ref => `
-                        <div class="reference-source">
+                        <span class="reference-source">
                             <span class="ref-number">[${ref.refNumber}]</span>
-                            <a href="${ref.url}" target="_blank">${ref.title}</a>
-                            <span class="confidence">${Math.round(ref.confidence * 100)}%</span>
-                        </div>
+                            <a href="${encodeURI(ref.url)}" target="_blank">${ref.title}</a>
+                            <span class="confidence">${(ref.confidence * 100).toFixed(1)}%</span>
+                        </span>
                     `).join('')}
-                </div>
+                </span>
             `;
 
             // 包装引用标记组
-            const refLink = `
+            const refGroup = `
                 <span class="reference-mark-group">
                     ${refMark}
                     <span class="reference-tooltip-wrapper">${tooltipContent}</span>
                 </span>
             `;
+            
+            // 替换文本并添加引用标记
+            markedText = markedText.replace(regex, `$&${placeholder}`);
+            htmlElements.push({
+                placeholder,
+                html: refGroup
+            });
             
             // 添加到有序来源列表
             sourceRefs.forEach(ref => {
@@ -273,13 +280,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                         url: ref.url
                     });
                 }
-            });
-            
-            // 替换文本并添加引用标记
-            markedText = markedText.replace(regex, `$&${placeholder}`);
-            htmlElements.push({
-                placeholder,
-                html: refLink
             });
         });
         
@@ -527,10 +527,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 let processedText = text;
                 let htmlElements = [];
+                let processedResult = text;
 
                 // 处理引用标记和来源信息(如果存在)
                 if (groundingMetadata) {
-                    const processedResult = addGroundingToMessage(text, groundingMetadata);
+                    processedResult = addGroundingToMessage(text, groundingMetadata);
                     if (typeof processedResult === 'object') {
                         processedText = processedResult.text;
                         htmlElements = processedResult.htmlElements;
@@ -567,7 +568,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
 
                     // 添加引用来源列表
-                    const processedResult = addGroundingToMessage(text, groundingMetadata);
                     if (typeof processedResult === 'object' && processedResult.sources && processedResult.sources.length > 0) {
                         const sourcesList = document.createElement('div');
                         sourcesList.className = 'sources-list';
