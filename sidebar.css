@@ -1467,18 +1467,7 @@ body.temporary-mode::after {
 .progress-bar {
     height: 100%;
     transition: width 0.3s ease;
-}
-
-.progress-bar.high-confidence {
-    background: #34c759;
-}
-
-.progress-bar.medium-confidence {
-    background: #ff9500;
-}
-
-.progress-bar.low-confidence {
-    background: #ff3b30;
+    background: color-mix(in srgb, var(--cerebr-text-color) 60%, transparent);
 }
 
 /* 深色主题适配 */
@@ -1486,14 +1475,62 @@ body.temporary-mode::after {
     background: rgba(255, 255, 255, 0.1);
 }
 
-:root.dark-theme .progress-bar.high-confidence {
-    background: #32d74b;
+:root.dark-theme .progress-bar {
+    background: color-mix(in srgb, var(--cerebr-text-color) 60%, transparent);
 }
 
-:root.dark-theme .progress-bar.medium-confidence {
-    background: #ff9f0a;
+/* Web Search Queries Section */
+.search-queries-list {
+    margin-top: 0.5em;
+    padding: 8px;
+    background: var(--cerebr-hover-color);
+    border-radius: 6px;
 }
 
-:root.dark-theme .progress-bar.low-confidence {
-    background: #ff453a;
+.search-queries-list h4 {
+    margin: 0 0 8px 0;
+    font-size: 0.9em;
+    opacity: 0.8;
+}
+
+.search-queries-list ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.search-queries-list li {
+    margin: 4px 0;
+    padding: 6px 8px;
+    background: var(--cerebr-message-ai-bg);
+    border-radius: 4px;
+    font-size: 0.9em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.search-queries-list li:hover {
+    background: var(--cerebr-message-user-bg);
+    /* transform: translateX(2px); */
+}
+
+.search-queries-list li:active {
+    /* transform: translateX(1px); */
+}
+
+.search-queries-list li::before {
+    content: '🔍';
+    opacity: 0.7;
+}
+
+/* Dark theme support */
+:root.dark-theme .search-queries-list li {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+:root.dark-theme .search-queries-list li:hover {
+    background: rgba(255, 255, 255, 0.1);
 }

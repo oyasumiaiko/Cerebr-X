@@ -607,15 +607,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                             progressBar.className = 'progress-bar';
                             progressBar.style.width = `${avgConfidence}%`;
                             
-                            // 根据置信度设置颜色
-                            if (avgConfidence >= 80) {
-                                progressBar.classList.add('high-confidence');
-                            } else if (avgConfidence >= 50) {
-                                progressBar.classList.add('medium-confidence');
-                            } else {
-                                progressBar.classList.add('low-confidence');
-                            }
-                            
                             // 添加进度条到容器
                             confidenceBar.appendChild(progressBar);
                             
@@ -637,6 +628,27 @@ document.addEventListener('DOMContentLoaded', async () => {
                         
                         sourcesList.appendChild(ul);
                         lastMessage.appendChild(sourcesList);
+
+                        // Add web search queries section if available
+                        if (processedResult.webSearchQueries && processedResult.webSearchQueries.length > 0) {
+                            const searchQueriesList = document.createElement('div');
+                            searchQueriesList.className = 'search-queries-list';
+                            searchQueriesList.innerHTML = '<h4>搜索查询：</h4>';
+                            const ul = document.createElement('ul');
+                            
+                            processedResult.webSearchQueries.forEach(query => {
+                                const li = document.createElement('li');
+                                li.textContent = query;
+                                li.addEventListener('click', () => {
+                                    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+                                    window.open(searchUrl, '_blank');
+                                });
+                                ul.appendChild(li);
+                            });
+                            
+                            searchQueriesList.appendChild(ul);
+                            lastMessage.appendChild(searchQueriesList);
+                        }
                     }
                 }
 
