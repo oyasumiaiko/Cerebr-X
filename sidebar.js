@@ -704,6 +704,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
 
+        // 设置表格渲染器
+        const renderer = new marked.Renderer();
+        renderer.table = function(header, body) {
+            return `<table class="markdown-table">\n<thead>\n${header}</thead>\n<tbody>\n${body}</tbody>\n</table>\n`;
+        };
+        marked.use({ renderer });
+
         // 渲染Markdown
         const renderedMarkdown = marked.parse(processedText);
 

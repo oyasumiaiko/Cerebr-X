@@ -11,6 +11,9 @@
     --cerebr-message-ai-bg: rgba(245, 245, 245, var(--cerebr-opacity));
     --cerebr-input-bg: rgba(248, 248, 248, var(--cerebr-opacity));
     --cerebr-icon-color: #666;
+    --cerebr-border-color: #e1e4e8;
+    --cerebr-hover-color: rgba(0, 0, 0, 0.02);
+    --cerebr-background-color: #ffffff;
 }
 
 /* 深色主题变量 */
@@ -22,6 +25,9 @@
     --cerebr-message-ai-bg: rgba(44, 49, 60, var(--cerebr-opacity));
     --cerebr-input-bg: rgba(33, 37, 43, var(--cerebr-opacity));
     --cerebr-icon-color: #abb2bf;
+    --cerebr-border-color: #30363d;
+    --cerebr-hover-color: rgba(255, 255, 255, 0.05);
+    --cerebr-background-color: #21252b;
 }
 
 /* 基础样式 */
@@ -1351,4 +1357,58 @@ body.temporary-mode::after {
 
 .reference-number.superscript:hover {
     text-decoration: underline;
+}
+
+/* 表格样式 */
+.markdown-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+    margin: 1em 0;
+    background-color: var(--cerebr-background-color);
+    border: 1px solid var(--cerebr-border-color);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.markdown-table th,
+.markdown-table td {
+    border: 1px solid var(--cerebr-border-color);
+    padding: 8px 12px;
+    text-align: left;
+}
+
+.markdown-table th {
+    background-color: var(--cerebr-hover-color);
+    font-weight: 600;
+    border-bottom-width: 2px;
+}
+
+/* 移除多余的边框 */
+.markdown-table tr:not(:last-child) td {
+    border-bottom: 1px solid var(--cerebr-border-color);
+}
+
+.markdown-table td:not(:last-child),
+.markdown-table th:not(:last-child) {
+    border-right: 1px solid var(--cerebr-border-color);
+}
+
+.markdown-table tr:nth-child(even) {
+    background-color: var(--cerebr-hover-color);
+}
+
+/* 确保暗色主题下表格边框可见 */
+.dark-theme .markdown-table {
+    border-color: var(--cerebr-border-color);
+}
+
+.dark-theme .markdown-table th,
+.dark-theme .markdown-table td {
+    border-color: var(--cerebr-border-color);
+}
+
+.dark-theme .markdown-table th {
+    background-color: var(--cerebr-hover-color);
+    border-bottom-width: 2px;
 }
