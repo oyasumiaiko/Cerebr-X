@@ -394,16 +394,47 @@ document.addEventListener('DOMContentLoaded', async () => {
             const basePrompt = `数学公式请使用LaTeX表示，行间公式请使用\\[...\\]表示，行内公式请使用\\(...\\)表示，禁止使用$美元符号包裹数学公式。始终使用**中文**回答用户问题。`;
 
             // 搜索模型的额外提示语
-            const searchPrompt = `\n\n当需要获取最新或更准确的信息时，请使用google_search.search功能。搜索时：
-1. 优先使用英文编写搜索词以获得更全面的结果
-2. 每个搜索主题可以用2-3个不同表述的搜索词以提高结果质量
-3. 可以进行10-20次不同的搜索
-4. 搜索词应该简洁、精确、多样化
-5. 根据搜索结果给出深入、全面的中文回答`;
+            const searchPrompt = `\n\n---\n\n当需要获取最新或更准确的信息时，请使用google_search.search功能。搜索前请先思考：
+
+1. 分析主题的关键概念和要素
+2. 确定需要了解的具体方面
+3. 考虑不同的视角和维度
+4. 思考时间跨度和地域范围
+5. 识别可能的专业术语
+
+然后按以下原则设计queries：
+
+1. 结合中英文，大部分使用英文，遵循以下模式：
+   - [核心概念] + [具体方面/属性]
+   - [主题] + [年份/时间范围] + [统计/研究/review]
+   - [专业术语] + [definition/example/application]
+   
+2. 每个要点设计3-4个不同queries：
+   - 使用同义词和相关词
+   - 从一般到具体
+   - 结合不同领域视角
+
+3. 总共可以使用10-20个渐进式queries：
+   - 先搜索基础概念和背景
+   - 再搜索具体细节和案例
+   - 最后搜索最新进展和争议
+
+4. 搜索结果分析和整合：
+   - 交叉验证不同来源
+   - 对比不同观点
+   - 提取关键数据和论据
+   - 总结主流观点和新趋势
+
+即使用户没有明确要求，也要主动搜索以确保信息：
+1. 时效性 - 了解最新发展和变化
+2. 全面性 - 覆盖不同角度和层面
+3. 准确性 - 核实关键信息和数据
+4. 权威性 - 参考可靠来源和专业观点
+5. 客观性 - 平衡不同立场和论据`;
 
             // 网页内容提示语
             const pageContentPrompt = pageContent ? 
-                `\n当前网页内容：\n标题：${pageContent.title}\nURL：${pageContent.url}\n内容：${pageContent.content}` :
+                `\n\n---\n\n当前网页内容：\n标题：${pageContent.title}\nURL：${pageContent.url}\n内容：${pageContent.content}` :
                 '';
 
             // 获取当前模型名称并根据模型类型添加搜索提示语
@@ -1554,7 +1585,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             if (selectedText) {
                 messageInput.textContent = isSearchModel ? 
-                    `google_search, 解释: "${selectedText}"` : 
+                    `编写最少10条多方面、多层次、多角度的queries，使用google_search(queries)工具执行查询，并将信息总结、精炼、组织为维基百科的形式。
+                    解释: "${selectedText}"
+                    使用中文回答。` : 
                     `"${selectedText}"是什么？`;
             } else {
                 if (wasTemporaryMode) {
