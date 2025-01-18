@@ -1551,6 +1551,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             const prompts = promptSettingsManager.getPrompts();
 
             if (selectedText) {
+                // 检查是否需要清空聊天记录
+                const result = await chrome.storage.sync.get(['clearOnSearch']);
+                if (result.clearOnSearch !== false) { // 默认为true
+                    clearChatHistory();
+                }
+                
                 // 使用自定义的划词搜索提示词
                 const prompt = isSearchModel ? 
                     prompts.selection.replace('<SELECTION>', selectedText) :
@@ -1965,7 +1971,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 初始化设置
     async function initSettings() {
         try {
-            const result = await chrome.storage.sync.get(['sidebarWidth', 'fontSize', 'scaleFactor', 'autoScroll']);
+            const result = await chrome.storage.sync.get(['sidebarWidth', 'fontSize', 'scaleFactor', 'autoScroll', 'clearOnSearch']);
             if (result.sidebarWidth) {
                 document.documentElement.style.setProperty('--cerebr-sidebar-width', `${result.sidebarWidth}px`);
                 sidebarWidth.value = result.sidebarWidth;
@@ -1989,6 +1995,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (autoScrollSwitch) {
                     autoScrollSwitch.checked = isAutoScrollEnabled;
                 }
+            }
+            // 初始化划词搜索清空聊天设置
+            const clearOnSearchSwitch = document.getElementById('clear-on-search-switch');
+            if (clearOnSearchSwitch) {
+                clearOnSearchSwitch.checked = result.clearOnSearch !== false; // 默认为true
             }
         } catch (error) {
             console.error('初始化设置失败:', error);
@@ -2092,4 +2103,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             type: 'CLOSE_SIDEBAR'
         }, '*');
     });
+
+    // 添加划词搜索清空聊天开关事件监听
+    const clearOnSearchSwitch = document.getElementById('clear-on-search-switch');
+    if (clearOnSearchSwitch) {
+        clearOnSearchSwitch.addEventListener('change', (e) => {
+            saveSettings('clearOnSearch', e.target.checked);
+        });
+    }
 });

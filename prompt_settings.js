@@ -250,6 +250,9 @@ class PromptSettings {
                     query: this.queryPrompt.value
                 }
             });
+            // 立即关闭设置页面
+            this.promptSettings.classList.remove('visible');
+            
             // 显示保存成功提示
             const saveButton = this.savePromptsButton;
             const originalText = saveButton.textContent;
