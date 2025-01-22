@@ -1,6 +1,12 @@
 // 默认提示词
 const DEFAULT_PROMPTS = {
     system: `数学公式请使用LaTeX表示，行间公式请使用\\[...\\]表示，行内公式请使用\\(...\\)表示，禁止使用$美元符号包裹数学公式。始终使用**中文**回答用户问题。`,
+    image: `如果是图片，请解释图片内容，包括:
+- 图片类型（照片、图表、截图等）
+- 主要内容和主题
+- 关键信息和重点
+
+如果是图片主体是文本内容，首先提取原始文本，提取后翻译成中文。`,
 
     selection: `请根据以下内容的复杂度，编写3-20条多方面、多层次、多角度的queries，使用google_search(queries)工具执行。
 "<SELECTION>"
@@ -116,6 +122,7 @@ class PromptSettings {
         this.pdfPrompt = document.getElementById('pdf-prompt');
         this.summaryPrompt = document.getElementById('summary-prompt');
         this.queryPrompt = document.getElementById('query-prompt');
+        this.imagePrompt = document.getElementById('image-prompt');
 
         // 为每个提示词文本框添加重置按钮
         this.addResetButtons();
@@ -196,7 +203,8 @@ class PromptSettings {
             'system': '系统提示词',
             'pdf': 'PDF提示词',
             'summary': '页面总结提示词',
-            'query': '直接查询提示词'
+            'query': '直接查询提示词',
+            'image': '图片解释提示词'
         };
         return nameMap[promptType] || promptType;
     }
@@ -237,6 +245,7 @@ class PromptSettings {
                 this.pdfPrompt.value = result.prompts.pdf !== undefined ? result.prompts.pdf : DEFAULT_PROMPTS.pdf;
                 this.summaryPrompt.value = result.prompts.summary !== undefined ? result.prompts.summary : DEFAULT_PROMPTS.summary;
                 this.queryPrompt.value = result.prompts.query !== undefined ? result.prompts.query : DEFAULT_PROMPTS.query;
+                this.imagePrompt.value = result.prompts.image !== undefined ? result.prompts.image : DEFAULT_PROMPTS.image;
             } else {
                 // 如果没有保存的设置，使用默认值
                 this.resetPrompts();
@@ -258,7 +267,8 @@ class PromptSettings {
                     system: this.systemPrompt.value,
                     pdf: this.pdfPrompt.value,
                     summary: this.summaryPrompt.value,
-                    query: this.queryPrompt.value
+                    query: this.queryPrompt.value,
+                    image: this.imagePrompt.value
                 }
             });
             // 立即关闭设置页面
@@ -286,6 +296,7 @@ class PromptSettings {
         this.pdfPrompt.value = DEFAULT_PROMPTS.pdf;
         this.summaryPrompt.value = DEFAULT_PROMPTS.summary;
         this.queryPrompt.value = DEFAULT_PROMPTS.query;
+        this.imagePrompt.value = DEFAULT_PROMPTS.image;
     }
 
     // 获取当前提示词
@@ -296,7 +307,8 @@ class PromptSettings {
             system: this.systemPrompt.value,
             pdf: this.pdfPrompt.value,
             summary: this.summaryPrompt.value,
-            query: this.queryPrompt.value
+            query: this.queryPrompt.value,
+            image: this.imagePrompt.value
         };
     }
 }

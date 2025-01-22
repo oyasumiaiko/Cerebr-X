@@ -80,15 +80,33 @@ document.addEventListener('DOMContentLoaded', async () => {
         return node;
     }
 
-    // 获取当前对话的消息链
+    /**
+     * 获取当前对话的完整消息链
+     * 从当前节点开始向上追溯，构建完整的对话历史
+     * 
+     * 实现逻辑:
+     * 1. 创建空数组存储消息链
+     * 2. 从当前节点开始遍历
+     * 3. 通过 parentId 不断向上查找父节点
+     * 4. 将每个节点插入到数组头部,保持对话顺序
+     * 5. 直到找不到父节点为止
+     * 
+     * @returns {Array} 按时间顺序排列的消息节点数组,从最早到最新
+     */
     function getCurrentConversationChain() {
+        // 存储完整的消息链
         const chain = [];
+        // 从当前节点开始
         let currentId = chatHistory.currentNode;
 
+        // 循环向上查找父节点
         while (currentId) {
             const node = findMessageNode(currentId);
+            // 如果节点不存在则中断
             if (!node) break;
+            // 将节点插入到数组头部,保持对话顺序
             chain.unshift(node);
+            // 继续查找父节点
             currentId = node.parentId;
         }
 
@@ -316,6 +334,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 设置处理状态为true
             isProcessingMessage = true;
 
+            // 获取当前提示词设置
+            const prompts = promptSettingsManager.getPrompts();
+
             // 生成新的请求ID
             const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -359,7 +380,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 如果有图片，构建包含文本和图片的数组格式
             if (imageTags.length > 0) {
                 messageContent = [];
-                // 添加文本内容（如果有）
+                // 如果只有图片没有文字，添加默认的图片解释提示词
+                if (!message.trim()) {
+                    messageContent.push({
+                        type: "text", 
+                        text: prompts.image
+                    });
+                }
+                // 添加用户输入的文本内容（如果有）
                 if (message) {
                     messageContent.push({
                         type: "text",
@@ -383,26 +411,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                 messageContent = message;
             }
 
-            // 构建用户消息
-            const userMessage = {
-                role: "user",
-                content: messageContent
-            };
-
             // 获取当前对话链
             const conversationChain = getCurrentConversationChain();
 
             // 网页内容提示语
             const pageContentPrompt = pageContent ? 
-                `\n\n---\n\n当前网页内容：\n标题：${pageContent.title}\nURL：${pageContent.url}\n内容：${pageContent.content}` :
+                `\n\n当前网页内容：\n标题：${pageContent.title}\nURL：${pageContent.url}\n内容：${pageContent.content}` :
                 '';
 
             // 获取当前模型名称并根据模型类型添加搜索提示语
             const currentModel = apiConfigs[selectedConfigIndex]?.modelName || '';
             const isSearchModel = currentModel.endsWith('-search');
-
-            // 获取当前提示词设置
-            const prompts = promptSettingsManager.getPrompts();
 
             // 组合完整的系统消息
             const systemMessage = {
@@ -416,6 +435,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (conversationChain.length === 0 || conversationChain[0].role !== "system") {
                 messages.push(systemMessage);
             }
+
             // 添加对话链中的消息
             messages.push(...conversationChain.map(node => ({
                 role: node.role,
@@ -434,7 +454,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     'X-Request-Id': requestId  // 添加请求ID到header
                 },
                 body: JSON.stringify({
-                    model: config.modelName || "gpt-4o",
+                    model: config.modelName,
                     messages: messages,  // 直接使用messages，不再添加userMessage
                     stream: true,
                     // temperature: config.temperature || 1,
