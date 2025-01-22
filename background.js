@@ -209,7 +209,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 // 简化Service Worker活跃保持
 const HEARTBEAT_INTERVAL = 20000;
 const keepAliveInterval = setInterval(() => {
-    console.log('Service Worker 心跳:', new Date().toISOString());
+    // console.log('Service Worker 心跳:', new Date().toISOString());
 }, HEARTBEAT_INTERVAL);
 
 self.addEventListener('beforeunload', () => clearInterval(keepAliveInterval));

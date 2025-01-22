@@ -107,7 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log('收到消息:', message);
+    //console.log('收到消息:', message);
 
     if (message.type === 'TOGGLE_FULLSCREEN') {
         window.parent.postMessage({

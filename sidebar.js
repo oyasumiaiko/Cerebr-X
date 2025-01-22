@@ -882,9 +882,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             selection.removeAllRanges();
             selection.addRange(range);
         } else if (event.data.type === 'URL_CHANGED') {
-            console.log('[收到URL变化]', event.data.url);
+            // console.log('[收到URL变化]', event.data.url);
             // 加载新URL的聊天记录
-            loadChatHistory(event.data.url);
+            // loadChatHistory(event.data.url);
             // 清空页面内容，等待下次发送消息时重新获取
             pageContent = null;
         } else if (event.data.type === 'UPDATE_PLACEHOLDER') {
