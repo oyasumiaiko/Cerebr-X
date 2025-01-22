@@ -437,9 +437,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     model: config.modelName || "gpt-4o",
                     messages: messages,  // 直接使用messages，不再添加userMessage
                     stream: true,
-                    temperature: config.temperature || 1,
-                    top_p: 0.95,
-                    max_tokens: 4096,
+                    // temperature: config.temperature || 1,
+                    // top_p: 0.95,
+                    max_tokens: 8192,
                 }),
                 signal  // 添加 signal 到请求中
             });
@@ -478,16 +478,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                     if (line.startsWith('data: ')) {
                         const content = line.slice(6);
                         if (content.trim() === '[DONE]') continue;
-
                         try {
                             const data = JSON.parse(content);
-                            if (data.choices?.[0]?.delta?.content) {
+                            const deltaContent = data.choices?.[0]?.delta?.content || data.choices?.[0]?.delta?.reasoning_content;
+                            if (deltaContent) {
                                 if (!hasStartedResponse) {
                                     // 移除加载状态消息
                                     loadingMessage.remove();
                                     hasStartedResponse = true;
                                 }
-                                aiResponse += data.choices[0].delta.content;
+                                aiResponse += deltaContent;
                                 updateAIMessage(aiResponse, data.choices?.[0]?.groundingMetadata);
                             }
                         } catch (e) {
