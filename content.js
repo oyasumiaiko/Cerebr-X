@@ -802,18 +802,42 @@ async function extractPageContent() {
     '.immersive-translate-target-inner',
   ];
 
-  selectorsToRemove.forEach(selector => {
-    const elements = tempContainer.querySelectorAll(selector);
-    elements.forEach(element => element.remove());
-  });
+  // 使用DocumentFragment优化DOM操作，一次性移除所有不需要的元素
+  const fragment = document.createDocumentFragment();
+  fragment.appendChild(tempContainer);
+  const elementsToRemove = fragment.querySelectorAll(selectorsToRemove.join(','));
+  elementsToRemove.forEach(element => element.remove());
 
-  let mainContent = tempContainer.textContent;
+  // 使用TreeWalker替代手动遍历，性能更好
+  const texts = [];
+  const treeWalker = document.createTreeWalker(
+    fragment,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: function(node) {
+        return node.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    }
+  );
 
-  // 理文本
-  mainContent = mainContent
-    .replace(/\s+/g, ' ')  // 替换多个空白字符为单个空格
-    .replace(/\n\s*\n/g, '\n')  // 替换多个换行为单个换行
-    .trim();
+  // 预分配合理大小的数组以避免扩容
+  const estimatedTextNodes = Math.min(tempContainer.getElementsByTagName('*').length * 2, 10000);
+  texts.length = estimatedTextNodes;
+  
+  let i = 0;
+  while (treeWalker.nextNode()) {
+    texts[i++] = treeWalker.currentNode.textContent.trim();
+  }
+  texts.length = i; // 截断到实际长度
+
+  // 改进文本处理逻辑
+  let mainContent = texts
+    // .filter(text => text.length > 0)  // 过滤掉空字符串
+    .join(' ')
+    // .replace(/[\u200B-\u200D\uFEFF]/g, '')  // 移除零宽字符
+    // .replace(/\s*​\s*/g, ' ')  // 处理特殊的空格字符
+    .replace(/\s+/g, ' ')  // 将多个空白字符替换为单个空格
+    // .trim();
 
   // 检查提取的内容是否足够
   if (mainContent.length < 40) {
