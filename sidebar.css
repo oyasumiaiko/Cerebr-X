@@ -1655,13 +1655,13 @@ body.temporary-mode::after {
 .prompt-settings-content {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 8px;
 }
 
 .prompt-group {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 4px;
 }
 
 .prompt-group label {
