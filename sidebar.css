@@ -655,8 +655,8 @@ input:checked + .slider:before {
 .message blockquote {
     margin: 0.5em 0;
     padding-left: 12px;
-    border-left: 4px solid  color-mix(in srgb, var(--cerebr-text-color) 20%, transparent);
-    color: color-mix(in srgb, var(--cerebr-text-color) 70%, transparent);
+    border-left: 4px solid  color-mix(in srgb, var(--cerebr-text-color) 40%, transparent);
+    color: color-mix(in srgb, var(--cerebr-text-color) 80%, transparent);
 }
 
 .message pre {
@@ -883,7 +883,7 @@ input:checked + .slider:before {
 
     .message blockquote {
         border-left-color: rgba(255, 255, 255, 0.2);
-        color: rgba(255, 255, 255, 0.7);
+        color: var(--cerebr-text-color);
     }
 
     .message code:not(pre code) {
