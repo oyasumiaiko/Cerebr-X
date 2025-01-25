@@ -1,4 +1,5 @@
 import { PromptSettings } from './prompt_settings.js';
+import { createChatHistoryManager } from './chat_history_manager.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
     const chatContainer = document.getElementById('chat-container');
@@ -24,6 +25,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     let isAutoScrollEnabled = true; // 自动滚动开关状态
     let currentController = null;  // 用于存储当前的 AbortController
     let isFullscreen = false;
+    let pageContent = null;
+
+    // Create ChatHistoryManager instance
+    const {
+        chatHistory,
+        addMessageToTree,
+        getCurrentConversationChain,
+        clearHistory
+    } = createChatHistoryManager();
 
     // 添加全屏切换功能
     fullscreenToggle.addEventListener('click', async () => {
@@ -35,84 +45,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }, '*');
         settingsMenu.classList.remove('visible');
     });
-
-    // 聊天历史记录变量
-    let chatHistory = {
-        messages: [],  // 所有消息的列表
-        root: null,    // 根节点ID
-        currentNode: null, // 当前节点ID
-    };
-    let pageContent = null;  // 保留pageContent变量，但移除webpageSwitch相关代码
-
-    // 添加消息树节点的工具函数
-    function createMessageNode(role, content, parentId = null) {
-        const node = {
-            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            role,
-            content,
-            parentId,
-            children: []
-        };
-        return node;
-    }
-
-    // 在消息树中查找节点
-    function findMessageNode(nodeId) {
-        return chatHistory.messages.find(msg => msg.id === nodeId);
-    }
-
-    // 添加消息到树中
-    function addMessageToTree(role, content, parentId = null) {
-        const node = createMessageNode(role, content, parentId);
-        chatHistory.messages.push(node);
-        
-        if (parentId) {
-            const parentNode = findMessageNode(parentId);
-            if (parentNode) {
-                parentNode.children.push(node.id);
-            }
-        }
-
-        if (!chatHistory.root) {
-            chatHistory.root = node.id;
-        }
-
-        chatHistory.currentNode = node.id;
-        return node;
-    }
-
-    /**
-     * 获取当前对话的完整消息链
-     * 从当前节点开始向上追溯，构建完整的对话历史
-     * 
-     * 实现逻辑:
-     * 1. 创建空数组存储消息链
-     * 2. 从当前节点开始遍历
-     * 3. 通过 parentId 不断向上查找父节点
-     * 4. 将每个节点插入到数组头部,保持对话顺序
-     * 5. 直到找不到父节点为止
-     * 
-     * @returns {Array} 按时间顺序排列的消息节点数组,从最早到最新
-     */
-    function getCurrentConversationChain() {
-        // 存储完整的消息链
-        const chain = [];
-        // 从当前节点开始
-        let currentId = chatHistory.currentNode;
-
-        // 循环向上查找父节点
-        while (currentId) {
-            const node = findMessageNode(currentId);
-            // 如果节点不存在则中断
-            if (!node) break;
-            // 将节点插入到数组头部,保持对话顺序
-            chain.unshift(node);
-            // 继续查找父节点
-            currentId = node.parentId;
-        }
-
-        return chain;
-    }
 
     // 添加公共的图片处理函数
     function processImageTags(content) {
@@ -157,7 +89,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         return msg;
     }
-
 
     // 获取网页内容
     async function getPageContent() {
@@ -375,50 +306,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             currentController = new AbortController();
             const signal = currentController.signal;
 
-            // 构建消息内容
-            let messageContent;
-
-            // 如果有图片，构建包含文本和图片的数组格式
-            if (imageTags.length > 0) {
-                messageContent = [];
-                // 如果只有图片没有文字，添加默认的图片解释提示词
-                if (!message.trim()) {
-                    messageContent.push({
-                        type: "text", 
-                        text: prompts.image
-                    });
-                }
-                // 添加用户输入的文本内容（如果有）
-                if (message) {
-                    messageContent.push({
-                        type: "text",
-                        text: message
-                    });
-                }
-                // 添加图片
-                imageTags.forEach(tag => {
-                    const base64Data = tag.getAttribute('data-image');
-                    if (base64Data) {
-                        messageContent.push({
-                            type: "image_url",
-                            image_url: {
-                                url: base64Data
-                            }
-                        });
-                    }
-                });
-            } else {
-                // 如果没有图片，直接使用文本内容
-                messageContent = message;
-            }
-
-            // 获取当前对话链
+            // Retrieve conversation chain from the manager
             const conversationChain = getCurrentConversationChain();
+            const pageContentPrompt = pageContent
+                ? `\n\n当前网页内容：\n标题：${pageContent.title}\nURL：${pageContent.url}\n内容：${pageContent.content}`
+                : '';
 
-            // 网页内容提示语
-            const pageContentPrompt = pageContent ? 
-                `\n\n当前网页内容：\n标题：${pageContent.title}\nURL：${pageContent.url}\n内容：${pageContent.content}` :
-                '';
 
             // 获取当前模型名称并根据模型类型添加搜索提示语
             const currentModel = apiConfigs[selectedConfigIndex]?.modelName || '';
@@ -717,10 +610,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
 
                 // 更新历史记录
-                if (chatHistory.currentNode) {
-                    const currentNode = findMessageNode(chatHistory.currentNode);
-                    if (currentNode) {
-                        currentNode.content = rawText;
+                const messageId = lastMessage.getAttribute('data-message-id');
+                if (messageId && chatHistory.messages) {
+                    const node = chatHistory.messages.find(msg => msg.id === messageId);
+                    if (node) {
+                        node.content = rawText;
                     }
                 }
 
@@ -1008,8 +902,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const parentId = chatHistory.currentNode;
             const node = addMessageToTree(
                 sender === 'user' ? 'user' : 'assistant',
-                processedContent,
-                parentId
+                processedContent
             );
             
             // 为消息div添加节点ID
@@ -1567,11 +1460,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 清空聊天容器
         chatContainer.innerHTML = '';
         // 清空当前页面的聊天历史记录
-        chatHistory = {
-            messages: [],
-            root: null,
-            currentNode: null
-        };
+        clearHistory();
     }
 
     const clearChat = document.getElementById('clear-chat');
