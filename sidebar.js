@@ -805,13 +805,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 处理数学公式和Markdown
     function processMathAndMarkdown(text) {
-        // 替换特殊语法
-        // text = text.replace(/\\\[([a-zA-Z\d]+)\]/g, '[$1]');
-        // text = text.replace(/(?<!\\n)abla_/g, '\\nabla_');
-        // text = text.replace(/:\s\*\*/g, ':**');
+        // 预处理 Markdown 文本，修正 "**bold**text" 这类连写导致的粗体解析问题
+        const preHandledText = fixBoldParsingIssue(text);
 
         // 预处理数学表达式
-        const { text: escapedText, mathExpressions } = preMathEscape(text);
+        const { text: escapedText, mathExpressions } = preMathEscape(preHandledText);
 
         // 处理未闭合的代码块
         let processedText = escapedText;
@@ -847,6 +845,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // 替换数学表达式
         return postMathReplace(renderedMarkdown, mathExpressions);
+    }
+
+    // 预处理 Markdown 文本，修正 "**bold**text" 这类连写导致的粗体解析问题
+    function fixBoldParsingIssue(text) {
+        // 匹配 '**任意内容**后无空格且直接紧跟字母数字下划线'
+        // 其中 (?![\\s\\p{P}]) 用来确保后面不是空格、标点之类的分隔符
+        // 也可以根据需求拓展匹配范围
+        return text.replace(/\*\*([^*]+)\*\*(?![\s\p{P}])([A-Za-z0-9_])/g, '**$1** $2');
     }
 
     // 监听来自 content script 的消息
