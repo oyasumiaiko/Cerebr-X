@@ -852,7 +852,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 匹配 '**任意内容**后无空格且直接紧跟字母数字下划线'
         // 其中 (?![\\s\\p{P}]) 用来确保后面不是空格、标点之类的分隔符
         // 也可以根据需求拓展匹配范围
-        return text.replace(/\*\*([^*]+)\*\*(?![\s\p{P}])([A-Za-z0-9_])/g, '**$1** $2');
+        return text.replace(/\*\*([^*]+)\*\*(?![\s\p{P}])([A-Za-z0-9_])/g, '**$1**\u200B$2');
     }
 
     // 监听来自 content script 的消息
