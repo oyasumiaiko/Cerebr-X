@@ -458,8 +458,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     model: config.modelName,
                     messages: messages,  // 直接使用messages，不再添加userMessage
                     stream: true,
-                    // temperature: config.temperature || 1,
-                    // top_p: 0.95,
+                    temperature: config.temperature,
+                    top_p: 0.95,
                     max_tokens: 8192,
                 }),
                 signal  // 添加 signal 到请求中
