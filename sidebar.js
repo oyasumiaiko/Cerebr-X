@@ -778,9 +778,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (lang && hljs.getLanguage(lang)) {
                     try {
                         return hljs.highlight(code, { language: lang }).value;
-                    } catch (err) { }
+                    } catch (err) {
+                        return code;
+                    }
                 }
-                return hljs.highlightAuto(code).value;
+                return code;
             }
         });
 
