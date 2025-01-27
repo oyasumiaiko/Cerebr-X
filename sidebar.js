@@ -19,14 +19,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const feedbackButton = document.getElementById('feedback-button');
     const fullscreenToggle = document.getElementById('fullscreen-toggle');
     const sendButton = document.getElementById('send-button');
+    const sendChatHistorySwitch = document.getElementById('send-chat-history-switch');
     let currentMessageElement = null;
     let isTemporaryMode = false; // 添加临时模式状态变量
     let isProcessingMessage = false; // 添加消息处理状态标志
     let shouldAutoScroll = true; // 控制是否自动滚动
     let isAutoScrollEnabled = true; // 自动滚动开关状态
     let currentController = null;  // 用于存储当前的 AbortController
-    let isFullscreen = false;
-    let pageContent = null;
+    let isFullscreen = false; // 全屏模式
+    let pageContent = null;  // 预存储的网页文本内容
+    let shouldSendChatHistory = true; // 是否发送聊天历史
 
     // Create ChatHistoryManager instance
     const {
@@ -35,6 +37,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         getCurrentConversationChain,
         clearHistory
     } = createChatHistoryManager();
+
+    // 初始化聊天历史开关状态
+    chrome.storage.local.get(['shouldSendChatHistory'], (result) => {
+        shouldSendChatHistory = result.shouldSendChatHistory !== false;
+        sendChatHistorySwitch.checked = shouldSendChatHistory;
+    });
+
+    // 监听聊天历史开关变化
+    sendChatHistorySwitch.addEventListener('change', (e) => {
+        shouldSendChatHistory = e.target.checked;
+        saveSettings('shouldSendChatHistory', shouldSendChatHistory);
+    });
 
     // 添加全屏切换功能
     fullscreenToggle.addEventListener('click', async () => {
@@ -293,7 +307,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             // 设置处理状态为true
             isProcessingMessage = true;
-
+        
             // 获取当前提示词设置
             const prompts = promptSettingsManager.getPrompts();
 
@@ -303,7 +317,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 如果没有文本内容，添加图片提示词
             if (messageInput.textContent.trim() === '') {
                 messageInput.innerHTML += prompts.image.prompt;
-            }
+        }
 
             // 先添加用户消息到界面和历史记录
             const userMessageDiv = appendMessage(messageInput.innerHTML, 'user');
@@ -358,11 +372,22 @@ document.addEventListener('DOMContentLoaded', async () => {
                 messages.push(systemMessage);
             }
 
-            // 添加对话链中的消息
-            messages.push(...conversationChain.map(node => ({
-                role: node.role,
-                content: node.content
-            })));
+            // 根据设置决定是否发送聊天历史
+            if (shouldSendChatHistory) {
+                messages.push(...conversationChain.map(node => ({
+                    role: node.role,
+                    content: node.content
+                })));
+            } else {
+                // 只发送最后一条消息
+                if (conversationChain.length > 0) {
+                    const lastMessage = conversationChain[conversationChain.length - 1];
+                    messages.push({
+                        role: lastMessage.role,
+                        content: lastMessage.content
+                    });
+                }
+            }
 
             // 更新加载状态消息
             loadingMessage.textContent = '正在等待 AI 回复...';
@@ -431,7 +456,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     loadingMessage.classList.add('error-message');
                 }
                 throw new Error(`API错误 (${response.status}): ${error}`);
-            }
+        }
 
             const reader = response.body.getReader();
             let hasStartedResponse = false;
@@ -448,7 +473,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     if (line.startsWith('data: ')) {
                         const content = line.slice(6);
                         if (content.trim() === '[DONE]') continue;
-                        try {
+        try {
                             const data = JSON.parse(content);
                             const deltaContent = data.choices?.[0]?.delta?.content || data.choices?.[0]?.delta?.reasoning_content;
                             if (deltaContent) {
