@@ -1443,7 +1443,6 @@ body.temporary-mode::after {
     flex-direction: column;
     gap: 4px;
     position: relative;
-    cursor: pointer;
 }
 
 .source-info {
@@ -1456,6 +1455,8 @@ body.temporary-mode::after {
     margin-left: auto;
     font-size: 0.85em;
     opacity: 0.8;
+    cursor: pointer;
+    position: relative;
 }
 
 .confidence-bar {
@@ -1502,7 +1503,7 @@ body.temporary-mode::after {
     contain: content;
 }
 
-.source-item:hover .source-tooltip {
+.source-item:has(.confidence-text:hover) .source-tooltip {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
