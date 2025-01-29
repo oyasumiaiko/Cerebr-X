@@ -756,31 +756,48 @@ async function waitForContent() {
 async function extractPageContent() {
   console.log('extractPageContent 开始提取页面内容');
 
-  // 检查是否是PDF
-  if (document.contentType === 'application/pdf') {
-    console.log('检测到PDF文件，尝试从缓存获取内容');
-    const url = window.location.href;
+  // 检查是否是PDF或者iframe中的PDF
+  if (document.contentType === 'application/pdf' ||
+      (window.location.href.includes('.pdf') ||
+       document.querySelector('iframe[src*="pdf.js"]') ||
+       document.querySelector('iframe[src*=".pdf"]'))) {
+    console.log('检测到PDF文件，尝试提取PDF内容');
     
+    // 确定PDF URL
+    let pdfUrl = window.location.href;
+    
+    // 如果是iframe中的PDF，尝试提取实际的PDF URL
+    const pdfIframe = document.querySelector('iframe[src*="pdf.js"]') || document.querySelector('iframe[src*=".pdf"]');
+    if (pdfIframe) {
+      const iframeSrc = pdfIframe.src;
+      // 尝试从iframe src中提取实际的PDF URL
+      const urlMatch = iframeSrc.match(/[?&]file=([^&]+)/);
+      if (urlMatch) {
+        pdfUrl = decodeURIComponent(urlMatch[1]);
+        console.log('从iframe中提取到PDF URL:', pdfUrl);
+      }
+    }
+
     // 检查缓存
-    if (pdfContentCache.has(url)) {
+    if (pdfContentCache.has(pdfUrl)) {
       console.log('从缓存中获取PDF内容');
-      const cachedContent = pdfContentCache.get(url);
+      const cachedContent = pdfContentCache.get(pdfUrl);
       return {
         title: document.title,
-        url: url,
+        url: pdfUrl,
         content: cachedContent
       };
     }
 
     console.log('缓存中没有找到PDF内容，开始提取');
-    const pdfText = await extractTextFromPDF(url);
+    const pdfText = await extractTextFromPDF(pdfUrl);
     if (pdfText) {
       // 将内容存入缓存
       console.log('将PDF内容存入缓存');
-      pdfContentCache.set(url, pdfText);
+      pdfContentCache.set(pdfUrl, pdfText);
       return {
         title: document.title,
-        url: url,
+        url: pdfUrl,
         content: pdfText
       };
     }
