@@ -143,8 +143,8 @@ class CerebrSidebar {
         }
 
         .cerebr-sidebar.fullscreen {
-          top: 0;
-          right: 0;
+          top: -1px;
+          right: -1px;
           width: 100vw !important;
           height: 100vh;
           margin-right: 0;
@@ -170,7 +170,7 @@ class CerebrSidebar {
         .cerebr-sidebar__content {
           height: 100%;
           overflow: hidden;
-          border-radius: 12px;
+          border-radius: 0;
           contain: style layout size;
         }
         .cerebr-sidebar.fullscreen .cerebr-sidebar__content {
