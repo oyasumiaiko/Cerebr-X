@@ -477,14 +477,31 @@ class CerebrSidebar {
   toggleFullscreen(isFullscreen) {
     console.log('切换全屏模式:', isFullscreen);
     this.isFullscreen = isFullscreen;
+
+    // 在全屏模式下，为了让侧边栏覆盖整个页面并"忽视"父窗口滚动条，
+    // 可以强制隐藏父页面的滚动条
     if (this.isFullscreen) {
+      // 将侧边栏切换为全屏
       this.sidebar.classList.add('fullscreen');
+
+      // 隐藏父文档滚动条
+      document.documentElement.style.overflow = 'hidden';
+
+      // 如果侧边栏当前不可见，需要先显示侧边栏
       if (!this.isVisible) {
-        this.toggle();
+        this.toggle(true);
       }
     } else {
+      // 退出全屏模式
       this.sidebar.classList.remove('fullscreen');
+
+      // 恢复父文档滚动条
+      document.documentElement.style.overflow = '';
+
+      // 如果侧边栏在全屏时是打开的，此时并不会自动关闭，
+      // 只有在用户显式调用 toggle(false) 时才会关闭。
     }
+
     // 如果是全屏模式，确保侧边栏可见
     if (this.isFullscreen && !this.sidebar.classList.contains('visible')) {
       this.sidebar.classList.add('visible');
