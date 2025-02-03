@@ -284,6 +284,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const message = messageInput.textContent.trim();
         const imageTags = messageInput.querySelectorAll('.image-tag');
 
+        // Added: Determine the current prompt type from the user message.
+        const currentPromptType = getPromptTypeFromContent(message);
+
         if (!message && imageTags.length === 0) return;
 
         let config = apiConfigs[selectedConfigIndex];
@@ -367,7 +370,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             // 根据设置决定是否发送聊天历史
-            if (shouldSendChatHistory) {
+            const SendChatHistory = shouldSendChatHistory && currentPromptType !== 'selection';
+            if (SendChatHistory) {
                 messages.push(...conversationChain.map(node => ({
                     role: node.role,
                     content: node.content
