@@ -1362,6 +1362,11 @@ body.temporary-mode::after {
     text-decoration: underline;
 }
 
+/* 新增：当 body 带有 .hide-references 类时隐藏引用标记 */
+body.hide-references .reference-number.superscript {
+    display: none;
+}
+
 /* 表格样式 */
 .markdown-table {
     border-collapse: separate;

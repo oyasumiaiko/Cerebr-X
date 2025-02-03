@@ -432,7 +432,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     stream: true,
                     temperature: config.temperature,
                     top_p: 0.95,
-                    max_tokens: 8192,
+                    // max_tokens: 8192,
                 }),
                 signal
             });
@@ -2053,7 +2053,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 'scaleFactor', 
                 'autoScroll', 
                 'clearOnSearch',
-                'shouldSendChatHistory'
+                'shouldSendChatHistory',
+                'showReference' // 添加新的配置键
             ]);
             if (result.sidebarWidth) {
                 document.documentElement.style.setProperty('--cerebr-sidebar-width', `${result.sidebarWidth}px`);
@@ -2066,9 +2067,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 fontSizeValue.textContent = `${result.fontSize}px`;
             }
             if (result.scaleFactor) {
-                const scaleFactor = document.getElementById('scale-factor');
+                const scaleFactorElem = document.getElementById('scale-factor');
                 const scaleValue = document.getElementById('scale-value');
-                scaleFactor.value = result.scaleFactor;
+                scaleFactorElem.value = result.scaleFactor;
                 scaleValue.textContent = `${result.scaleFactor}x`;
             }
             // 初始化自动滚动开关状态
@@ -2092,6 +2093,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                     sendChatHistorySwitch.checked = shouldSendChatHistory;
                 }
             }
+            // 新增：初始化显示引用标记设置（默认显示）
+            const showReferenceSwitch = document.getElementById('show-reference-switch');
+            if (showReferenceSwitch) {
+                if (result.showReference === undefined) {
+                    showReferenceSwitch.checked = true;
+                } else {
+                    showReferenceSwitch.checked = result.showReference;
+                }
+                updateReferenceVisibility(showReferenceSwitch.checked);
+                showReferenceSwitch.addEventListener('change', (e) => {
+                    updateReferenceVisibility(e.target.checked);
+                    saveSettings('showReference', e.target.checked);
+                });
+            }
         } catch (error) {
             console.error('初始化设置失败:', error);
         }
@@ -2103,6 +2118,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             await chrome.storage.sync.set({ [key]: value });
         } catch (error) {
             console.error('保存设置失败:', error);
+        }
+    }
+
+    // 新增：切换引用标记显示/隐藏的函数
+    function updateReferenceVisibility(shouldShow) {
+        if (shouldShow) {
+            document.body.classList.remove('hide-references');
+        } else {
+            document.body.classList.add('hide-references');
         }
     }
 
