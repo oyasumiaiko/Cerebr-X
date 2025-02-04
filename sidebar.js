@@ -496,7 +496,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             // 消息处理完成后，自动保存会话
-            saveOrUpdateCurrentConversation();
+            saveCurrentConversation(true); // 指定为更新操作
 
         } catch (error) {
             if (error.name === 'AbortError') {
@@ -1563,7 +1563,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function clearChatHistory() {
         // 保存当前对话，如果有消息
         if (chatHistory.messages.length > 0) {
-            saveCurrentConversation();
+            saveCurrentConversation(false); // 明确指定为非更新操作
         }
         // 如果有正在进行的请求，停止它
         if (currentController) {
@@ -2263,86 +2263,72 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     /**
-     * 保存当前对话至持久存储 (使用 chrome.storage.local)
-     * 每次对话结束（例如点击清空聊天记录时）自动调用
+     * 保存或更新当前对话至持久存储 (使用 chrome.storage.local)
+     * @param {boolean} [isUpdate=false] - 是否为更新操作
+     * @returns {void}
      */
-    function saveCurrentConversation() {
+    function saveCurrentConversation(isUpdate = false) {
         if (chatHistory.messages.length === 0) return;
-        const domain = currentUrl;
-        const messages = chatHistory.messages.slice(); // 复制当前消息
+        const messages = chatHistory.messages.slice();
         const timestamps = messages.map(msg => msg.timestamp);
         const startTime = Math.min(...timestamps);
         const endTime = Math.max(...timestamps);
-        // 使用第一条用户消息作为简要（截取前50个字符）
-        const firstUserMessage = messages.find(msg => msg.role === 'user');
+        
+        // 找到第一条有文字内容的消息
+        const firstMessageWithContent = messages.find(msg => msg.content?.trim());
         let summary = '';
-        if (firstUserMessage) {
-            summary = firstUserMessage.content.substring(0, 50);
-        } else if (messages.length > 0) {
-            summary = messages[0].content.substring(0, 50);
+        if (firstMessageWithContent?.content) {
+            let content = firstMessageWithContent.content;
+            // 替换预设模板为模板名称
+            const prompts = promptSettingsManager.getPrompts();
+            if (content.includes(prompts.selection.prompt)) {
+                content = content.replace(prompts.selection.prompt, '[划词搜索]');
+            }
+            if (content.includes(prompts.pdf.prompt)) {
+                content = content.replace(prompts.pdf.prompt, '[PDF总结]');
+            }
+            if (content.includes(prompts.summary.prompt)) {
+                content = content.replace(prompts.summary.prompt, '[页面总结]');
+            }
+            if (content.includes(prompts.query.prompt)) {
+                content = content.replace(prompts.query.prompt, '[划词解释]');
+            }
+            if (content.includes(prompts.image.prompt)) {
+                content = content.replace(prompts.image.prompt, '[图片分析]');
+            }
+            summary = content.substring(0, 50);
         }
+        
+        const generateConversationId = () => `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const conversation = {
-            id: `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            domain,
-            startTime,
+            id: isUpdate ? (currentConversationId || generateConversationId()) : generateConversationId(),
+            url: currentUrl,
+            startTime, 
             endTime,
             messages,
             summary,
             messageCount: messages.length
         };
-        chrome.storage.local.get({ conversationHistories: [] }, (result) => {
-            const histories = result.conversationHistories;
-            histories.push(conversation);
-            chrome.storage.local.set({ conversationHistories: histories }, () => {
-                console.log('已保存对话记录:', conversation);
-            });
-        });
-    }
 
-    // 修改 saveOrUpdateCurrentConversation 函数中的域名获取
-    function saveOrUpdateCurrentConversation() {
-        if (chatHistory.messages.length === 0) return;
-        const domain = getCurrentDomain();
-        const messages = chatHistory.messages.slice(); // 复制当前消息
-        const timestamps = messages.map(msg => msg.timestamp);
-        const startTime = Math.min(...timestamps);
-        const endTime = Math.max(...timestamps);
-        // 使用第一条用户消息作为简要（截取前50个字符）
-        const firstUserMessage = messages.find(msg => msg.role === 'user');
-        let summary = '';
-        if (firstUserMessage) {
-            summary = firstUserMessage.content.substring(0, 50);
-        } else if (messages.length > 0) {
-            summary = messages[0].content.substring(0, 50);
-        }
-        const conversation = {
-            id: currentConversationId || `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            domain,
-            startTime,
-            endTime,
-            messages,
-            summary,
-            messageCount: messages.length
-        };
         chrome.storage.local.get({ conversationHistories: [] }, (result) => {
             let histories = result.conversationHistories;
-            if (currentConversationId) {
-                // 更新现有会话
+            
+            if (isUpdate && currentConversationId) {
                 const index = histories.findIndex(conv => conv.id === currentConversationId);
                 if (index !== -1) {
                     histories[index] = conversation;
                 }
             } else {
-                // 新增会话
                 histories.push(conversation);
                 currentConversationId = conversation.id;
             }
+
             chrome.storage.local.set({ conversationHistories: histories }, () => {
-                console.log('已保存或更新对话记录:', conversation);
+                console.log(`已${isUpdate ? '更新' : '保存'}对话记录:`, conversation);
             });
         });
     }
-
+    
     /**
      * 显示聊天记录面板，用于读取以前的对话记录
      */
@@ -2351,32 +2337,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!panel) {
             panel = document.createElement('div');
             panel.id = 'chat-history-panel';
-            // 使用简单内联样式
-            panel.style.position = 'fixed';
-            panel.style.top = '50%';
-            panel.style.left = '50%';
-            panel.style.transform = 'translate(-50%, -50%)';
-            panel.style.width = '80%';
-            panel.style.maxWidth = '600px';
-            panel.style.maxHeight = '80%';
-            panel.style.overflowY = 'auto';
-            panel.style.backgroundColor = 'var(--cerebr-bg-color)';
-            panel.style.border = '1px solid var(--cerebr-border-color)';
-            panel.style.borderRadius = '8px';
-            panel.style.padding = '16px';
-            panel.style.zIndex = '9999';
             
             // 添加标题栏
             const header = document.createElement('div');
-            header.style.display = 'flex';
-            header.style.justifyContent = 'space-between';
-            header.style.alignItems = 'center';
-            header.style.marginBottom = '16px';
+            header.className = 'panel-header';
             
             const title = document.createElement('span');
             title.textContent = '聊天记录';
-            title.style.fontSize = '16px';
-            title.style.fontWeight = 'bold';
+            title.className = 'panel-title';
             
             const closeBtn = document.createElement('button');
             closeBtn.textContent = '关闭';
@@ -2388,13 +2356,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             // 域名筛选输入框
             const filterContainer = document.createElement('div');
-            filterContainer.style.marginBottom = '12px';
+            filterContainer.className = 'filter-container';
             const filterInput = document.createElement('input');
             filterInput.type = 'text';
             filterInput.placeholder = '按域名筛选...';
-            filterInput.style.width = '100%';
-            filterInput.style.padding = '8px';
-            filterInput.style.boxSizing = 'border-box';
             filterInput.addEventListener('input', () => {
                 loadConversationHistories(panel, filterInput.value);
             });
@@ -2447,8 +2412,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         chrome.storage.local.get({ conversationHistories: [] }, (result) => {
             let histories = result.conversationHistories || [];
             if (filterText) {
-                histories = histories.filter(conv => conv.domain.includes(filterText));
+                histories = histories.filter(conv => conv.url.includes(filterText));
             }
+
             if (histories.length === 0) {
                 const emptyMsg = document.createElement('div');
                 emptyMsg.textContent = '暂无聊天记录';
@@ -2460,17 +2426,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             histories.forEach(conv => {
                 const item = document.createElement('div');
                 item.className = 'chat-history-item';
-                item.style.borderBottom = '1px solid var(--cerebr-border-color)';
-                item.style.padding = '8px 0';
-                item.style.cursor = 'pointer';
+                
                 const summaryDiv = document.createElement('div');
+                summaryDiv.className = 'summary';
                 summaryDiv.textContent = conv.summary;
-                summaryDiv.style.fontWeight = 'bold';
+                
                 const infoDiv = document.createElement('div');
-                infoDiv.style.fontSize = '12px';
-                infoDiv.style.color = 'var(--cerebr-text-color)';
+                infoDiv.className = 'info';
                 const date = new Date(conv.startTime).toLocaleString();
-                infoDiv.textContent = `消息数: ${conv.messageCount}，时间: ${date}，域名: ${conv.domain}`;
+                infoDiv.textContent = `消息数: ${conv.messageCount}，时间: ${date}，url: ${conv.url}`;
+                
+
                 item.appendChild(summaryDiv);
                 item.appendChild(infoDiv);
                 item.addEventListener('click', () => {
