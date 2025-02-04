@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let isFullscreen = false; // 全屏模式
     let pageContent = null;  // 预存储的网页文本内容
     let shouldSendChatHistory = true; // 是否发送聊天历史
+    let currentConversationId = null; // 当前会话ID
 
     // Create ChatHistoryManager instance
     const {
@@ -491,6 +492,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 }
             }
+
+            // 消息处理完成后，自动保存会话
+            saveOrUpdateCurrentConversation();
+
         } catch (error) {
             if (error.name === 'AbortError') {
                 console.log('用户手动停止更新');
@@ -1568,6 +1573,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         chatContainer.innerHTML = '';
         // 清空当前页面的聊天历史记录
         clearHistory();
+        // 重置当前会话ID
+        currentConversationId = null;
     }
 
     const clearChat = document.getElementById('clear-chat');
@@ -2292,6 +2299,65 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     /**
+     * 获取当前页面的真实域名
+     * @returns {string} 当前页面的域名
+     */
+    function getCurrentDomain() {
+        try {
+            // 尝试从 URL 参数获取当前页面 URL
+            const parentUrl = window.parent.location.href;
+            return new URL(parentUrl).hostname;
+        } catch (error) {
+            console.error('获取父页面域名失败:', error);
+            return window.location.hostname; // 降级使用扩展页面域名
+        }
+    }
+
+    // 修改 saveOrUpdateCurrentConversation 函数中的域名获取
+    function saveOrUpdateCurrentConversation() {
+        if (chatHistory.messages.length === 0) return;
+        const domain = getCurrentDomain();
+        const messages = chatHistory.messages.slice(); // 复制当前消息
+        const timestamps = messages.map(msg => msg.timestamp);
+        const startTime = Math.min(...timestamps);
+        const endTime = Math.max(...timestamps);
+        // 使用第一条用户消息作为简要（截取前50个字符）
+        const firstUserMessage = messages.find(msg => msg.role === 'user');
+        let summary = '';
+        if (firstUserMessage) {
+            summary = firstUserMessage.content.substring(0, 50);
+        } else if (messages.length > 0) {
+            summary = messages[0].content.substring(0, 50);
+        }
+        const conversation = {
+            id: currentConversationId || `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            domain,
+            startTime,
+            endTime,
+            messages,
+            summary,
+            messageCount: messages.length
+        };
+        chrome.storage.local.get({ conversationHistories: [] }, (result) => {
+            let histories = result.conversationHistories;
+            if (currentConversationId) {
+                // 更新现有会话
+                const index = histories.findIndex(conv => conv.id === currentConversationId);
+                if (index !== -1) {
+                    histories[index] = conversation;
+                }
+            } else {
+                // 新增会话
+                histories.push(conversation);
+                currentConversationId = conversation.id;
+            }
+            chrome.storage.local.set({ conversationHistories: histories }, () => {
+                console.log('已保存或更新对话记录:', conversation);
+            });
+        });
+    }
+
+    /**
      * 显示聊天记录面板，用于读取以前的对话记录
      */
     function showChatHistoryPanel() {
@@ -2354,6 +2420,29 @@ document.addEventListener('DOMContentLoaded', async () => {
             listContainer.id = 'chat-history-list';
             panel.appendChild(listContainer);
             document.body.appendChild(panel);
+
+            // 添加存储变化监听器
+            const storageChangeListener = (changes, areaName) => {
+                if (areaName === 'local' && changes.conversationHistories) {
+                    const filterInput = panel.querySelector('input[type="text"]');
+                    if (filterInput) {
+                        loadConversationHistories(panel, filterInput.value);
+                    }
+                }
+            };
+
+            // 添加监听器
+            chrome.storage.onChanged.addListener(storageChangeListener);
+
+            // 当面板关闭时移除监听器
+            const originalClickHandler = closeBtn.onclick;
+            closeBtn.onclick = () => {
+                chrome.storage.onChanged.removeListener(storageChangeListener);
+                if (originalClickHandler) {
+                    originalClickHandler();
+                }
+                panel.remove();
+            };
         }
         // 加载默认（不过滤）的对话记录列表
         loadConversationHistories(panel, '');
@@ -2366,6 +2455,8 @@ document.addEventListener('DOMContentLoaded', async () => {
      */
     function loadConversationHistories(panel, filterText) {
         const listContainer = panel.querySelector('#chat-history-list');
+        if (!listContainer) return;
+
         listContainer.innerHTML = '';
         chrome.storage.local.get({ conversationHistories: [] }, (result) => {
             let histories = result.conversationHistories || [];
