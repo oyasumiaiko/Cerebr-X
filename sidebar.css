@@ -2037,3 +2037,10 @@ body.hide-references .reference-number.superscript {
     margin-bottom: 6px;
     color: var(--cerebr-text-color);
 }
+
+/* 高亮显示关键字附近内容的样式 */
+.highlight-snippet {
+    font-size: 12px;
+    color: var(--cerebr-text-color);
+    margin-top: 4px;
+}

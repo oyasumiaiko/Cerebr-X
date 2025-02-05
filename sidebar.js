@@ -2513,8 +2513,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     
                     const summaryDiv = document.createElement('div');
                     summaryDiv.className = 'summary';
-                    summaryDiv.textContent = conv.summary;
-                    
+                    let displaySummary = conv.summary;
+                    if (filterText && filterText.trim() !== "") {
+                        const regex = new RegExp(`(${filterText})`, 'gi');
+                        displaySummary = displaySummary.replace(regex, '<mark>$1</mark>');
+                    }
+                    summaryDiv.innerHTML = displaySummary;
                     const infoDiv = document.createElement('div');
                     infoDiv.className = 'info';
                     const convDate = new Date(conv.startTime);
@@ -2539,6 +2543,31 @@ document.addEventListener('DOMContentLoaded', async () => {
                     
                     item.appendChild(summaryDiv);
                     item.appendChild(infoDiv);
+                    
+                    // 如果有筛选关键字, 尝试提取该关键字附近的内容作为 snippet
+                    if (filterText && filterText.trim() !== "") {
+                        let snippet = "";
+                        if (conv.messages && Array.isArray(conv.messages)) {
+                            for (const msg of conv.messages) {
+                                if (msg.content && msg.content.toLowerCase().includes(filterText.toLowerCase())) {
+                                    const index = msg.content.toLowerCase().indexOf(filterText.toLowerCase());
+                                    const start = Math.max(0, index - 30);
+                                    const end = Math.min(msg.content.length, index + filterText.length + 30);
+                                    snippet = msg.content.substring(start, end);
+                                    // 高亮关键字
+                                    snippet = snippet.replace(new RegExp(`(${filterText})`, 'gi'), '<mark>$1</mark>');
+                                    break;
+                                }
+                            }
+                        }
+                        if (snippet) {
+                            const snippetDiv = document.createElement('div');
+                            snippetDiv.className = 'highlight-snippet';
+                            snippetDiv.innerHTML = '…' + snippet + '…';
+                            item.appendChild(snippetDiv);
+                        }
+                    }
+                    
                     item.addEventListener('click', () => {
                         loadConversationIntoChat(conv);
                         // 保持聊天记录面板打开
