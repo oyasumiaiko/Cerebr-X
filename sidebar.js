@@ -2544,26 +2544,35 @@ document.addEventListener('DOMContentLoaded', async () => {
                     item.appendChild(summaryDiv);
                     item.appendChild(infoDiv);
                     
-                    // 如果有筛选关键字, 尝试提取该关键字附近的内容作为 snippet
+                    // 如果有筛选关键字, 尝试提取所有匹配关键字附近的内容作为 snippet
                     if (filterText && filterText.trim() !== "") {
-                        let snippet = "";
+                        let snippets = [];
+                        // 对 filterText 进行转义，避免正则特殊字符问题
+                        const escapedFilter = filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const regex = new RegExp(escapedFilter, 'gi');
+                        
                         if (conv.messages && Array.isArray(conv.messages)) {
                             for (const msg of conv.messages) {
-                                if (msg.content && msg.content.toLowerCase().includes(filterText.toLowerCase())) {
-                                    const index = msg.content.toLowerCase().indexOf(filterText.toLowerCase());
-                                    const start = Math.max(0, index - 30);
-                                    const end = Math.min(msg.content.length, index + filterText.length + 30);
-                                    snippet = msg.content.substring(start, end);
-                                    // 高亮关键字
-                                    snippet = snippet.replace(new RegExp(`(${filterText})`, 'gi'), '<mark>$1</mark>');
-                                    break;
+                                if (msg.content) {
+                                    // 使用正则全局匹配所有出现的关键字
+                                    let match;
+                                    while ((match = regex.exec(msg.content)) !== null) {
+                                        const index = match.index;
+                                        const start = Math.max(0, index - 30);
+                                        const end = Math.min(msg.content.length, index + match[0].length + 30);
+                                        let snippet = msg.content.substring(start, end);
+                                        // 高亮 snippet 中所有匹配到的关键字
+                                        snippet = snippet.replace(new RegExp(escapedFilter, 'gi'), '<mark>$&</mark>');
+                                        snippets.push(snippet);
+                                    }
                                 }
                             }
                         }
-                        if (snippet) {
+                        if (snippets.length > 0) {
                             const snippetDiv = document.createElement('div');
                             snippetDiv.className = 'highlight-snippet';
-                            snippetDiv.innerHTML = '…' + snippet + '…';
+                            // 用 <br> 分隔多个 snippet
+                            snippetDiv.innerHTML = snippets.map(s => '…' + s + '…').join('<br>');
                             item.appendChild(snippetDiv);
                         }
                     }
