@@ -2361,8 +2361,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             const filterInput = document.createElement('input');
             filterInput.type = 'text';
             filterInput.placeholder = '筛选...';
+            let debounceTimer;
             filterInput.addEventListener('input', () => {
-                loadConversationHistories(panel, filterInput.value);
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => {
+                    loadConversationHistories(panel, filterInput.value);
+                }, 300);
             });
             filterContainer.appendChild(filterInput);
             panel.appendChild(filterContainer);
@@ -2549,21 +2553,27 @@ document.addEventListener('DOMContentLoaded', async () => {
                         let snippets = [];
                         // 对 filterText 进行转义，避免正则特殊字符问题
                         const escapedFilter = filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                        const regex = new RegExp(escapedFilter, 'gi');
-                        
+                        const lowerFilter = filterText.toLowerCase();
+                        // 预先构造用于高亮的正则对象
+                        const highlightRegex = new RegExp(escapedFilter, 'gi');
                         if (conv.messages && Array.isArray(conv.messages)) {
                             for (const msg of conv.messages) {
                                 if (msg.content) {
-                                    // 使用正则全局匹配所有出现的关键字
-                                    let match;
-                                    while ((match = regex.exec(msg.content)) !== null) {
-                                        const index = match.index;
-                                        const start = Math.max(0, index - 30);
-                                        const end = Math.min(msg.content.length, index + match[0].length + 30);
-                                        let snippet = msg.content.substring(start, end);
-                                        // 高亮 snippet 中所有匹配到的关键字
-                                        snippet = snippet.replace(new RegExp(escapedFilter, 'gi'), '<mark>$&</mark>');
+                                    const content = msg.content;
+                                    const contentLower = content.toLowerCase();
+                                    // 若当前消息中未包含关键字，则跳过
+                                    if (contentLower.indexOf(lowerFilter) === -1) continue;
+                                    let startIndex = 0;
+                                    while (true) {
+                                        const index = contentLower.indexOf(lowerFilter, startIndex);
+                                        if (index === -1) break;
+                                        const snippetStart = Math.max(0, index - 30);
+                                        const snippetEnd = Math.min(content.length, index + filterText.length + 30);
+                                        let snippet = content.substring(snippetStart, snippetEnd);
+                                        // 高亮 snippet 中所有匹配关键字，复用 highlightRegex
+                                        snippet = snippet.replace(highlightRegex, '<mark>$&</mark>');
                                         snippets.push(snippet);
+                                        startIndex = index + 1;
                                     }
                                 }
                             }
