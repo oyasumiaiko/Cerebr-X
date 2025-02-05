@@ -2401,10 +2401,58 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     /**
-     * 从存储中加载聊天记录，并填充到面板中
-     * @param {HTMLElement} panel - 聊天记录面板
-     * @param {string} filterText - 域名筛选内容
+     * 格式化相对时间字符串
+     * @param {Date} date - 日期对象
+     * @returns {string} 相对时间描述，例如 "5分钟前"、"2小时前"、"3天前"、"2周前"、"4月前"
      */
+    function formatRelativeTime(date) {
+        const now = new Date();
+        const diff = now - date; // 毫秒差
+        const seconds = Math.floor(diff / 1000);
+        if (seconds < 60) return `${seconds}秒前`;
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}分钟前`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours}小时前`;
+        const days = Math.floor(hours / 24);
+        if (days < 7) return `${days}天前`;
+        const weeks = Math.floor(days / 7);
+        if (weeks < 4) return `${weeks}周前`;
+        const months = Math.floor(days / 30);
+        if (months < 12) return `${months}月前`;
+        const years = Math.floor(days / 365);
+        return `${years}年前`;
+    }
+
+    /**
+     * 根据日期生成分组标签
+     * @param {Date} date - 日期对象
+     * @returns {string} 分组标签，如 "今天"、"昨天"、"本周"、"上周"、"本月" 或 "YYYY年M月"
+     */
+    function getGroupLabel(date) {
+        const now = new Date();
+        if (date.toDateString() === now.toDateString()) return "今天";
+        const yesterday = new Date(now);
+        yesterday.setDate(now.getDate() - 1);
+        if (date.toDateString() === yesterday.toDateString()) return "昨天";
+        // 以星期一为一周起点
+        const day = now.getDay(); // 0代表星期日
+        const diffToMonday = (day === 0 ? 6 : day - 1);
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - diffToMonday);
+        if (date >= monday) return "本周";
+        const lastMonday = new Date(monday);
+        lastMonday.setDate(monday.getDate() - 7);
+        if (date >= lastMonday) return "上周";
+        if (date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()) {
+            return "本月";
+        }
+        return `${date.getFullYear()}年${date.getMonth() + 1}月`;
+    }
+
+    // ----------------------------------------
+    // 修改聊天记录加载函数 loadConversationHistories
+    // ----------------------------------------
     function loadConversationHistories(panel, filterText) {
         const listContainer = panel.querySelector('#chat-history-list');
         if (!listContainer) return;
@@ -2433,27 +2481,53 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             // 按结束时间降序排序
             histories.sort((a, b) => b.endTime - a.endTime);
-            histories.forEach(conv => {
-                const item = document.createElement('div');
-                item.className = 'chat-history-item';
-                
-                const summaryDiv = document.createElement('div');
-                summaryDiv.className = 'summary';
-                summaryDiv.textContent = conv.summary;
-                
-                const infoDiv = document.createElement('div');
-                infoDiv.className = 'info';
-                const date = new Date(conv.startTime).toLocaleString();
-                infoDiv.textContent = `消息数: ${conv.messageCount}，时间: ${date}，url: ${conv.url}`;
-                
 
-                item.appendChild(summaryDiv);
-                item.appendChild(infoDiv);
-                item.addEventListener('click', () => {
-                    loadConversationIntoChat(conv);
-                    // 保持聊天记录面板打开
+            // 根据会话的开始时间进行分组
+            const groups = {};
+            const groupLatestTime = {}; // 用于记录各分组中最新的会话时间以便排序
+            histories.forEach(conv => {
+                const convDate = new Date(conv.startTime);
+                const groupLabel = getGroupLabel(convDate);
+                if (!groups[groupLabel]) {
+                    groups[groupLabel] = [];
+                    groupLatestTime[groupLabel] = convDate.getTime();
+                } else {
+                    groupLatestTime[groupLabel] = Math.max(groupLatestTime[groupLabel], convDate.getTime());
+                }
+                groups[groupLabel].push(conv);
+            });
+
+            // 根据每个分组中最新的时间降序排序分组
+            const sortedGroupLabels = Object.keys(groups).sort((a, b) => groupLatestTime[b] - groupLatestTime[a]);
+
+            sortedGroupLabels.forEach(groupLabel => {
+                // 创建分组标题
+                const groupHeader = document.createElement('div');
+                groupHeader.className = 'chat-history-group-header';
+                groupHeader.textContent = groupLabel;
+                listContainer.appendChild(groupHeader);
+
+                groups[groupLabel].forEach(conv => {
+                    const item = document.createElement('div');
+                    item.className = 'chat-history-item';
+                    
+                    const summaryDiv = document.createElement('div');
+                    summaryDiv.className = 'summary';
+                    summaryDiv.textContent = conv.summary;
+                    
+                    const infoDiv = document.createElement('div');
+                    infoDiv.className = 'info';
+                    const relativeTime = formatRelativeTime(new Date(conv.startTime));
+                    infoDiv.textContent = `${relativeTime} • 消息数: ${conv.messageCount}`;
+                    
+                    item.appendChild(summaryDiv);
+                    item.appendChild(infoDiv);
+                    item.addEventListener('click', () => {
+                        loadConversationIntoChat(conv);
+                        // 保持聊天记录面板打开
+                    });
+                    listContainer.appendChild(item);
                 });
-                listContainer.appendChild(item);
             });
         });
     }

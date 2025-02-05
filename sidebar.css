@@ -2026,3 +2026,14 @@ body.hide-references .reference-number.superscript {
 #chat-history-panel .filter-container {
     flex: 0 0 auto;
 }
+
+/* 添加聊天记录分组标题样式 */
+.chat-history-group-header {
+    font-weight: bold;
+    padding: 8px;
+    background: var(--cerebr-hover-color);
+    border-radius: 4px;
+    margin-top: 12px;
+    margin-bottom: 6px;
+    color: var(--cerebr-text-color);
+}
