@@ -1916,6 +1916,7 @@ body.hide-references .reference-number.superscript {
         border: 0;
     }
 }
+
 /* 聊天记录面板样式 */
 #chat-history-panel {
     position: fixed;
@@ -1932,6 +1933,7 @@ body.hide-references .reference-number.superscript {
     z-index: 9999;
     backdrop-filter: blur(var(--cerebr-blur-radius));
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    overflow: hidden;
 }
 
 .panel-header {
@@ -1973,4 +1975,43 @@ body.hide-references .reference-number.superscript {
 .chat-history-item .info {
     font-size: 12px;
     color: var(--cerebr-text-color);
+}
+
+/* 保持面板整体固定，内部列表区域独立滚动 */
+#chat-history-list {
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-height: calc(80vh - 120px); /* 80vh面板高度减去标题和过滤区占用的高度 */
+    /* Firefox 下的滚动条 */
+    scrollbar-width: thin;
+    scrollbar-color: var(--cerebr-border-color) transparent;
+}
+
+/* 以下是 WebKit 浏览器下定制滚动条的样式 */
+#chat-history-list::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+#chat-history-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+#chat-history-list::-webkit-scrollbar-thumb {
+    background-color: var(--cerebr-border-color);
+    border-radius: 3px;
+}
+
+/* 调整聊天记录面板标题栏关闭按钮的样式，使其与整体风格一致 */
+#chat-history-panel .panel-header button {
+    background: none;
+    border: none;
+    color: var(--cerebr-text-color);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+}
+
+#chat-history-panel .panel-header button:hover {
+    background-color: var(--cerebr-message-user-bg);
 }
