@@ -2360,7 +2360,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             filterContainer.className = 'filter-container';
             const filterInput = document.createElement('input');
             filterInput.type = 'text';
-            filterInput.placeholder = '按域名筛选...';
+            filterInput.placeholder = '筛选...';
             filterInput.addEventListener('input', () => {
                 loadConversationHistories(panel, filterInput.value);
             });
@@ -2517,8 +2517,25 @@ document.addEventListener('DOMContentLoaded', async () => {
                     
                     const infoDiv = document.createElement('div');
                     infoDiv.className = 'info';
-                    const relativeTime = formatRelativeTime(new Date(conv.startTime));
-                    infoDiv.textContent = `${relativeTime} • 消息数: ${conv.messageCount}`;
+                    const convDate = new Date(conv.startTime);
+                    const relativeTime = formatRelativeTime(convDate);
+                    
+                    // 提取 URL 中的 domain
+                    let domain = '';
+                    if (conv.url) {
+                        try {
+                            const urlObj = new URL(conv.url);
+                            domain = urlObj.hostname;
+                        } catch (error) {
+                            domain = conv.url;
+                        }
+                    } else {
+                        domain = '未知';
+                    }
+                    
+                    infoDiv.textContent = `${relativeTime} · 消息数: ${conv.messageCount} · ${domain}`;
+                    // 新增：鼠标悬停显示具体的日期时间
+                    infoDiv.title = convDate.toLocaleString();
                     
                     item.appendChild(summaryDiv);
                     item.appendChild(infoDiv);
