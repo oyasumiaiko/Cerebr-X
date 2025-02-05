@@ -204,6 +204,7 @@ body {
     transform: translateY(4px);
     transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
     border: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 10000;
 }
 
 #settings-menu.visible {
@@ -1925,7 +1926,8 @@ body.hide-references .reference-number.superscript {
     transform: translate(-50%, -50%);
     width: 80%;
     max-width: 600px;
-    max-height: 80vh;
+    /* 固定高度，避免搜索时闪烁 */
+    height: 80vh;
     background-color: var(--cerebr-bg-color);
     border: 1px solid var(--cerebr-border-color);
     border-radius: 8px;
@@ -1934,6 +1936,8 @@ body.hide-references .reference-number.superscript {
     backdrop-filter: blur(var(--cerebr-blur-radius));
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 .panel-header {
@@ -1979,9 +1983,10 @@ body.hide-references .reference-number.superscript {
 
 /* 保持面板整体固定，内部列表区域独立滚动 */
 #chat-history-list {
+    flex: 1 1 auto;
     overflow-y: auto;
     overflow-x: hidden;
-    max-height: calc(80vh - 120px); /* 80vh面板高度减去标题和过滤区占用的高度 */
+    max-height: calc(80vh - 120px); /* 保持原有最大高度设置 */
     /* Firefox 下的滚动条 */
     scrollbar-width: thin;
     scrollbar-color: var(--cerebr-border-color) transparent;
@@ -2014,4 +2019,10 @@ body.hide-references .reference-number.superscript {
 
 #chat-history-panel .panel-header button:hover {
     background-color: var(--cerebr-message-user-bg);
+}
+
+/* 固定聊天记录面板中的标题栏和搜索框 */
+#chat-history-panel .panel-header,
+#chat-history-panel .filter-container {
+    flex: 0 0 auto;
 }

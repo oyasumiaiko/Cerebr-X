@@ -2451,7 +2451,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 item.appendChild(infoDiv);
                 item.addEventListener('click', () => {
                     loadConversationIntoChat(conv);
-                    panel.remove();
+                    // 保持聊天记录面板打开
                 });
                 listContainer.appendChild(item);
             });
@@ -2465,9 +2465,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     function loadConversationIntoChat(conversation) {
         // 清空当前聊天容器
         chatContainer.innerHTML = '';
-        // 遍历对话中的每条消息并显示
+        // 遍历对话中的每条消息并显示，并确保 AI 消息的角色为 "ai"
         conversation.messages.forEach(msg => {
-            appendMessage(msg.content, msg.role, true);
+            const role = msg.role.toLowerCase() === 'assistant' ? 'ai' : msg.role;
+            appendMessage(msg.content, role, true);
         });
         // 清空当前对话管理（开始新会话）
         clearHistory();
