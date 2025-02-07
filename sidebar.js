@@ -1562,10 +1562,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 清空聊天记录功能，并保存当前对话至持久存储（每次聊天会话结束自动保存）
     function clearChatHistory() {
-        // 保存当前对话，如果有消息
+        // 尝试保存当前对话，如果有消息且当前会话ID不存在于存储中
         if (chatHistory.messages.length > 0) {
-            saveCurrentConversation(true); // 修改传入 true 以更新已有对话记录，避免重复保存
+            chrome.storage.local.get({ conversationHistories: [] }, (result) => {
+                const histories = result.conversationHistories || [];
+                // 当 currentConversationId 为 null 或存储中不存在当前 id 时，调用保存操作
+                if (!currentConversationId || !histories.some(conv => conv.id === currentConversationId)) {
+                    saveCurrentConversation(true);
+                }
+            });
         }
+
         // 如果有正在进行的请求，停止它
         if (currentController) {
             currentController.abort();
@@ -2638,6 +2645,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 修改：恢复加载的对话历史到聊天管理器，避免覆盖已加载历史
         chatHistory.messages = conversation.messages.slice();
         chatHistory.currentNode = conversation.messages.length > 0 ? conversation.messages[conversation.messages.length - 1] : null;
+        // 新增：将加载的对话记录ID保存到全局变量，用于后续更新操作
+        currentConversationId = conversation.id;
     }
 
     // 添加聊天记录菜单项监听
