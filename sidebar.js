@@ -920,7 +920,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // 修改appendMessage函数，移除初始字数显示
     function appendMessage(text, sender, skipHistory = false, fragment = null) {
         const messageDiv = document.createElement('div');
         messageDiv.classList.add('message', `${sender}-message`);
@@ -978,8 +977,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             fragment.appendChild(messageDiv);
         } else {
             chatContainer.appendChild(messageDiv);
-            // 修改这里：移除用户消息的强制滚动
-            scrollToBottom(); // 统一使用自动滚动设置
+            // 不在这里自动滚动，等待 AI 消息流式接收时触发滚动
         }
 
         // 更新聊天历史
@@ -2209,10 +2207,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 初始化设置
     await initSettings();
 
-    // 添加滚轮事件监听
+    // 修改滚轮事件监听：
+    // 当用户向上滚动时，禁用自动滚动；
+    // 当用户向下滚动时，检查离底部距离，如果距离小于50px，则重新启用自动滚动
     chatContainer.addEventListener('wheel', (e) => {
         if (e.deltaY < 0) { // 向上滚动
             shouldAutoScroll = false;
+        } else if (e.deltaY > 0) { // 向下滚动时检查底部距离
+            const threshold = 50; // 距离底部小于50px认为接近底部
+            const distanceFromBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
+            if (distanceFromBottom < threshold) {
+                shouldAutoScroll = true;
+            }
         }
     });
 
@@ -2394,7 +2400,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             };
 
-            // 添加监听器
             chrome.storage.onChanged.addListener(storageChangeListener);
 
             // 当面板关闭时移除监听器
@@ -2406,6 +2411,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
                 panel.remove();
             };
+
+            // --- Modified: Close panel only when clicking on chat-container ---
+            chatContainer.addEventListener('click', function onChatContainerClick(event) {
+                if (panel) {
+                    panel.remove();
+                    chatContainer.removeEventListener('click', onChatContainerClick);
+                }
+            });
+            // --- End Modified ---
         }
         // 加载默认（不过滤）的对话记录列表
         loadConversationHistories(panel, '');
