@@ -299,7 +299,7 @@ class PromptSettings {
             if (result.prompts) {
                 Object.keys(DEFAULT_PROMPTS).forEach(type => {
                     const promptData = result.prompts[type] || DEFAULT_PROMPTS[type];
-                    this[`${type}Prompt`].value = promptData.prompt || promptData;
+                    this[`${type}Prompt`].value = (typeof promptData.prompt !== 'undefined') ? promptData.prompt : promptData;
                     if (this.modelSelects[type]) {
                         this.modelSelects[type].value = promptData.model || DEFAULT_PROMPTS[type].model;
                     }
