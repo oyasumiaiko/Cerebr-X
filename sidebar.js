@@ -1827,9 +1827,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             reader.readAsDataURL(file);
         } else {
-            // 处理文本粘贴
+            // 修改：处理纯文本粘贴，避免插入富文本
             const text = e.clipboardData.getData('text/plain');
-            document.execCommand('insertText', false, text);
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                range.deleteContents();
+                const textNode = document.createTextNode(text);
+                range.insertNode(textNode);
+                // 移动光标到新插入的文本节点之后
+                range.setStartAfter(textNode);
+                range.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
         }
     });
 
