@@ -307,6 +307,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             // 设置处理状态为true
             isProcessingMessage = true;
+            // 当开始生成时，给聊天容器添加 glow 效果
+            chatContainer.classList.add('auto-scroll-glow');
         
             // 获取当前提示词设置
             const prompts = promptSettingsManager.getPrompts();
@@ -514,6 +516,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         } finally {
             // 无论成功还是失败，都重置处理状态
             isProcessingMessage = false;
+            // 当生成结束时，移除 glow 效果
+            chatContainer.classList.remove('auto-scroll-glow');
             const lastMessage = chatContainer.querySelector('.ai-message:last-child');
             if (lastMessage) {
                 lastMessage.classList.remove('updating');
