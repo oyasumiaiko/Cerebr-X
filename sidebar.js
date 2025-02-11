@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sendButton = document.getElementById('send-button');
     const sendChatHistorySwitch = document.getElementById('send-chat-history-switch');
     const showReferenceSwitch = document.getElementById('show-reference-switch');
+    const copyCodeButton = document.getElementById('copy-code');
 
     let currentMessageElement = null;
     let isTemporaryMode = false; // 添加临时模式状态变量
@@ -33,6 +34,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let shouldSendChatHistory = true; // 是否发送聊天历史
     let currentConversationId = null; // 当前会话ID
     let currentUrl = null; // 存储当前URL
+    let currentCodeBlock = null;
 
 
     // Create ChatHistoryManager instance
@@ -1703,7 +1705,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         messageInput.removeEventListener('click', (e) => e.stopPropagation());
     });
 
-    // 右键菜单功能
+    // 修改右键菜单显示逻辑
     function showContextMenu(e, messageElement) {
         e.preventDefault();
         currentMessageElement = messageElement;
@@ -1711,11 +1713,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 设置菜单位置
         contextMenu.style.display = 'block';
 
+        // 获取点击的代码块元素
+        const codeBlock = e.target.closest('pre code');
+        const copyCodeButton = document.getElementById('copy-code');
+
         // 根据消息状态显示或隐藏停止更新按钮
         if (messageElement.classList.contains('updating')) {
             stopUpdateButton.style.display = 'flex';
         } else {
             stopUpdateButton.style.display = 'none';
+        }
+
+        // 根据是否点击代码块显示或隐藏复制代码按钮
+        if (codeBlock) {
+            copyCodeButton.style.display = 'flex';
+            currentCodeBlock = codeBlock;
+        } else {
+            copyCodeButton.style.display = 'none';
+            currentCodeBlock = null;
         }
 
         const menuWidth = contextMenu.offsetWidth;
@@ -1735,6 +1750,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         contextMenu.style.left = x + 'px';
         contextMenu.style.top = y + 'px';
+    }
+
+    // 添加复制代码块功能
+    function copyCodeContent() {
+        if (currentCodeBlock) {
+            const codeContent = currentCodeBlock.textContent;
+            navigator.clipboard.writeText(codeContent).then(() => {
+                hideContextMenu();
+            }).catch(err => {
+                console.error('复制失败:', err);
+            });
+        }
     }
 
     // 添加停止更新按钮的点击事件处理
@@ -2766,4 +2793,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
         });
     }
+
+    copyCodeButton.addEventListener('click', copyCodeContent);
 });
