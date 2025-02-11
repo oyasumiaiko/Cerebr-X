@@ -752,21 +752,21 @@ document.addEventListener('DOMContentLoaded', async () => {
             return placeholder;
         });
 
-        // 替换美元符号包围的块级数学表达式
-        text = text.replace(/(\$\$[\s\S]+?\$\$)/g, (match, p1) => {
-            const placeholder = `😎DOLLARBLOCK_MATH_${counter}😎`;
-            mathExpressions.push({ placeholder, content: p1.slice(2, -2), originalContent: p1, type: 'dollarblock' });
-            counter++;
-            return placeholder;
-        });
+        // // 替换美元符号包围的块级数学表达式
+        // text = text.replace(/(\$\$[\s\S]+?\$\$)/g, (match, p1) => {
+        //     const placeholder = `😎DOLLARBLOCK_MATH_${counter}😎`;
+        //     mathExpressions.push({ placeholder, content: p1.slice(2, -2), originalContent: p1, type: 'dollarblock' });
+        //     counter++;
+        //     return placeholder;
+        // });
 
-        // 替换美元符号包围的行内数学表达式
-        text = text.replace(/(\$[^\$\n]+?\$)/g, (match, p1) => {
-            const placeholder = `😎DOLLAR_MATH_${counter}😎`;
-            mathExpressions.push({ placeholder, content: p1.slice(1, -1), originalContent: p1, type: 'dollarinline' });
-            counter++;
-            return placeholder;
-        });
+        // // 替换美元符号包围的行内数学表达式
+        // text = text.replace(/(\$[^\$\n]+?\$)/g, (match, p1) => {
+        //     const placeholder = `😎DOLLAR_MATH_${counter}😎`;
+        //     mathExpressions.push({ placeholder, content: p1.slice(1, -1), originalContent: p1, type: 'dollarinline' });
+        //     counter++;
+        //     return placeholder;
+        // });
 
         return { text, mathExpressions };
     }
