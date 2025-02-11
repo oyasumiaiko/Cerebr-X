@@ -286,7 +286,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // 检查是否是划词搜索提示词，将 selection prompt 中的 "<SELECTION>" 移除后进行匹配
         if (prompts.selection.prompt) {
-            const selectionPromptKeyword = prompts.selection.prompt.replace('<SELECTION>', '').trim();
+            const selectionPromptKeyword = prompts.selection.prompt.split('<SELECTION>')[0];
             if (selectionPromptKeyword && content.startsWith(selectionPromptKeyword)) {
                 return 'selection';
             }
@@ -441,7 +441,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 确定要使用的模型配置
             let targetConfig = null;
             // 只判断一次 prompttype，重用之前的 currentPromptType
-            if (prompts[currentPromptType]?.model !== 'follow_current') {
+            if (currentPromptType !== 'none' && prompts[currentPromptType] && prompts[currentPromptType].model !== 'follow_current') {
                 targetConfig = apiConfigs.find(c => c.modelName === prompts[currentPromptType].model);
             }
 
@@ -540,7 +540,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 loadingMessage.classList.add('error-message');
             }
             // 从 chatHistory 中移除最后一条记录（用户的问题）
-            chatHistory.pop();
+            chatHistory.messages.pop();
         } finally {
             // 无论成功还是失败，都重置处理状态
             isProcessingMessage = false;
