@@ -50,18 +50,10 @@
     "resources": [
       "sidebar.html",
       "lib/*",
-      "lib/marked.min.js", 
-      "lib/highlight.min.js",
-      "lib/github-dark.css",
-      "lib/katex.min.js",
-      "lib/katex.min.css",
-      "lib/auto-render.min.js",
       "sidebar-message-handler.js",
       "prompt_settings.js",
       "chat_history_manager.js",
-      "lib/fonts/*",
-      "lib/pdf.js",
-      "lib/pdf.worker.js"
+      "indexeddb_helper.js"
     ],
     "matches": ["<all_urls>"]
   }],

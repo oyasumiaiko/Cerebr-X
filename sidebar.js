@@ -1,5 +1,6 @@
 import { PromptSettings } from './prompt_settings.js';
 import { createChatHistoryManager } from './chat_history_manager.js';
+import { getAllConversations, putConversation, deleteConversation } from './indexeddb_helper.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
     const chatContainer = document.getElementById('chat-container');
@@ -36,6 +37,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     let currentUrl = null; // 存储当前URL
     let currentCodeBlock = null;
 
+    /**
+     * 迁移旧有的 chrome.storage.local 对话记录到 IndexedDB
+     * @returns {Promise<void>}
+     */
+    async function migrateLocalHistoriesToIndexedDB() {
+        return new Promise((resolve) => {
+            chrome.storage.local.get({ conversationHistories: [] }, async (result) => {
+                const localHistories = result.conversationHistories;
+                if (localHistories && localHistories.length > 0) {
+                    console.log("检测到 local storage 中已有对话记录，开始迁移到 IndexedDB...");
+                    for (const conv of localHistories) {
+                        try {
+                            await putConversation(conv);
+                        } catch (error) {
+                            console.error("迁移对话记录失败:", conv.id, error);
+                        }
+                    }
+                    chrome.storage.local.remove("conversationHistories", () => {
+                        console.log("迁移完成：已从 chrome.storage.local 移除 conversationHistories");
+                        resolve();
+                    });
+                } else {
+                    console.log("没有检测到需要迁移的 local storage 对话记录");
+                    resolve();
+                }
+            });
+        });
+    }
+
+    // 执行对话记录的迁移
+    await migrateLocalHistoriesToIndexedDB();
 
     // Create ChatHistoryManager instance
     const {
@@ -1658,13 +1690,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function clearChatHistory() {
         // 尝试保存当前对话，如果有消息且当前会话ID不存在于存储中
         if (chatHistory.messages.length > 0) {
-            chrome.storage.local.get({ conversationHistories: [] }, (result) => {
-                const histories = result.conversationHistories || [];
-                // 当 currentConversationId 为 null 或存储中不存在当前 id 时，调用保存操作
-                if (!currentConversationId || !histories.some(conv => conv.id === currentConversationId)) {
-                    saveCurrentConversation(true);
-                }
-            });
+            saveCurrentConversation(true);
         }
 
         // 如果有正在进行的请求，停止它
@@ -2412,7 +2438,7 @@ document.addEventListener('DOMContentLoaded', async () => {
      * @param {boolean} [isUpdate=false] - 是否为更新操作
      * @returns {void}
      */
-    function saveCurrentConversation(isUpdate = false) {
+    async function saveCurrentConversation(isUpdate = false) {
         if (chatHistory.messages.length === 0) return;
         const messages = chatHistory.messages.slice();
         const timestamps = messages.map(msg => msg.timestamp);
@@ -2471,23 +2497,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             messageCount: messages.length
         };
 
-        chrome.storage.local.get({ conversationHistories: [] }, (result) => {
-            let histories = result.conversationHistories;
-
-            if (isUpdate && currentConversationId) {
-                const index = histories.findIndex(conv => conv.id === currentConversationId);
-                if (index !== -1) {
-                    histories[index] = conversation;
-                }
-            } else {
-                histories.push(conversation);
-                currentConversationId = conversation.id;
-            }
-
-            chrome.storage.local.set({ conversationHistories: histories }, () => {
-                console.log(`已${isUpdate ? '更新' : '保存'}对话记录:`, conversation);
-            });
-        });
+        // 使用 IndexedDB 存储对话记录
+        await putConversation(conversation);
+        currentConversationId = conversation.id;
+        console.log(`已${isUpdate ? '更新' : '保存'}对话记录:`, conversation);
     }
 
     /**
@@ -2536,28 +2549,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             listContainer.id = 'chat-history-list';
             panel.appendChild(listContainer);
             document.body.appendChild(panel);
-
-            // 添加存储变化监听器
-            const storageChangeListener = (changes, areaName) => {
-                if (areaName === 'local' && changes.conversationHistories) {
-                    const filterInput = panel.querySelector('input[type="text"]');
-                    if (filterInput) {
-                        loadConversationHistories(panel, filterInput.value);
-                    }
-                }
-            };
-
-            chrome.storage.onChanged.addListener(storageChangeListener);
-
-            // 当面板关闭时移除监听器
-            const originalClickHandler = closeBtn.onclick;
-            closeBtn.onclick = () => {
-                chrome.storage.onChanged.removeListener(storageChangeListener);
-                if (originalClickHandler) {
-                    originalClickHandler();
-                }
-                panel.remove();
-            };
 
             // --- Modified: Close panel only when clicking on chat-container ---
             chatContainer.addEventListener('click', function onChatContainerClick(event) {
@@ -2630,8 +2621,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!listContainer) return;
 
         listContainer.innerHTML = '';
-        chrome.storage.local.get({ conversationHistories: [] }, (result) => {
-            let histories = result.conversationHistories || [];
+        getAllConversations().then(histories => {
             if (filterText) {
                 const lowerFilter = filterText.toLowerCase();
                 histories = histories.filter(conv => {
@@ -2776,6 +2766,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     listContainer.appendChild(item);
                 });
             });
+        }).catch(err => {
+            console.error("加载聊天记录失败", err);
         });
     }
 
@@ -2846,9 +2838,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         deleteOption.textContent = '删除聊天记录';
         deleteOption.classList.add('chat-history-context-menu-option');
 
-        deleteOption.addEventListener('click', () => {
-            deleteConversation(conversationId);
+        deleteOption.addEventListener('click', async () => {
+            await deleteConversation(conversationId);
             menu.remove();
+
+            // 刷新聊天记录面板
+            const panel = document.getElementById('chat-history-panel');
+            if (panel) {
+                const filterInput = panel.querySelector('input[type="text"]');
+                loadConversationHistories(panel, filterInput ? filterInput.value : '');
+            }
         });
 
         menu.appendChild(deleteOption);
@@ -2860,26 +2859,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 menu.remove();
             }
             document.removeEventListener('click', onDocClick);
-        });
-    }
-
-    /**
-     * 删除指定的对话记录历史，并刷新聊天记录列表
-     * @param {string} conversationId - 对话记录ID
-     */
-    function deleteConversation(conversationId) {
-        chrome.storage.local.get({ conversationHistories: [] }, (result) => {
-            let histories = result.conversationHistories;
-            histories = histories.filter(conv => conv.id !== conversationId);
-            chrome.storage.local.set({ conversationHistories: histories }, () => {
-                console.log('已删除对话记录:', conversationId);
-                const panel = document.getElementById('chat-history-panel');
-                if (panel) {
-                    const filterInput = panel.querySelector('input[type="text"]');
-                    const filterText = filterInput ? filterInput.value : '';
-                    loadConversationHistories(panel, filterText);
-                }
-            });
         });
     }
 
