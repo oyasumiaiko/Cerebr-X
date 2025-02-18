@@ -2804,26 +2804,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     function loadConversationIntoChat(conversation) {
         // 清空当前聊天容器
         chatContainer.innerHTML = '';
-        // 遍历对话中的每条消息并显示，并确保 AI 消息的角色为 "ai"
+        // 遍历对话中的每条消息并显示
         conversation.messages.forEach(msg => {
             const role = msg.role.toLowerCase() === 'assistant' ? 'ai' : msg.role;
+            // 对于内容为数组的情况，将每个部分都使用同一个消息ID展示
             if (Array.isArray(msg.content)) {
-                // 如果消息内容为数组，则逐个处理文本和图片块
                 msg.content.forEach(part => {
+                    let messageElem = null;
                     if (part.type === 'text') {
-                        appendMessage(part.text, role, true);
+                        messageElem = appendMessage(part.text, role, true);
                     } else if (part.type === 'image_url' && part.image_url && part.image_url.url) {
-                        // 以 <img> 标签形式显示图片
-                        appendMessage(`<img src="${part.image_url.url}" alt="image" />`, role, true);
+                        messageElem = appendMessage(`<img src="${part.image_url.url}" alt="image" />`, role, true);
+                    }
+                    if (messageElem) {
+                        // 设置消息的 data-message-id 为加载时的消息 id
+                        messageElem.setAttribute('data-message-id', msg.id);
                     }
                 });
             } else {
-                appendMessage(msg.content, role, true);
+                let messageElem = appendMessage(msg.content, role, true);
+                if (messageElem) {
+                    messageElem.setAttribute('data-message-id', msg.id);
+                }
             }
         });
         // 恢复加载的对话历史到聊天管理器
         chatHistory.messages = conversation.messages.slice();
-        // 修复：将 currentNode 设置为最后一条消息的 id，而不是整个对象
+        // 将 currentNode 更新为最后一条消息的 id
         chatHistory.currentNode = conversation.messages.length > 0 ? conversation.messages[conversation.messages.length - 1].id : null;
         // 保存加载的对话记录ID，用于后续更新操作
         currentConversationId = conversation.id;
