@@ -759,13 +759,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                         lastMessage.appendChild(sourcesList);
 
                         // Add web search queries section if available
-                        if (processedResult.webSearchQueries && processedResult.webSearchQueries.length > 0) {
+                        if (groundingMetadata.webSearchQueries && groundingMetadata.webSearchQueries.length > 0) {
                             const searchQueriesList = document.createElement('div');
                             searchQueriesList.className = 'search-queries-list';
                             searchQueriesList.innerHTML = '<h4>搜索查询：</h4>';
                             const ul = document.createElement('ul');
 
-                            processedResult.webSearchQueries.forEach(query => {
+                            groundingMetadata.webSearchQueries.forEach(query => {
                                 const li = document.createElement('li');
                                 li.textContent = query;
                                 li.addEventListener('click', () => {
@@ -2416,7 +2416,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             requestAnimationFrame(() => {
                 chatContainer.scrollTo({
                     top: chatContainer.scrollHeight,
-                    behavior: 'smooth'
+                    behavior: 'auto' // 取消平滑滚动，立即滚动到底部
                 });
             });
         }
