@@ -1719,33 +1719,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // 清空聊天记录功能，并保存当前对话至持久存储（每次聊天会话结束自动保存）
-    function clearChatHistory() {
-        // 尝试保存当前对话，如果有消息且当前会话ID不存在于存储中
+    async function clearChatHistory() { // 改为 async 函数
+        // 如果有消息，等待保存完成
         if (chatHistory.messages.length > 0) {
-            saveCurrentConversation(true);
+            await saveCurrentConversation(true);
         }
-
-        // 如果有正在进行的请求，停止它
+        // 如果有正在进行的请求，则中止更新
         if (currentController) {
             currentController.abort();
             currentController = null;
         }
-        // 清空聊天容器
+        // 清空聊天容器和内存中的聊天记录
         chatContainer.innerHTML = '';
-        // 清空当前页面的聊天历史记录
         clearHistory();
-        // 重置当前会话ID
+        // 重置当前会话ID，确保下次发送新消息创建新会话
         currentConversationId = null;
     }
 
     const clearChat = document.getElementById('clear-chat');
-    clearChat.addEventListener('click', () => {
-        clearChatHistory();
-        // 关闭设置菜单
+    clearChat.addEventListener('click', async () => {
+        await clearChatHistory();
         toggleSettingsMenu(false);
-        // 聚焦输入框并将光标移到末尾
         messageInput.focus();
-        // 移动光标到末尾
+        // 移动光标到输入框末尾
         const range = document.createRange();
         range.selectNodeContents(messageInput);
         range.collapse(false);
@@ -1793,7 +1789,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // 检查是否需要清空聊天记录
                 const result = await chrome.storage.sync.get(['clearOnSearch']);
                 if (result.clearOnSearch !== false) { // 默认为true
-                    clearChatHistory();
+                    await clearChatHistory();
                 }
 
                 // 根据模型名称决定使用哪个提示词
@@ -1807,7 +1803,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (wasTemporaryMode) {
                     exitTemporaryMode();
                 }
-                clearChatHistory();
+                await clearChatHistory();
 
                 // 为PDF文件使用自定义的PDF提示词
                 if (isPDF) {
@@ -2459,8 +2455,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateSendButtonState();
 
     // 添加清空聊天右键菜单项的点击事件处理
-    clearChatContextButton.addEventListener('click', () => {
-        clearChatHistory();
+    clearChatContextButton.addEventListener('click', async () => {
+        await clearChatHistory();
         hideContextMenu();
     });
 
