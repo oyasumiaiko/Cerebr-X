@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sendChatHistorySwitch = document.getElementById('send-chat-history-switch');
     const showReferenceSwitch = document.getElementById('show-reference-switch');
     const copyCodeButton = document.getElementById('copy-code');
+    const imageContainer = document.getElementById('image-container');
 
     let currentMessageElement = null;
     let isTemporaryMode = false; // 添加临时模式状态变量
@@ -953,44 +954,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.log('收到拖放图片数据');
             const imageData = event.data.imageData;
             if (imageData && imageData.data) {
-                console.log('创建图片标签');
-                const imageTag = createImageTag(imageData.data, imageData.name);
-
-                // 确保输入框有焦点
-                messageInput.focus();
-
-                // 获取或创建选区
-                const selection = window.getSelection();
-                let range;
-
-                // 检查是否有现有选区
-                if (selection.rangeCount > 0) {
-                    range = selection.getRangeAt(0);
-                } else {
-                    // 创建新的选区
-                    range = document.createRange();
-                    // 将选区设置到输入框的末尾
-                    range.selectNodeContents(messageInput);
-                    range.collapse(false);
-                    selection.removeAllRanges();
-                    selection.addRange(range);
-                }
-
-                console.log('插入图片标签到输入框');
-                // 插入图片标签
-                range.deleteContents();
-                range.insertNode(imageTag);
-
-                // 移动光标到图片标签后面
-                const newRange = document.createRange();
-                newRange.setStartAfter(imageTag);
-                newRange.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(newRange);
-
-                // 触发输入事件以调整高度
-                messageInput.dispatchEvent(new Event('input'));
-                console.log('图片插入完成');
+                addImageToContainer(imageData.data, imageData.name);
             }
         } else if (event.data.type === 'FOCUS_INPUT') {
             messageInput.focus();
@@ -1969,36 +1933,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 处理图片粘贴
             const file = imageItem.getAsFile();
             const reader = new FileReader();
-
             reader.onload = async () => {
-                const base64Data = reader.result;
-                const imageTag = createImageTag(base64Data, file.name);
-
-                // 在光标位置插入图片标签
-                const selection = window.getSelection();
-                const range = selection.getRangeAt(0);
-                range.deleteContents();
-                range.insertNode(imageTag);
-
-                // 移动光标到图片标签后面，并确保不会插入额外的换行
-                const newRange = document.createRange();
-                newRange.setStartAfter(imageTag);
-                newRange.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(newRange);
-
-                // 移除可能存在的多余行
-                const brElements = messageInput.getElementsByTagName('br');
-                Array.from(brElements).forEach(br => {
-                    if (br.previousSibling && br.previousSibling.classList && br.previousSibling.classList.contains('image-tag')) {
-                        br.remove();
-                    }
-                });
-
-                // 触发输入事件以调整高度
-                messageInput.dispatchEvent(new Event('input'));
+                addImageToContainer(reader.result, file.name);
             };
-
             reader.readAsDataURL(file);
         } else {
             // 修改：处理纯文本粘贴，避免插入富文本
@@ -2018,34 +1955,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // 处理图片标签的删除
-    messageInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Backspace' || e.key === 'Delete') {
-            const selection = window.getSelection();
-            const range = selection.getRangeAt(0);
-            const startContainer = range.startContainer;
-
-            // 检查是否在图片标签旁边
-            if (startContainer.nodeType === Node.TEXT_NODE && startContainer.textContent === '') {
-                const previousSibling = startContainer.previousSibling;
-                if (previousSibling && previousSibling.classList?.contains('image-tag')) {
-                    e.preventDefault();
-                    previousSibling.remove();
-
-                    // 移除可能存在的多余换行
-                    const brElements = messageInput.getElementsByTagName('br');
-                    Array.from(brElements).forEach(br => {
-                        if (!br.nextSibling || (br.nextSibling.nodeType === Node.TEXT_NODE && br.nextSibling.textContent.trim() === '')) {
-                            br.remove();
-                        }
-                    });
-
-                    // 触发输入事件以调整高度
-                    messageInput.dispatchEvent(new Event('input'));
-                }
-            }
-        }
-    });
 
     // 创建图片标签
     function createImageTag(base64Data, fileName) {
@@ -3020,5 +2929,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
         input.click();
+    }
+
+    // 新增：辅助函数 将图片数据转化为图片标签后统一添加到图片容器
+    function addImageToContainer(imageData, fileName) {
+        const imageTag = createImageTag(imageData, fileName);
+        imageContainer.appendChild(imageTag);
+        messageInput.dispatchEvent(new Event('input'));
+        console.log("图片插入到图片容器");
+    }
+
+    // 新增：dummy 方法，用于显示已发送的图片消息（先删除旧的显示方式，后续再改）
+    function dummyDisplayImageMessage() {
+        return "[图片消息已删除]";
     }
 });
