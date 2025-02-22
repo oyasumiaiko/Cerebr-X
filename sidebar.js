@@ -408,13 +408,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 提取提示词中注入的系统消息
             const systemMessageRegex = /{{system}}([\s\S]*?){{end_system}}/g;
             const injectedSystemMessages = [];
-            messageInput.innerHTML = messageInput.innerHTML.replace(systemMessageRegex, (match, capture) => {
+            messageInput.textContent = messageInput.textContent.replace(systemMessageRegex, (match, capture) => {
                 injectedSystemMessages.push(capture);
+                console.log('捕获注入的系统消息：', injectedSystemMessages);
                 return '';
             });
 
             // 添加用户消息到界面和历史记录
-            const userMessageDiv = appendMessage(messageInput.innerHTML, 'user');
+            const userMessageDiv = appendMessage(messageInput.textContent, 'user');
             clearMessageInput();
             adjustTextareaHeight(messageInput);
 
@@ -1080,20 +1081,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         updateSendButtonState();
 
         // 处理 placeholder 的显示
-        if (this.textContent.trim() === '' && !this.querySelector('.image-tag')) {
+        if (this.textContent.trim() === '') {
             // 如果内容空且没有图片标签，清空内容以显示 placeholder
             while (this.firstChild) {
                 this.removeChild(this.firstChild);
             }
         }
-
-        // 移除不必要的 br 标签
-        const brElements = this.getElementsByTagName('br');
-        Array.from(brElements).forEach(br => {
-            if (!br.nextSibling || (br.nextSibling.nodeType === Node.TEXT_NODE && br.nextSibling.textContent.trim() === '')) {
-                br.remove();
-            }
-        });
     });
 
     // 处理换行和输入
