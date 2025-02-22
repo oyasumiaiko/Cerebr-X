@@ -733,7 +733,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             li.innerHTML = `
                                 <div class="source-item">
                                     <div class="source-info">
-                                        [${source.refNumber}] <a href="${source.url}" target="_blank">${source.domain}</a>
+                                        [${source.refNumber}] <a href="${encodeURI(source.url)}" target="_blank">${source.domain}</a>
                                         <span class="confidence-text">
                                             ${avgConfidence.toFixed(1)}% (${count}次引用)
                                         </span>
@@ -746,6 +746,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                                     </div>
                                 </div>
                             `;
+
+                            // 新增：添加点击事件，使点击 .confidence-text 打开对应网页
+                            const confidenceTextElem = li.querySelector('.confidence-text');
+                            if (confidenceTextElem) {
+                                confidenceTextElem.style.cursor = 'pointer';
+                                confidenceTextElem.addEventListener('click', () => {
+                                    window.open(source.url, '_blank');
+                                });
+                            }
 
                             // 将进度条插入到source-item中
                             const sourceItem = li.querySelector('.source-item');
@@ -2564,7 +2573,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                     let title = conv.title;
 
-                    const displayInfos = [relativeTime, `消息数: ${conv.messageCount}`, domain, title].filter(Boolean).join(' · ');
+                    const displayInfos = [relativeTime, `消息数: ${conv.messageCount}`, domain].filter(Boolean).join(' · ');
                     infoDiv.textContent = displayInfos;
                     // 新增：鼠标悬停显示具体的日期时间
 
