@@ -62,15 +62,17 @@
     </div>
     <div id="input-container">
         <div id="image-container"></div>
-        <div id="message-input" contenteditable="plaintext-only" placeholder="输入消息..." role="textbox"></div>
-        <button id="send-button">↵</button>
-        <button id="settings-button">
-            <svg viewBox="0 0 24 24">
-                <circle cx="12" cy="6" r="2"/>
-                <circle cx="12" cy="12" r="2"/>
-                <circle cx="12" cy="18" r="2"/>
-            </svg>
-        </button>
+        <div id="message-row">
+            <div id="message-input" contenteditable="plaintext-only" placeholder="输入消息..." role="textbox"></div>
+            <button id="send-button">↵</button>
+            <button id="settings-button">
+                <svg viewBox="0 0 24 24">
+                    <circle cx="12" cy="6" r="2"/>
+                    <circle cx="12" cy="12" r="2"/>
+                    <circle cx="12" cy="18" r="2"/>
+                </svg>
+            </button>
+        </div>
         <div id="settings-menu">
             <div class="menu-item" id="theme-toggle">
                 <span>深色模式</span>
