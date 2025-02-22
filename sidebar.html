@@ -65,108 +65,110 @@
         <div id="message-row">
             <div id="message-input" contenteditable="plaintext-only" placeholder="输入消息..." role="textbox"></div>
             <button id="send-button">↵</button>
-            <button id="settings-button">
-                <svg viewBox="0 0 24 24">
-                    <circle cx="12" cy="6" r="2"/>
-                    <circle cx="12" cy="12" r="2"/>
-                    <circle cx="12" cy="18" r="2"/>
-                </svg>
-            </button>
-        </div>
-        <div id="settings-menu">
-            <div class="menu-item" id="theme-toggle">
-                <span>深色模式</span>
-                <label class="switch">
-                    <input type="checkbox" id="theme-switch">
-                    <span class="slider"></span>
-                </label>
-            </div>
-            <div class="menu-item">
-                <span>自动滚动</span>
-                <label class="switch">
-                    <input type="checkbox" id="auto-scroll-switch" checked>
-                    <span class="slider"></span>
-                </label>
-            </div>
-            <div class="menu-item">
-                <span>划词搜索时清空聊天</span>
-                <label class="switch">
-                    <input type="checkbox" id="clear-on-search-switch" checked>
-                    <span class="slider"></span>
-                </label>
-            </div>
-            <div class="menu-item">
-                <span>发送聊天历史</span>
-                <label class="switch">
-                    <input type="checkbox" id="send-chat-history-switch" checked>
-                    <span class="slider"></span>
-                </label>
-            </div>
-            <div class="menu-item">
-                <span>显示引用标记</span>
-                <label class="switch">
-                    <input type="checkbox" id="show-reference-switch" checked>
-                    <span class="slider"></span>
-                </label>
-            </div>
-            <div class="menu-item" id="clear-chat" style="display: none;">
-                <span>清空聊天记录</span>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M3 4H13" stroke="currentColor" stroke-width="1.5"/>
-                    <path d="M5 4V12H11V4" stroke="currentColor" stroke-width="1.5"/>
-                </svg>
-            </div>
-            <div class="menu-item" id="quick-summary" style="display: none;">
-                <span>快速总结</span>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M2 4h12M2 8h8M2 12h4" stroke="currentColor" stroke-width="1.5"/>
-                </svg>
-            </div>
-            <div class="menu-item" id="prompt-settings-toggle">
-                <span>提示词设置</span>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-            </div>
-            <div class="menu-item" id="api-settings-toggle">
-                <span>API 设置</span>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-            </div>
-            <div class="menu-item" id="debug-chat-tree-btn">
-                <span>调试聊天记录树</span>
-            </div>
-            <div class="menu-item" id="favorite-apis" style="display: none;">
-                <span>收藏的API</span>
-                <div class="favorite-apis-list"></div>
-            </div>
-            <div class="menu-item">
-                <span>侧栏宽度</span>
-                <input type="range" id="sidebar-width" min="500" max="1500" step="10" value="800">
-                <span id="width-value">800px</span>
-            </div>
-            <div class="menu-item">
-                <span>字体大小</span>
-                <input type="range" id="font-size" min="12" max="20" step="1" value="14">
-                <span id="font-size-value">14px</span>
-            </div>
-            <div class="menu-item">
-                <span>缩放比例</span>
-                <input type="range" id="scale-factor" min="0.5" max="2" step="0.1" value="1">
-                <span id="scale-value">1.0x</span>
-            </div>
-            <div class="menu-item" id="fullscreen-toggle">
-                <span>全屏模式</span>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M2 6V2H6M10 2H14V6M14 10V14H10M6 14H2V10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            </div>
-            <div class="menu-item" id="chat-history-menu">
-                <span>聊天记录</span>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
+            <div id="settings-container">
+                <button id="settings-button">
+                    <svg viewBox="0 0 24 24">
+                        <circle cx="12" cy="6" r="2"/>
+                        <circle cx="12" cy="12" r="2"/>
+                        <circle cx="12" cy="18" r="2"/>
+                    </svg>
+                </button>
+                <div id="settings-menu">
+                    <div class="menu-item" id="theme-toggle">
+                        <span>深色模式</span>
+                        <label class="switch">
+                            <input type="checkbox" id="theme-switch">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="menu-item">
+                        <span>自动滚动</span>
+                        <label class="switch">
+                            <input type="checkbox" id="auto-scroll-switch" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="menu-item">
+                        <span>划词搜索时清空聊天</span>
+                        <label class="switch">
+                            <input type="checkbox" id="clear-on-search-switch" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="menu-item">
+                        <span>发送聊天历史</span>
+                        <label class="switch">
+                            <input type="checkbox" id="send-chat-history-switch" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="menu-item">
+                        <span>显示引用标记</span>
+                        <label class="switch">
+                            <input type="checkbox" id="show-reference-switch" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="menu-item" id="clear-chat" style="display: none;">
+                        <span>清空聊天记录</span>
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M3 4H13" stroke="currentColor" stroke-width="1.5"/>
+                            <path d="M5 4V12H11V4" stroke="currentColor" stroke-width="1.5"/>
+                        </svg>
+                    </div>
+                    <div class="menu-item" id="quick-summary" style="display: none;">
+                        <span>快速总结</span>
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M2 4h12M2 8h8M2 12h4" stroke="currentColor" stroke-width="1.5"/>
+                        </svg>
+                    </div>
+                    <div class="menu-item" id="prompt-settings-toggle">
+                        <span>提示词设置</span>
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                    <div class="menu-item" id="api-settings-toggle">
+                        <span>API 设置</span>
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                    <div class="menu-item" id="debug-chat-tree-btn">
+                        <span>调试聊天记录树</span>
+                    </div>
+                    <div class="menu-item" id="favorite-apis" style="display: none;">
+                        <span>收藏的API</span>
+                        <div class="favorite-apis-list"></div>
+                    </div>
+                    <div class="menu-item">
+                        <span>侧栏宽度</span>
+                        <input type="range" id="sidebar-width" min="500" max="1500" step="10" value="800">
+                        <span id="width-value">800px</span>
+                    </div>
+                    <div class="menu-item">
+                        <span>字体大小</span>
+                        <input type="range" id="font-size" min="12" max="20" step="1" value="14">
+                        <span id="font-size-value">14px</span>
+                    </div>
+                    <div class="menu-item">
+                        <span>缩放比例</span>
+                        <input type="range" id="scale-factor" min="0.5" max="2" step="0.1" value="1">
+                        <span id="scale-value">1.0x</span>
+                    </div>
+                    <div class="menu-item" id="fullscreen-toggle">
+                        <span>全屏模式</span>
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M2 6V2H6M10 2H14V6M14 10V14H10M6 14H2V10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <div class="menu-item" id="chat-history-menu">
+                        <span>聊天记录</span>
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

@@ -185,6 +185,12 @@ body {
     display: block;
 }
 
+/* 新增：容器为设置按钮和菜单的包裹容器，作为菜单的定位参照 */
+#settings-container {
+    position: relative;
+    display: inline-block;
+}
+
 /* 设置按钮和菜单样式 */
 #settings-button {
     padding: 12px;
@@ -225,7 +231,7 @@ body {
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
     padding: 8px;
-    min-width: 180px;
+    width: max-content;
     margin-bottom: 8px;
     transform-origin: bottom right;
     backdrop-filter: blur(var(--cerebr-blur-radius));
