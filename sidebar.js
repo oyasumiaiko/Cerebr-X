@@ -412,7 +412,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
 
             // 添加用户消息，同时包含文本和图片区域
-            appendMessage(messageText, 'user', false, null, imageContainer.innerHTML);
+            const userMessageDiv = appendMessage(messageText, 'user', false, null, imageContainer.innerHTML);
             
             clearMessageInput();
             adjustTextareaHeight(messageInput);
@@ -2676,26 +2676,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 遍历对话中的每条消息并显示
         conversation.messages.forEach(msg => {
             const role = msg.role.toLowerCase() === 'assistant' ? 'ai' : msg.role;
-            // 对于内容为数组的情况，将每个部分都使用同一个消息ID展示
+            let messageElem = null;
+
             if (Array.isArray(msg.content)) {
+                const imagesHTML = document.createElement('div');
+                let textContent = '';
+
                 msg.content.forEach(part => {
-                    let messageElem = null;
                     if (part.type === 'text') {
-                        messageElem = appendMessage(part.text, role, true);
+                        textContent = part.text;
                     } else if (part.type === 'image_url' && part.image_url && part.image_url.url) {
-                        messageElem = appendMessage(`<img src="${part.image_url.url}" alt="image" />`, role, true);
-                    }
-                    if (messageElem) {
-                        // 设置消息的 data-message-id 为加载时的消息 id
-                        messageElem.setAttribute('data-message-id', msg.id);
+                        const imageTag = createImageTag(part.image_url.url, null);
+                        imagesHTML.appendChild(imageTag);
                     }
                 });
+
+                messageElem = appendMessage(textContent, role, true, null, imagesHTML.innerHTML);
             } else {
-                let messageElem = appendMessage(msg.content, role, true);
-                if (messageElem) {
-                    messageElem.setAttribute('data-message-id', msg.id);
-                }
+                messageElem = appendMessage(msg.content, role, true);
             }
+            
+            messageElem.setAttribute('data-message-id', msg.id);
         });
         // 恢复加载的对话历史到聊天管理器
         chatHistory.messages = conversation.messages.slice();
