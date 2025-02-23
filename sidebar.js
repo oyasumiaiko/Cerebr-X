@@ -1154,9 +1154,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             // 发送消息
             sendMessage();
-        } else if (e.key === 'Escape') {
-            // 按 ESC 键时让输入框失去焦点
-            messageInput.blur();
         } else if (e.key === '-') {
             // 检查输入框是否为空
             if (!this.textContent.trim() && !this.querySelector('.image-tag')) {
@@ -2442,15 +2439,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             // --- Modified: Close panel only when clicking on chat-container ---
             chatContainer.addEventListener('click', function onChatContainerClick(event) {
-                if (panel) {
-                    panel.remove();
-                    chatContainer.removeEventListener('click', onChatContainerClick);
-                }
+                closeChatHistoryPanel();
+                chatContainer.removeEventListener('click', onChatContainerClick);
             });
             // --- End Modified ---
         }
         // 加载默认（不过滤）的对话记录列表
         loadConversationHistories(panel, '');
+
+        // 设置面板显示，并触发 CSS 淡入动画
+        panel.style.display = 'flex';  // 面板采用 flex 布局
+        void panel.offsetWidth;         // 强制重排，让 CSS transition 起效
+        panel.classList.add('visible');
     }
 
     /**
@@ -2904,8 +2904,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 新增：统一关闭聊天记录面板的函数
     function closeChatHistoryPanel() {
         const panel = document.getElementById('chat-history-panel');
-        if (panel) {
-            panel.remove();
+        if (panel && panel.classList.contains('visible')) {
+            panel.classList.remove('visible');
+            panel.addEventListener('transitionend', function handler(e) {
+                if (e.propertyName === 'opacity' && !panel.classList.contains('visible')) {
+                    panel.style.display = 'none';
+                    panel.removeEventListener('transitionend', handler);
+                }
+            });
         }
     }
+
+    // ----- 修改 5：新增切换函数 -----
+    function toggleChatHistoryPanel() {
+        const panel = document.getElementById('chat-history-panel');
+        if (panel && panel.classList.contains('visible')) {
+            closeChatHistoryPanel();
+        } else {
+            showChatHistoryPanel();
+        }
+    }
+
+    // ----- 修改 2：增加全局 ESC 键监听，实现面板切换 -----
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape'){
+            toggleChatHistoryPanel();
+            e.preventDefault();
+        }
+    });
 });
