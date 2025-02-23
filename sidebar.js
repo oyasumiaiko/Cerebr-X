@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const imageContainer = document.getElementById('image-container');
     const promptSettingsToggle = document.getElementById('prompt-settings-toggle');
     const promptSettings = document.getElementById('prompt-settings');
-    
+    const inputContainer = document.getElementById('input-container');
     let currentMessageElement = null;
     let isTemporaryMode = false; // 添加临时模式状态变量
     let isProcessingMessage = false; // 添加消息处理状态标志
@@ -295,6 +295,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 如果content是空字符串，就判断为图片提示词
         const prompts = promptSettingsManager.getPrompts();
 
+        // 如果content是图片提示词，则返回image
+        if (prompts.image.prompt && content === prompts.image.prompt) {
+            return 'image';
+        }
+
         // 检查是否是PDF提示词
         if (prompts.pdf.prompt && content === prompts.pdf.prompt) {
             return 'pdf';
@@ -370,7 +375,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // 获取当前提示词设置
         const prompts = promptSettingsManager.getPrompts();
-        const currentPromptType = imageTags.length > 0 && messageText === '' ? 'image' : getPromptTypeFromContent(messageText);
+        const shouldUseImagePrompt = imageTags.length > 0 && messageText.trim() === '';
+        if (shouldUseImagePrompt) {
+            messageText = prompts.image.prompt;
+        }
+        const currentPromptType = getPromptTypeFromContent(messageText);
 
         // 提前创建 loadingMessage 配合finally使用
         let loadingMessage;
@@ -461,7 +470,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const conversationChain = getCurrentConversationChain();
 
             // 根据设置决定是否发送聊天历史
-            const SendChatHistory = shouldSendChatHistory && currentPromptType !== 'selection';
+            const SendChatHistory = shouldSendChatHistory && currentPromptType !== 'selection' && currentPromptType !== 'image';
             if (SendChatHistory) {
                 messages.push(...conversationChain.map(node => ({
                     role: node.role,
@@ -950,6 +959,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             const imageData = event.data.imageData;
             if (imageData && imageData.data) {
                 addImageToContainer(imageData.data, imageData.name);
+            }
+            if (event.data.explain) {
+                sendMessage();
             }
         } else if (event.data.type === 'FOCUS_INPUT') {
             messageInput.focus();
@@ -2253,20 +2265,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 更新发送按钮状态
     function updateSendButtonState() {
-        const hasContent = messageInput.textContent.trim() || messageInput.querySelector('.image-tag');
+        const hasContent = messageInput.textContent.trim() || inputContainer.querySelector('.image-tag');
         sendButton.disabled = !hasContent;
     }
 
     // 添加发送按钮点击事件
     sendButton.addEventListener('click', () => {
         const text = messageInput.textContent.trim();
-        if (text || messageInput.querySelector('.image-tag')) {
-            sendMessage();
-        }
+        sendMessage();
     });
 
     // 初始化发送按钮状态
-    updateSendButtonState();
+    //updateSendButtonState();
 
     // 添加清空聊天右键菜单项的点击事件处理
     clearChatContextButton.addEventListener('click', async () => {
@@ -2337,6 +2347,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             if (content.includes(prompts.summary.prompt)) {
                 content = content.replace(prompts.summary.prompt, '[总结]');
+            }
+            if (content.includes(prompts.image.prompt)) {
+                content = content.replace(prompts.image.prompt, '[解释图片]');
             }
             summary = content.substring(0, 50);
         }

@@ -656,7 +656,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 if (imageData) {
                   iframe.contentWindow.postMessage({
                     type: 'DROP_IMAGE',
-                    imageData: imageData
+                    imageData: imageData,
+                    explain: true
                   }, '*');
                 }
               })
