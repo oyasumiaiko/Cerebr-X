@@ -115,7 +115,7 @@ class PromptSettings {
 
     // 初始化模型选择下拉框
     initModelSelects() {
-        const promptTypes = ['selection', 'pdf', 'summary', 'image']; 
+        const promptTypes = ['selection', 'query', 'pdf', 'summary', 'image']; 
 
         // 获取所有可用的模型
         const getAvailableModels = () => {

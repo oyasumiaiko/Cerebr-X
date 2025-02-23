@@ -64,6 +64,8 @@ chrome.commands.onCommand.addListener(async (command) => {
     await handleTabCommand('CLEAR_CHAT');
   } else if (command === 'quick_summary') {
     await handleTabCommand('QUICK_SUMMARY');
+  } else if (command === 'quick_summary_query') {
+    await handleTabCommand('QUICK_SUMMARY_QUERY');
   } else if (command === 'toggle_temp_mode') {
     await handleTabCommand('TOGGLE_TEMP_MODE');
   }

@@ -633,6 +633,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             selectedContent: selectedContent
         }, '*');
         break;
+      case 'QUICK_SUMMARY_QUERY':
+        sidebar.toggle(true);  // 明确传入 true 表示打开
+        let selectedContentQuery = window.getSelection().toString();
+        iframe.contentWindow.postMessage({
+            type: 'QUICK_SUMMARY_COMMAND_QUERY',
+            selectedContent: selectedContentQuery
+        }, '*');
+        break;
       case 'CLEAR_CHAT':
         iframe?.contentWindow?.postMessage({ type: 'CLEAR_CHAT_COMMAND' }, '*');
         break;

@@ -977,6 +977,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         } else if (event.data.type === 'QUICK_SUMMARY_COMMAND') {
             performQuickSummary(event.data.selectedContent);
+        } else if (event.data.type === 'QUICK_SUMMARY_COMMAND_QUERY') {
+            performQuickSummary(event.data.selectedContent, true);
         } else if (event.data.type === 'TOGGLE_TEMP_MODE_FROM_EXTENSION') {
             // 调用已有的toggle逻辑
             if (isTemporaryMode) {
@@ -1726,7 +1728,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 导入并初始化提示词设置
     const promptSettingsManager = new PromptSettings();
 
-    async function performQuickSummary(webpageSelection = null) {
+    async function performQuickSummary(webpageSelection = null, forceQuery = false) {
         const wasTemporaryMode = isTemporaryMode;
         try {
             // 检查焦点是否在侧栏内
@@ -1753,7 +1755,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
 
                 // 根据模型名称决定使用哪个提示词
-                const promptType = (prompts.selection.model || '').endsWith('-search') ? 'selection' : 'query';
+                // 新增：forceQuery为true时, 强制使用 'query' 提示词
+                const promptType = forceQuery ? 'query' : ((prompts.selection.model || '').endsWith('-search') ? 'selection' : 'query');
                 const prompt = prompts[promptType].prompt.replace('<SELECTION>', selectedText);
                 messageInput.textContent = prompt;
 
