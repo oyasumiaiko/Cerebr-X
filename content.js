@@ -367,7 +367,10 @@ class CerebrSidebar {
 
       // 根据当前显示状态更新侧边栏
       if (this.isVisible) {
-        // 显示侧边栏
+        // 显示侧边栏前，先将 display 设为 'block'
+        this.sidebar.style.display = 'block';
+        // 强制重排（读取 offsetWidth ）以确保初始状态被应用
+        this.sidebar.offsetWidth;
         this.sidebar.classList.add('visible');
 
         // 如果当前为全屏模式，则隐藏滚动条
@@ -380,7 +383,7 @@ class CerebrSidebar {
           this.focusInput();
         }
       } else {
-        // 隐藏侧边栏
+        // 隐藏侧边栏：先移除 visible 类
         this.sidebar.classList.remove('visible');
 
         // 如果当前为全屏模式，关闭侧边栏时需要还原滚动条状态
@@ -393,6 +396,12 @@ class CerebrSidebar {
         if (iframe) {
           iframe.contentWindow.postMessage({ type: 'BLUR_INPUT' }, '*');
         }
+        // 当动画过渡结束后，再把 display 设置为 none
+        this.sidebar.addEventListener('transitionend', (e) => {
+          if (!this.sidebar.classList.contains('visible')) {
+            this.sidebar.style.display = 'none';
+          }
+        }, { once: true });
       }
     } catch (error) {
       console.error('切换侧边栏失败:', error);
