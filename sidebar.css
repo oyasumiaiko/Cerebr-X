@@ -146,6 +146,10 @@ body {
     scrollbar-width: none;
 }
 
+#image-container:empty {
+    display: none;
+}
+
 .message .image-content
 {
     padding: 0px;
@@ -1973,7 +1977,7 @@ body.hide-references .reference-number.superscript {
     border: 1px solid var(--cerebr-border-color);
     border-radius: 8px;
     padding: 16px;
-    z-index: 9999;
+    /* z-index: 9999; */
     backdrop-filter: blur(var(--cerebr-blur-radius));
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
     overflow: hidden;
@@ -2016,12 +2020,25 @@ body.hide-references .reference-number.superscript {
     color: var(--cerebr-text-color);
 }
 
+/* 添加聊天记录分组标题样式 */
+.chat-history-group-header {
+    font-weight: bold;
+    padding: 8px;
+    background: var(--cerebr-hover-color);
+    border-radius: 4px;
+    margin-top: 12px;
+    margin-bottom: 6px;
+    color: var(--cerebr-text-color);
+    opacity: 0;
+    animation: chatHistoryItemFadeIn 0.1s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
 .chat-history-item {
     border-bottom: 1px solid var(--cerebr-border-color);
     padding: 8px 0;
     cursor: pointer;
     opacity: 0;
-    animation: chatHistoryItemFadeIn 0.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    animation: chatHistoryItemFadeIn 0.1s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 @keyframes chatHistoryItemFadeIn {
@@ -2089,29 +2106,6 @@ body.hide-references .reference-number.superscript {
     flex: 0 0 auto;
 }
 
-/* 添加聊天记录分组标题样式 */
-.chat-history-group-header {
-    font-weight: bold;
-    padding: 8px;
-    background: var(--cerebr-hover-color);
-    border-radius: 4px;
-    margin-top: 12px;
-    margin-bottom: 6px;
-    color: var(--cerebr-text-color);
-    opacity: 0;
-    animation: chatHistoryGroupFadeIn 0.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-@keyframes chatHistoryGroupFadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(4px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
 
 /* 高亮显示关键字附近内容的样式 */
 .highlight-snippet {
