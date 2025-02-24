@@ -68,6 +68,8 @@ chrome.commands.onCommand.addListener(async (command) => {
     await handleTabCommand('QUICK_SUMMARY_QUERY');
   } else if (command === 'toggle_temp_mode') {
     await handleTabCommand('TOGGLE_TEMP_MODE');
+  } else if (command === 'capture_screenshot') {
+    await handleTabCommand('CAPTURE_SCREENSHOT');
   }
 });
 

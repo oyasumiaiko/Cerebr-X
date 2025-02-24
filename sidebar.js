@@ -371,7 +371,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         const imageTags = imageContainer.querySelectorAll('.image-tag');
         let messageText = messageInput.textContent;
-        
+
+        const imageContainsScreenshot = imageContainer.querySelector('img[alt="page-screenshot.png"]');
+
+
         // 如果消息为空且没有图片标签，则不发送消息
         const isEmptyMessage = !messageText && imageTags.length === 0;
 
@@ -456,6 +459,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             // 组合系统消息+注入的系统消息+网页内容
             let systemMessageContent = prompts.system.prompt;
+            
+            if (imageContainsScreenshot) {
+                systemMessageContent += "\n用户附加了当前页面的屏幕截图";
+            }
             systemMessageContent += "\n" + injectedSystemMessages.join('\n');
             systemMessageContent += pageContentPrompt;
 
@@ -1162,16 +1169,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             e.preventDefault();
 
             const text = this.textContent.trim();
-            if (e.ctrlKey) {
+                if (e.ctrlKey) {
                 // Ctrl+Enter: 将输入内容作为selection类型发送
-                const prompts = promptSettingsManager.getPrompts();
-                const selectionPrompt = prompts.selection.prompt;
-                if (selectionPrompt) {
+                    const prompts = promptSettingsManager.getPrompts();
+                    const selectionPrompt = prompts.selection.prompt;
+                    if (selectionPrompt) {
                     this.textContent = selectionPrompt.replace('<SELECTION>', text);
+                    }
                 }
-            }
             // 发送消息
-            sendMessage();
+                sendMessage();
         } else if (e.key === '-') {
             // 检查输入框是否为空
             if (!this.textContent.trim() && !this.querySelector('.image-tag')) {
@@ -3003,4 +3010,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             hideContextMenu();
         }
     });
+
+    function requestScreenshot() {
+        window.parent.postMessage({ type: 'CAPTURE_SCREENSHOT' }, '*');
+    }
 });

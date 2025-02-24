@@ -332,6 +332,9 @@ class CerebrSidebar {
           console.log('处理全屏切换消息:', event.data.isFullscreen);
           this.toggleFullscreen(event.data.isFullscreen);
           break;
+        case 'CAPTURE_SCREENSHOT':
+          captureAndDropScreenshot();
+          break;
       }
     });
   }
@@ -655,6 +658,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             explain: true
           }, '*');
         }
+        break;
+      case 'CAPTURE_SCREENSHOT':
+        captureAndDropScreenshot();
         break;
     }
 
@@ -1095,12 +1101,3 @@ function captureAndDropScreenshot() {
   });
 }
 // --- 修改截图功能，使用 captureVisibleTab 截取屏幕结束 ---
-
-// 新增：按 F9 直接测试截图，不用发送 CAPTURE_PAGE 消息
-document.addEventListener('keydown', (e) => {
-    // 使用 F9 键触发截图功能
-    if (e.code === 'F9') {
-        console.log('F9 按键触发截图');
-        captureAndDropScreenshot();
-    }
-});

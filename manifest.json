@@ -43,6 +43,9 @@
     },
     "toggle_temp_mode": {
       "description": "切换临时模式"
+    },
+    "capture_screenshot": {
+      "description": "截取当前页面截图添加到消息中"
     }
   },
   "background": {
