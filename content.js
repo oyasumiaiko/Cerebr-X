@@ -1076,28 +1076,41 @@ async function extractTextFromPDF(url) {
  * 截图前会先隐藏侧边栏，并在等待两帧后再进行截图，最后恢复侧边栏显示。
  */
 function captureAndDropScreenshot() {
-  const sidebarDisplay = sidebar.sidebar.style.display; // 保存侧边栏原始显示状态
+  const sidebarVisibility = sidebar.sidebar.style.visibility; // 保存侧边栏原始可见状态
+  sidebar.sidebar.style.transition = 'none'; // 设置侧边栏无过渡效果
+  sidebar.sidebar.style.visibility = 'hidden'; // 立即隐藏侧边栏
 
-  requestAnimationFrame(() => {
-    sidebar.sidebar.style.display = 'none'; // 立即隐藏侧边栏
+  /**
+   * 递归地执行 requestAnimationFrame，并在指定次数后执行截屏操作。
+   * @param {number} waitFramesCount 递归层级，控制等待的帧数。
+   */
+  function waitCaptureWithAnimationFrame(waitFramesCount) {
     requestAnimationFrame(() => {
-      // 在等待两帧后执行截图
-      chrome.runtime.sendMessage({ action: 'capture_visible_tab' }, (response) => {
-        sidebar.sidebar.style.display = sidebarDisplay; // 截图完成后恢复侧边栏显示
-        const iframe = sidebar.sidebar?.querySelector('.cerebr-sidebar__iframe');
-        if (response && response.success && response.dataURL) {
-          console.log('页面截图完成，发送到侧边栏');
-          if (iframe) {
-            iframe.contentWindow.postMessage({
-              type: 'DROP_IMAGE',
-              imageData: { data: response.dataURL, name: 'page-screenshot.png' },
-            }, '*');
+      if (waitFramesCount > 0) {
+        // 递归调用，减少递归层级
+        waitCaptureWithAnimationFrame(waitFramesCount - 1);
+      } else {
+        // 达到指定递归层级后，执行截屏操作
+        chrome.runtime.sendMessage({ action: 'capture_visible_tab' }, (response) => {
+          sidebar.sidebar.style.visibility = sidebarVisibility; // 截图完成后恢复侧边栏显示
+          sidebar.sidebar.style.transition = '';
+          const iframe = sidebar.sidebar?.querySelector('.cerebr-sidebar__iframe');
+          if (response && response.success && response.dataURL) {
+            console.log('页面截图完成，发送到侧边栏');
+            if (iframe) {
+              iframe.contentWindow.postMessage({
+                type: 'DROP_IMAGE',
+                imageData: { data: response.dataURL, name: 'page-screenshot.png' },
+              }, '*');
+            }
+          } else {
+            console.error('屏幕截图失败:', response && response.error);
           }
-        } else {
-          console.error('屏幕截图失败:', response && response.error);
-        }
-      });
+        });
+      }
     });
-  });
+  }
+
+  waitCaptureWithAnimationFrame(5); // 初始调用，设置递归层级为 5，实现等待五帧的效果
 }
 // --- 修改截图功能，使用 captureVisibleTab 截取屏幕结束 ---
