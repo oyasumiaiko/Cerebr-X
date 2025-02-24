@@ -8,6 +8,7 @@ import { createImageHandler } from './image_handler.js'; // 导入图片处理�
 import { createChatHistoryUI } from './chat_history_ui.js'; // 导入聊天历史UI模块
 import { createApiManager } from './api_settings.js'; // 导入 API 设置模块
 import { createMessageSender } from './message_sender.js'; // 导入消息发送模块
+import { createSettingsManager } from './settings_manager.js'; // 导入设置管理模块
 
 document.addEventListener('DOMContentLoaded', async () => {
     const chatContainer = document.getElementById('chat-container');
@@ -35,13 +36,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     const promptSettings = document.getElementById('prompt-settings');
     const inputContainer = document.getElementById('input-container');
     const regenerateButton = document.getElementById('regenerate-message');
+    const themeSwitch = document.getElementById('theme-switch');
+    const autoScrollSwitch = document.getElementById('auto-scroll-switch');
+    const clearOnSearchSwitch = document.getElementById('clear-on-search-switch');
+    const scaleFactor = document.getElementById('scale-factor');
+    const scaleValue = document.getElementById('scale-value');
 
     let currentMessageElement = null;
     let isTemporaryMode = false; // 添加临时模式状态变量
     let isProcessingMessage = false; // 添加消息处理状态标志
     let shouldAutoScroll = true; // 控制是否自动滚动
     let isAutoScrollEnabled = true; // 自动滚动开关状态
-    let currentController = null;  // 用于存储当前的 AbortController
     let isFullscreen = false; // 全屏模式
     let pageContent = null;  // 预存储的网页文本内容
     let shouldSendChatHistory = true; // 是否发送聊天历史
@@ -169,21 +174,38 @@ document.addEventListener('DOMContentLoaded', async () => {
         getPrompts: () => promptSettingsManager.getPrompts()
     });
 
-    // 监听引用标记开关变化，更新消息处理器的showReference设置
+    // 创建设置管理器实例
+    const settingsManager = createSettingsManager({
+        themeSwitch,
+        sidebarWidth,
+        widthValue,
+        fontSize,
+        fontSizeValue,
+        scaleFactor,
+        scaleValue,
+        autoScrollSwitch,
+        clearOnSearchSwitch,
+        sendChatHistorySwitch,
+        showReferenceSwitch,
+        setMessageSenderChatHistory: messageSender.setSendChatHistory
+    });
+    
+    // 初始化设置管理器
+    await settingsManager.init();
+
+    // 监听引用标记开关变化
     showReferenceSwitch.addEventListener('change', (e) => {
-        updateReferenceVisibility(e.target.checked);
-        saveSettings('showReference', e.target.checked);
+        settingsManager.setShowReference(e.target.checked);
     });
 
     // 监听聊天历史开关变化
     sendChatHistorySwitch.addEventListener('change', (e) => {
-        messageSender.setSendChatHistory(e.target.checked);
-        saveSettings('shouldSendChatHistory', e.target.checked);
+        settingsManager.setSendChatHistory(e.target.checked);
     });
 
     // 添加全屏切换功能
     fullscreenToggle.addEventListener('click', async () => {
-        const isFullscreen = !isFullscreen;
+        isFullscreen = !isFullscreen;
         // 直接向父窗口发送消息
         window.parent.postMessage({
             type: 'TOGGLE_FULLSCREEN',
@@ -371,58 +393,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     messageInput.addEventListener('focus', () => {
         toggleSettingsMenu(false);
     });
-
-    // 主题切换
-    const themeSwitch = document.getElementById('theme-switch');
-
-    // 设置主题
-    function setTheme(isDark) {
-        // 获取根元素
-        const root = document.documentElement;
-
-        // 移除现有的主题类
-        root.classList.remove('dark-theme', 'light-theme');
-
-        // 添加新的主题类
-        root.classList.add(isDark ? 'dark-theme' : 'light-theme');
-
-        // 更新开关状态
-        themeSwitch.checked = isDark;
-
-        // 保存主题设置
-        chrome.storage.sync.set({ theme: isDark ? 'dark' : 'light' });
-    }
-
-    // 初始化主题
-    async function initTheme() {
-        try {
-            const result = await chrome.storage.sync.get('theme');
-            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            const isDark = result.theme === 'dark' || (!result.theme && prefersDark);
-            setTheme(isDark);
-        } catch (error) {
-            console.error('初始化主题失败:', error);
-            // 如果出错，使用系统主题
-            setTheme(window.matchMedia('(prefers-color-scheme: dark)').matches);
-        }
-    }
-
-    // 监听主题切换
-    themeSwitch.addEventListener('change', () => {
-        setTheme(themeSwitch.checked);
-    });
-
-    // 监听系统主题变化
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-        chrome.storage.sync.get('theme', (data) => {
-            if (!data.theme) {  // 只有在用户没有手动设置主题时才跟随系统
-                setTheme(e.matches);
-            }
-        });
-    });
-
-    // 初始化主题
-    await initTheme();
 
     // 清空聊天记录功能，并保存当前对话至持久存储（每次聊天会话结束自动保存）
     async function clearChatHistory() { // 改为 async 函数
@@ -629,150 +599,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // 初始化设置
-    async function initSettings() {
-        try {
-            const result = await chrome.storage.sync.get([
-                'sidebarWidth',
-                'fontSize',
-                'scaleFactor',
-                'autoScroll',
-                'clearOnSearch',
-                'shouldSendChatHistory',
-                'showReference' // 添加新的配置键
-            ]);
-            if (result.sidebarWidth) {
-                document.documentElement.style.setProperty('--cerebr-sidebar-width', `${result.sidebarWidth}px`);
-                sidebarWidth.value = result.sidebarWidth;
-                widthValue.textContent = `${result.sidebarWidth}px`;
-            }
-            if (result.fontSize) {
-                document.documentElement.style.setProperty('--cerebr-font-size', `${result.fontSize}px`);
-                fontSize.value = result.fontSize;
-                fontSizeValue.textContent = `${result.fontSize}px`;
-            }
-            if (result.scaleFactor) {
-                const scaleFactorElem = document.getElementById('scale-factor');
-                const scaleValue = document.getElementById('scale-value');
-                scaleFactorElem.value = result.scaleFactor;
-                scaleValue.textContent = `${result.scaleFactor}x`;
-            }
-            // 初始化自动滚动开关状态
-            if (result.autoScroll !== undefined) {
-                isAutoScrollEnabled = result.autoScroll;
-                const autoScrollSwitch = document.getElementById('auto-scroll-switch');
-                if (autoScrollSwitch) {
-                    autoScrollSwitch.checked = isAutoScrollEnabled;
-                }
-            }
-            // 初始化划词搜索清空聊天设置
-            const clearOnSearchSwitch = document.getElementById('clear-on-search-switch');
-            if (clearOnSearchSwitch) {
-                clearOnSearchSwitch.checked = result.clearOnSearch !== false; // 默认为true
-            }
-            // 初始化聊天历史开关状态
-            if (result.shouldSendChatHistory !== undefined) {
-                messageSender.setSendChatHistory(result.shouldSendChatHistory);
-                const sendChatHistorySwitch = document.getElementById('send-chat-history-switch');
-                if (sendChatHistorySwitch) {
-                    sendChatHistorySwitch.checked = result.shouldSendChatHistory;
-                }
-            }
-            // 新增：初始化显示引用标记设置（默认显示）
-            if (showReferenceSwitch) {
-                if (result.showReference === undefined) {
-                    showReferenceSwitch.checked = true;
-                } else {
-                    showReferenceSwitch.checked = result.showReference;
-                }
-                updateReferenceVisibility(showReferenceSwitch.checked);
-                showReferenceSwitch.addEventListener('change', (e) => {
-                    updateReferenceVisibility(e.target.checked);
-                    saveSettings('showReference', e.target.checked);
-                });
-            }
-        } catch (error) {
-            console.error('初始化设置失败:', error);
-        }
-    }
-
-    // 保存设置
-    async function saveSettings(key, value) {
-        try {
-            await chrome.storage.sync.set({ [key]: value });
-        } catch (error) {
-            console.error('保存设置失败:', error);
-        }
-    }
-
-    // 新增：切换引用标记显示/隐藏的函数
-    function updateReferenceVisibility(shouldShow) {
-        if (shouldShow) {
-            document.body.classList.remove('hide-references');
-        } else {
-            document.body.classList.add('hide-references');
-        }
-    }
-
-    // 监听侧栏宽度变化
-    sidebarWidth.addEventListener('input', (e) => {
-        const width = e.target.value;
-        widthValue.textContent = `${width}px`;
-    });
-
-    sidebarWidth.addEventListener('change', (e) => {
-        const width = e.target.value;
-        document.documentElement.style.setProperty('--cerebr-sidebar-width', `${width}px`);
-        saveSettings('sidebarWidth', width);
-        // 通知父窗口宽度变化
-        window.parent.postMessage({
-            type: 'SIDEBAR_WIDTH_CHANGE',
-            width: parseInt(width)
-        }, '*');
-    });
-
-    // 监听字体大小变化
-    fontSize.addEventListener('input', (e) => {
-        const size = e.target.value;
-        fontSizeValue.textContent = `${size}px`;
-    });
-
-    fontSize.addEventListener('change', (e) => {
-        const size = e.target.value;
-        document.documentElement.style.setProperty('--cerebr-font-size', `${size}px`);
-        saveSettings('fontSize', size);
-    });
-
-    // 监听缩放比例变化
-    const scaleFactor = document.getElementById('scale-factor');
-    const scaleValue = document.getElementById('scale-value');
-
-    scaleFactor.addEventListener('input', (e) => {
-        const value = parseFloat(e.target.value);
-        scaleValue.textContent = `${value.toFixed(1)}x`;
-    });
-
-    scaleFactor.addEventListener('change', (e) => {
-        const value = parseFloat(e.target.value);
-        window.parent.postMessage({
-            type: 'SCALE_FACTOR_CHANGE',
-            value: value
-        }, '*');
-        saveSettings('scaleFactor', value);
-    });
-
-    // 添加自动滚动开关事件监听
-    const autoScrollSwitch = document.getElementById('auto-scroll-switch');
-    if (autoScrollSwitch) {
-        autoScrollSwitch.addEventListener('change', (e) => {
-            isAutoScrollEnabled = e.target.checked;
-            saveSettings('autoScroll', isAutoScrollEnabled);
-        });
-    }
-
-    // 初始化设置
-    await initSettings();
-
     // 修改滚轮事件监听：
     // 当用户向上滚动时，禁用自动滚动；
     // 当用户向下滚动时，检查离底部距离，如果距离小于50px，则重新启用自动滚动
@@ -790,7 +616,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 简化滚动到底部的函数
     function scrollToBottom() { // 移除 force 参数
-        if (!isAutoScrollEnabled) {
+        if (!settingsManager.getSetting('autoScroll')) {
             return;
         }
 
@@ -810,14 +636,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             type: 'CLOSE_SIDEBAR'
         }, '*');
     });
-
-    // 添加划词搜索清空聊天开关事件监听
-    const clearOnSearchSwitch = document.getElementById('clear-on-search-switch');
-    if (clearOnSearchSwitch) {
-        clearOnSearchSwitch.addEventListener('change', (e) => {
-            saveSettings('clearOnSearch', e.target.checked);
-        });
-    }
 
     // 更新发送按钮状态
     function updateSendButtonState() {

@@ -67,3 +67,30 @@
 // 3. 更好的状态管理 - isProcessingMessage、currentController等状态封装在模块内
 // 4. 更易测试 - 可以独立测试消息发送逻辑
 // 5. 更好的API集成 - 与apiManager无缝集成
+
+// ---- 设置管理模块重构说明 2024-07-24 ----
+// 创建了新的 settings_manager.js 模块，负责管理所有用户界面设置。
+// 以下功能已从sidebar.js移动到settings_manager.js中:
+//
+// 1. initSettings - 初始化所有设置，现在由settingsManager.init处理
+// 2. saveSettings - 保存单个设置，现在由settingsManager的各种setter方法处理
+// 3. setTheme/initTheme - 主题设置相关，现在由settingsManager.setTheme和applyTheme处理
+// 4. updateReferenceVisibility - 引用标记可见性，现在由settingsManager.updateReferenceVisibility处理
+//
+// 移除的UI事件监听:
+// 1. 侧边栏宽度滑块事件 - 现在由settingsManager内部管理
+// 2. 字体大小滑块事件 - 现在由settingsManager内部管理
+// 3. 缩放比例滑块事件 - 现在由settingsManager内部管理
+// 4. 自动滚动开关事件 - 现在由settingsManager内部管理
+// 5. 划词搜索清空聊天开关事件 - 现在由settingsManager内部管理
+// 6. 主题系统变化监听 - 现在由settingsManager内部管理
+//
+// 设置管理模块的优势:
+// 1. 集中管理 - 所有设置相关的逻辑集中在一个模块，避免散布在多处
+// 2. 一致的接口 - 统一的设置获取和设置方法
+// 3. 降低耦合 - 分离UI操作和设置逻辑
+// 4. 简化sidebar.js - 大幅减少主文件的代码量
+// 5. 更易扩展 - 添加新设置时只需修改settings_manager.js
+//
+// 此重构移除了超过150行代码，使sidebar.js更加精简和聚焦于核心功能。
+// 设置的统一管理模式可以作为未来其他UI行为模块化的参考。
