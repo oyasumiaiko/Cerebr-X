@@ -109,6 +109,72 @@ document.addEventListener('DOMContentLoaded', async () => {
     const previewImage = previewModal.querySelector('img');
     const closeButton = previewModal.querySelector('.image-preview-close');
 
+    // 导入并初始化提示词设置
+    const promptSettingsManager = new PromptSettings();
+
+    // ====================== 核心函数定义 ======================
+    
+    /**
+     * 滚动到底部函数
+     * 在设置管理器初始化后使用，因此会先定义
+     */
+    function scrollToBottom() {
+        // 使用可选链确保即使settingsManager尚未初始化也不会报错
+        if (settingsManager?.getSetting('autoScroll') === false) {
+            return;
+        }
+
+        if (shouldAutoScroll) {
+            requestAnimationFrame(() => {
+                chatContainer.scrollTo({
+                    top: chatContainer.scrollHeight,
+                    behavior: 'auto' // 取消平滑滚动，立即滚动到底部
+                });
+            });
+        }
+    }
+    
+    /**
+     * 关闭互斥面板函数
+     * 由于存在循环依赖，我们先定义函数，后续再绑定实现
+     */
+    function closeExclusivePanels() {
+        // 实现会在uiManager创建后绑定
+        console.log("closeExclusivePanels被调用，但尚未绑定实现");
+        return null;
+    }
+    
+    /**
+     * 删除消息内容函数
+     * 由于依赖contextMenuManager，先定义后绑定实现
+     */
+    async function deleteMessageContent(messageElement) {
+        if (!messageElement) return;
+        
+        const messageId = messageElement.getAttribute('data-message-id');
+        // 从 DOM 中删除该消息元素
+        messageElement.remove();
+
+        if (!messageId) {
+            console.error("未找到消息ID");
+            if (contextMenuManager) contextMenuManager.hideContextMenu();
+            return;
+        }
+
+        // 删除聊天历史中的消息，并更新继承关系
+        const success = deleteMessage(messageId);
+        if (!success) {
+            console.error("删除消息失败: 未找到对应的消息节点");
+        } else {
+            // 更新并持久化聊天记录
+            await chatHistoryUI.saveCurrentConversation(true);
+        }
+        
+        if (contextMenuManager) contextMenuManager.hideContextMenu();
+    }
+
+    // ====================== 第一阶段：创建基础模块 ======================
+    
     // 创建图片处理器实例
     const imageHandler = createImageHandler({
         previewModal,
@@ -117,9 +183,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         imageContainer,
         messageInput
     });
-
-    // 导入并初始化提示词设置
-    const promptSettingsManager = new PromptSettings();
 
     // 创建消息处理器实例
     const messageProcessor = createMessageProcessor({
@@ -142,13 +205,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         createImageTag: imageHandler.createImageTag
     });
 
-    // API 设置功能
+    // ====================== 第二阶段：创建有依赖关系的模块 ======================
+    
+    // 获取API设置相关DOM元素
     const apiSettings = document.getElementById('api-settings');
     const apiSettingsToggle = document.getElementById('api-settings-toggle');
     const backButton = document.querySelector('.back-button');
     const apiCards = document.querySelector('.api-cards');
 
-    // 创建 UI 管理器实例
+    // 创建UI管理器实例
     const uiManager = createUIManager({
         messageInput,
         settingsButton,
@@ -164,16 +229,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         setShouldAutoScroll: (value) => shouldAutoScroll = value,
         renderFavoriteApis: null // 后面会设置
     });
-
-    // 创建 API 管理器实例
+    
+    // 重要：首先绑定closeExclusivePanels的实现
+    closeExclusivePanels = function() {
+        return uiManager.closeExclusivePanels();
+    };
+    
+    // 创建API管理器实例（注意循环依赖已经解决）
     const apiManager = createApiManager({
         apiSettings,
         apiCards,
-        closeExclusivePanels: closeExclusivePanels
+        closeExclusivePanels: closeExclusivePanels // 使用已绑定的函数
     });
-    
-    // 更新UI管理器中的渲染收藏API函数
-    uiManager.renderFavoriteApis = () => apiManager.renderFavoriteApis();
     
     // 创建消息发送器实例
     const messageSender = createMessageSender({
@@ -221,15 +288,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         setMessageSenderChatHistory: messageSender.setSendChatHistory
     });
     
+    // ====================== 第三阶段：解决循环依赖问题 ======================
+    
+    // 更新uiManager的依赖
+    uiManager.renderFavoriteApis = () => apiManager.renderFavoriteApis();
+    
+    // ====================== 第四阶段：初始化模块 ======================
+    
     // 初始化各模块
     contextMenuManager.init();
     uiManager.init();
     await settingsManager.init();
+    
+    // 设置 API 设置 UI 事件处理
+    apiManager.setupUIEventHandlers(apiSettingsToggle, backButton);
+    
+    // 初始化 API 配置（确保这步不会漏掉）
+    await apiManager.init();
 
-    // 关闭互斥面板函数
-    function closeExclusivePanels() {
-        return uiManager.closeExclusivePanels();
-    }
+    // ====================== 第五阶段：设置事件监听器 ======================
 
     // 监听引用标记开关变化
     showReferenceSwitch.addEventListener('change', (e) => {
@@ -293,29 +370,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // 自动调整文本框高度
-    function adjustTextareaHeight(textarea) {
-        textarea.style.height = 'auto';
-        const maxHeight = 200;
-        const scrollHeight = textarea.scrollHeight;
-        textarea.style.height = Math.min(scrollHeight, maxHeight) + 'px';
-        textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
-    }
-
-    // 监听输入框变化
-    messageInput.addEventListener('input', function () {
-        adjustTextareaHeight(this);
-        updateSendButtonState();
-
-        // 处理 placeholder 的显示
-        if (this.textContent.trim() === '') {
-            // 如果内容空且没有图片标签，清空内容以显示 placeholder
-            while (this.firstChild) {
-                this.removeChild(this.firstChild);
-            }
-        }
-    });
-
     // 处理换行和输入
     messageInput.addEventListener('compositionstart', () => {
         isComposing = true;
@@ -370,311 +424,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // 设置菜单开关函数
-    function toggleSettingsMenu(show) {
-        if (show === undefined) {
-            // 如果没有传参数，就切换当前状态
-            settingsMenu.classList.toggle('visible');
-        } else {
-            // 否则设置为指定状态
-            if (show) {
-                settingsMenu.classList.add('visible');
-            } else {
-                settingsMenu.classList.remove('visible');
-            }
-        }
-
-        // 每次打开菜单时重新渲染收藏的API列表
-        if (settingsMenu.classList.contains('visible')) {
-            apiManager.renderFavoriteApis();
-        }
-    }
-
-    // 修改点击事件监听器
-    document.addEventListener('click', (e) => {
-        // 如果点击的不是设置按钮本身和设置菜单，就关闭菜单
-        if (!settingsButton.contains(e.target) && !settingsMenu.contains(e.target)) {
-            toggleSettingsMenu(false);
-        }
-    });
-
-    // 确保设置按钮的点击事件在文档点击事件之前处理
-    settingsButton.addEventListener('click', (e) => {
-        e.stopPropagation();
-        toggleSettingsMenu();
-    });
-
-    // 添加输入框的事件监听器
-    messageInput.addEventListener('focus', () => {
-        toggleSettingsMenu(false);
-    });
-
-    // 设置按钮悬停事件
-    settingsButton.addEventListener('mouseenter', () => {
-        toggleSettingsMenu(true);
-    });
-
-    // 设置按钮和菜单的鼠标离开事件
-    const handleMouseLeave = (e) => {
-        const toElement = e.relatedTarget;
-        if (!settingsButton.contains(toElement) && !settingsMenu.contains(toElement)) {
-            toggleSettingsMenu(false);
-        }
-    };
-
-    settingsButton.addEventListener('mouseleave', handleMouseLeave);
-    settingsMenu.addEventListener('mouseleave', handleMouseLeave);
-
-    // 添加输入框的事件监听器
-    messageInput.addEventListener('focus', () => {
-        toggleSettingsMenu(false);
-    });
-
     // 清空聊天记录功能
     clearChat.addEventListener('click', async () => {
-        await clearChatHistory();
-        toggleSettingsMenu(false);
+        await chatHistoryUI.clearChatHistory();
+        uiManager.toggleSettingsMenu(false);
         messageInput.focus();
     });
 
     // 快速总结功能
     quickSummary.addEventListener('click', () => messageSender.performQuickSummary());
 
-    // 添加点击事件监听
-    chatContainer.addEventListener('click', () => {
-        // 击聊天区域时让输入框失去焦点
-        messageInput.blur();
-    });
-
-    // 监听输入框的焦点状态
-    messageInput.addEventListener('focus', () => {
-        // 输入框获得焦点，阻止事件冒泡
-        messageInput.addEventListener('click', (e) => e.stopPropagation());
-    });
-
-    messageInput.addEventListener('blur', () => {
-        // 输入框失去焦点时，移除点击事件监听
-        messageInput.removeEventListener('click', (e) => e.stopPropagation());
-    });
-
-    // 修改右键菜单显示逻辑
-    function showContextMenu(e, messageElement) {
-        e.preventDefault();
-        currentMessageElement = messageElement;
-
-        // 设置菜单位置
-        contextMenu.style.display = 'block';
-
-        // 获取点击的代码块元素
-        const codeBlock = e.target.closest('pre code');
-        const copyCodeButton = document.getElementById('copy-code');
-
-        // 根据消息状态显示或隐藏停止更新按钮
-        if (messageElement.classList.contains('updating')) {
-            stopUpdateButton.style.display = 'flex';
-        } else {
-            stopUpdateButton.style.display = 'none';
-        }
-
-        // 根据是否点击代码块显示或隐藏复制代码按钮
-        if (codeBlock) {
-            copyCodeButton.style.display = 'flex';
-            currentCodeBlock = codeBlock;
-        } else {
-            copyCodeButton.style.display = 'none';
-            currentCodeBlock = null;
-        }
-
-        // 调整菜单位置，确保菜单不超出视口
-        const menuWidth = contextMenu.offsetWidth;
-        const menuHeight = contextMenu.offsetHeight;
-        let x = e.clientX;
-        let y = e.clientY;
-        if (x + menuWidth > window.innerWidth) {
-            x = window.innerWidth - menuWidth;
-        }
-        if (y + menuHeight > window.innerHeight) {
-            y = window.innerHeight - menuHeight;
-        }
-        contextMenu.style.left = x + 'px';
-        contextMenu.style.top = y + 'px';
-
-        // 新增：只在右键点击最后一条用户消息时显示"重新生成"按钮
-        if (messageElement.classList.contains('user-message')) {
-            // 获取所有用户消息
-            const userMessages = chatContainer.querySelectorAll('.user-message');
-            if (userMessages.length > 0 && messageElement === userMessages[userMessages.length - 1]) {
-                regenerateButton.style.display = 'flex';
-            } else {
-                regenerateButton.style.display = 'none';
-            }
-        } else {
-            regenerateButton.style.display = 'none';
-        }
-    }
-
-    // 添加复制代码块功能
-    function copyCodeContent() {
-        if (currentCodeBlock) {
-            const codeContent = currentCodeBlock.textContent;
-            navigator.clipboard.writeText(codeContent).then(() => {
-                hideContextMenu();
-            }).catch(err => {
-                console.error('复制失败:', err);
-            });
-        }
-    }
-
-    // 添加停止更新按钮的点击事件处理
-    stopUpdateButton.addEventListener('click', () => {
-        messageSender.abortCurrentRequest();
-        hideContextMenu();
-    });
-    
-    // 隐藏右键菜单
-    function hideContextMenu() {
-        contextMenu.style.display = 'none';
-        currentMessageElement = null;
-    }
-
-    // 复制消息内容
-    function copyMessageContent() {
-        if (currentMessageElement) {
-            // 获取存储的原始文本
-            const originalText = currentMessageElement.getAttribute('data-original-text');
-            navigator.clipboard.writeText(originalText).then(() => {
-                hideContextMenu();
-            }).catch(err => {
-                console.error('复制失败:', err);
-            });
-        }
-    }
-
-    // 监听消息（用户或 AI）右键点击
-    chatContainer.addEventListener('contextmenu', (e) => {
-        // 如果按住了Ctrl、Shift或Alt键，则显示默认菜单
-        if (e.ctrlKey || e.shiftKey || e.altKey) {
-            return;
-        }
-        // 修改：允许用户和 AI 消息都触发右键菜单
-        const messageElement = e.target.closest('.message');
-        if (messageElement) {
-        e.preventDefault();
-        showContextMenu(e, messageElement);
-        }
-    });
-
-    // 点击制按钮
-    copyMessageButton.addEventListener('click', copyMessageContent);
-
-    // 点击其他地方隐藏菜单
-    document.addEventListener('click', (e) => {
-        if (!contextMenu.contains(e.target)) {
-            hideContextMenu();
-        }
-    });
-
-    // 滚动时隐藏菜单
-    chatContainer.addEventListener('scroll', hideContextMenu);
-
-    // 片粘贴功能
-    messageInput.addEventListener('paste', async (e) => {
-        e.preventDefault(); // 阻止默认粘贴行为
-
-        const items = Array.from(e.clipboardData.items);
-        const imageItem = items.find(item => item.type.startsWith('image/'));
-
-        if (imageItem) {
-            // 处理图片粘贴
-            const file = imageItem.getAsFile();
-            const reader = new FileReader();
-            reader.onload = async () => {
-                imageHandler.addImageToContainer(reader.result, file.name);
-            };
-            reader.readAsDataURL(file);
-        } else {
-            // 修改：处理纯文本粘贴，避免插入富文本
-            const text = e.clipboardData.getData('text/plain');
-            const selection = window.getSelection();
-            if (selection.rangeCount > 0) {
-                const range = selection.getRangeAt(0);
-                range.deleteContents();
-                const textNode = document.createTextNode(text);
-                range.insertNode(textNode);
-                // 移动光标到新插入的文本节点之后
-                range.setStartAfter(textNode);
-                range.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(range);
-            }
-        }
-    });
-
-    // 修改拖放处理
-    messageInput.addEventListener('drop', (e) => imageHandler.handleImageDrop(e, messageInput));
-    chatContainer.addEventListener('drop', (e) => imageHandler.handleImageDrop(e, chatContainer));
-
-    // 阻止聊天区域的图片默认行为
-    chatContainer.addEventListener('click', (e) => {
-        if (e.target.tagName === 'IMG') {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-    });
-
-    // 修改滚轮事件监听：
-    // 当用户向上滚动时，禁用自动滚动；
-    // 当用户向下滚动时，检查离底部距离，如果距离小于50px，则重新启用自动滚动
-    chatContainer.addEventListener('wheel', (e) => {
-        if (e.deltaY < 0) { // 向上滚动
-            shouldAutoScroll = false;
-        } else if (e.deltaY > 0) { // 向下滚动时检查底部距离
-            const threshold = 50; // 距离底部小于50px认为接近底部
-            const distanceFromBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
-            if (distanceFromBottom < threshold) {
-                shouldAutoScroll = true;
-            }
-        }
-    });
-
-    // 简化滚动到底部的函数
-    function scrollToBottom() { // 移除 force 参数
-        if (!settingsManager.getSetting('autoScroll')) {
-            return;
-        }
-
-        if (shouldAutoScroll) {
-            requestAnimationFrame(() => {
-                chatContainer.scrollTo({
-                    top: chatContainer.scrollHeight,
-                    behavior: 'auto' // 取消平滑滚动，立即滚动到底部
-                });
-            });
-        }
-    }
-
-    // 添加收起按钮点击事件
-    collapseButton.addEventListener('click', () => {
-        window.parent.postMessage({
-            type: 'CLOSE_SIDEBAR'
-        }, '*');
-    });
-
-    // 更新发送按钮状态
-    function updateSendButtonState() {
-        const hasContent = messageInput.textContent.trim() || inputContainer.querySelector('.image-tag');
-        sendButton.disabled = !hasContent;
-    }
-
     // 添加发送按钮点击事件
     sendButton.addEventListener('click', () => {
         messageSender.sendMessage();
-    });
-
-    // 添加清空聊天右键菜单项的点击事件处理
-    clearChatContextButton.addEventListener('click', async () => {
-        await chatHistoryUI.clearChatHistory();
-        hideContextMenu();
     });
 
     // 点击聊天记录菜单项
@@ -688,34 +450,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    copyCodeButton.addEventListener('click', copyCodeContent);
-
-    /**
-     * 删除指定消息的函数，更新 UI 和聊天历史树（维护继承关系）
-     */
-    async function deleteMessageContent(messageElement) {
-        if (!messageElement) return;
-        const messageId = messageElement.getAttribute('data-message-id');
-        // 从 DOM 中删除该消息元素
-        messageElement.remove();
-
-        if (!messageId) {
-            console.error("未找到消息ID");
-            hideContextMenu();
-            return;
-        }
-
-        // 删除聊天历史中的消息，并更新继承关系
-        const success = deleteMessage(messageId);
-        if (!success) {
-            console.error("删除消息失败: 未找到对应的消息节点");
-        } else {
-            // 更新并持久化聊天记录
-            await chatHistoryUI.saveCurrentConversation(true);
-        }
-        hideContextMenu();
-    }
-
     // 调试聊天记录树按钮绑定
     if (debugTreeButton) {
         debugTreeButton.addEventListener('click', () => {
@@ -724,7 +458,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // 新增：辅助函数 将图片数据生成图片标签后，统一添加到图片容器
+    // ====================== 辅助函数 ======================
+
+    /**
+     * 将图片数据生成图片标签后，统一添加到图片容器
+     * @param {string} imageData - 图片数据（Base64编码）
+     * @param {string} fileName - 图片文件名
+     */
     function addImageToContainer(imageData, fileName) {
         const imageTag = imageHandler.createImageTag(imageData, fileName);
         imageContainer.appendChild(imageTag);
@@ -733,39 +473,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log("图片插入到图片容器");
     }
 
-    // 显示/隐藏提示词设置面板
-    promptSettingsToggle.addEventListener('click', () => {
-        const wasVisible = promptSettings.classList.contains('visible');
-        closeExclusivePanels();
-
-        if (!wasVisible) {
-            promptSettings.classList.toggle('visible');
-        }
-    });
-
-    // 新增：添加重新生成消息的按钮事件处理
-    regenerateButton.addEventListener('click', async () => {
-        // 获取当前聊天区域中的所有消息
-        const messages = chatContainer.querySelectorAll('.message');
-        if (messages.length > 0) {
-            const lastMessage = messages[messages.length - 1];
-            // 如果最后一条消息是助手消息，则删除
-            if (lastMessage.classList.contains('ai-message')) {
-                await deleteMessageContent(lastMessage);
-            }
-            // 调用发送消息接口，重新生成助手回复
-            messageSender.sendMessage();
-            hideContextMenu();
-        }
-    });
-
     /**
      * 轮询等待 image-container 中出现截屏图片
-     * 每 0.1 秒检查一次，最多等待 10 秒
+     * 每 0.1 秒检查一次，最多等待 5 秒
      * @returns {Promise<void>}
      */
     function waitForScreenshot() {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
             const startTime = Date.now();
             const interval = setInterval(() => {
                 const screenshotImg = imageContainer.querySelector('img[alt="page-screenshot.png"]');
@@ -781,6 +495,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    /**
+     * 请求截屏
+     */
     function requestScreenshot() {
         window.parent.postMessage({
             type: 'CAPTURE_SCREENSHOT'
