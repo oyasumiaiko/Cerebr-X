@@ -24,3 +24,23 @@
 
 // 以上函数已完全通过chatHistoryUI实例方法进行替换，所有对这些函数的调用都已更新。
 // 删除这些函数不会影响程序功能，只会删除冗余代码。
+
+// ---- API设置重构说明 2024-07-23 ----
+// API设置相关功能已经重构到api_settings.js模块中，该模块采用工厂函数模式创建API管理器实例。
+// 以下功能已经从sidebar.js移动到api_settings.js中:
+// 
+// 1. loadAPIConfigs - 现在使用apiManager.loadAPIConfigs或apiManager.init
+// 2. saveAPIConfigs - 现在使用apiManager.saveAPIConfigs
+// 3. renderAPICards - 现在使用apiManager.renderAPICards
+// 4. createAPICard - 现在模块内部使用
+// 5. renderFavoriteApis - 现在使用apiManager.renderFavoriteApis
+//
+// 此外，API请求的构建和发送也被抽象为纯函数:
+// 1. buildRequest - 负责构建API请求体，与具体API格式解耦
+// 2. sendRequest - 负责发送API请求，便于后续扩展不同的API格式
+//
+// 使用新模块的好处:
+// 1. 更好的关注点分离 - API配置管理与UI逻辑分离
+// 2. 更容易复用 - 可以在不同模块中使用API管理功能
+// 3. 更易于测试 - 纯函数设计使单元测试更简单
+// 4. 更好的可扩展性 - 可以更容易地添加对非OpenAI格式API的支持
