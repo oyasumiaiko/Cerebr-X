@@ -13,6 +13,7 @@ import { createContextMenuManager } from './context_menu_manager.js'; // 导入�
 import { createUIManager } from './ui_manager.js'; // 导入UI管理模块
 
 document.addEventListener('DOMContentLoaded', async () => {
+    // DOM 元素获取
     const chatContainer = document.getElementById('chat-container');
     const messageInput = document.getElementById('message-input');
     const contextMenu = document.getElementById('context-menu');
@@ -50,22 +51,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const debugTreeButton = document.getElementById('debug-chat-tree-btn');
     const screenshotButton = document.getElementById('screenshot-button');
 
-    let currentMessageElement = null;
-    let isTemporaryMode = false; // 添加临时模式状态变量
-    let isProcessingMessage = false; // 添加消息处理状态标志
+    // 应用程序状态
     let shouldAutoScroll = true; // 控制是否自动滚动
-    let isAutoScrollEnabled = true; // 自动滚动开关状态
     let isFullscreen = false; // 全屏模式
-    let pageContent = null;  // 预存储的网页文本内容
-    let shouldSendChatHistory = true; // 是否发送聊天历史
-    let currentConversationId = null; // 当前会话ID
-    let currentPageInfo = null;
-    let currentCodeBlock = null;
+    let isComposing = false; // 跟踪输入法状态
 
-    const screenshotButton = document.getElementById('screenshot-button');
+    // 截屏按钮事件
     if(screenshotButton) {
         screenshotButton.addEventListener('click', () => {
-            // 调用内置的 requestScreenshot() 函数
             requestScreenshot();
         });
     }
@@ -102,7 +95,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 执行对话记录的迁移
     await migrateLocalHistoriesToIndexedDB();
 
-    // Create ChatHistoryManager instance
+    // 创建聊天历史管理器实例
     const {
         chatHistory,
         addMessageToTree,
@@ -155,14 +148,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const backButton = document.querySelector('.back-button');
     const apiCards = document.querySelector('.api-cards');
 
-    // 创建 API 管理器实例
-    const apiManager = createApiManager({
-        apiSettings,
-        apiCards,
-        closeExclusivePanels: closeExclusivePanels
-    });
-    
-    // 创建UI管理器实例
+    // 创建 UI 管理器实例
     const uiManager = createUIManager({
         messageInput,
         settingsButton,
@@ -176,15 +162,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         chatHistoryUI,
         imageHandler,
         setShouldAutoScroll: (value) => shouldAutoScroll = value,
-        renderFavoriteApis: () => apiManager.renderFavoriteApis()
+        renderFavoriteApis: null // 后面会设置
     });
 
-    // 设置 API 设置 UI 事件处理
-    apiManager.setupUIEventHandlers(apiSettingsToggle, backButton);
+    // 创建 API 管理器实例
+    const apiManager = createApiManager({
+        apiSettings,
+        apiCards,
+        closeExclusivePanels: closeExclusivePanels
+    });
     
-    // 初始化 API 配置
-    await apiManager.init();
-
+    // 更新UI管理器中的渲染收藏API函数
+    uiManager.renderFavoriteApis = () => apiManager.renderFavoriteApis();
+    
     // 创建消息发送器实例
     const messageSender = createMessageSender({
         apiManager,
@@ -327,8 +317,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // 处理换行和输入
-    let isComposing = false;  // 跟踪输入法状态
-
     messageInput.addEventListener('compositionstart', () => {
         isComposing = true;
     });
@@ -442,27 +430,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         toggleSettingsMenu(false);
     });
 
-    // 清空聊天记录功能，并保存当前对话至持久存储（每次聊天会话结束自动保存）
-    async function clearChatHistory() { // 改为 async 函数
-        await chatHistoryUI.clearChatHistory();
-    }
-
-    const clearChat = document.getElementById('clear-chat');
+    // 清空聊天记录功能
     clearChat.addEventListener('click', async () => {
         await clearChatHistory();
         toggleSettingsMenu(false);
         messageInput.focus();
-        // 移动光标到输入框末尾
-        const range = document.createRange();
-        range.selectNodeContents(messageInput);
-        range.collapse(false);
-        const selection = window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(range);
     });
 
     // 快速总结功能
-    const quickSummary = document.getElementById('quick-summary');
     quickSummary.addEventListener('click', () => messageSender.performQuickSummary());
 
     // 添加点击事件监听
@@ -714,12 +689,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     copyCodeButton.addEventListener('click', copyCodeContent);
-    const deleteMessageButton = document.getElementById('delete-message');
-    if (deleteMessageButton) {
-        deleteMessageButton.addEventListener('click', (e) => {
-            deleteMessageContent(currentMessageElement);
-        });
-    }
 
     /**
      * 删除指定消息的函数，更新 UI 和聊天历史树（维护继承关系）
@@ -747,8 +716,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         hideContextMenu();
     }
 
-    // 调试聊天记录树按钮绑定（该按钮在 sidebar.html 中设置了 id="debug-chat-tree-btn"）
-    const debugTreeButton = document.getElementById('debug-chat-tree-btn');
+    // 调试聊天记录树按钮绑定
     if (debugTreeButton) {
         debugTreeButton.addEventListener('click', () => {
             // 使用当前聊天记录树 chatHistory（由 createChatHistoryManager() 提供）初始化调试窗口
