@@ -977,7 +977,7 @@ input:checked + .slider:before {
 @keyframes messageAppear {
     0% {
         opacity: 0;
-        transform: translateY(16px) scale(0.98);
+        transform: translateY(4px) scale(0.99);
     }
     40% {
         opacity: 1;
@@ -1979,13 +1979,13 @@ body.hide-references .reference-number.superscript {
 #chat-history-panel {
     position: fixed;
     top: 0;
-    bottom: 64px;
+    bottom: 0;
     left: 0;
     right: 0;
     margin: auto; /* 自动计算上下左右的空隙，从而居中 */
     width: 80%;          /* 或者指定具体宽度 */
     max-width: 600px;
-    height: 80%;        /* 明确高度 */
+    height: 70%;        /* 明确高度 */
     background-color: var(--cerebr-bg-color);
     border: 1px solid var(--cerebr-border-color);
     border-radius: 8px;
