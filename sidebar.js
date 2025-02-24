@@ -44,6 +44,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     let currentPageInfo = null;
     let currentCodeBlock = null;
 
+    const screenshotButton = document.getElementById('screenshot-button');
+    if(screenshotButton) {
+        screenshotButton.addEventListener('click', () => {
+            // 调用内置的 requestScreenshot() 函数
+            requestScreenshot();
+        });
+    }
+
     /**
      * 迁移旧有的 chrome.storage.local 对话记录到 IndexedDB
      * @returns {Promise<void>}
@@ -459,7 +467,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             // 组合系统消息+注入的系统消息+网页内容
             let systemMessageContent = prompts.system.prompt;
-            
+
             if (imageContainsScreenshot) {
                 systemMessageContent += "\n用户附加了当前页面的屏幕截图";
             }

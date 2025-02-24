@@ -2185,3 +2185,26 @@ body.hide-references .reference-number.superscript {
     resize: vertical;
     transition: all 0.2s ease;
 }
+
+/* 新增截屏按钮样式 */
+#screenshot-button {
+    padding: 12px;
+    height: 100%;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--cerebr-icon-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 44px;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+}
+#screenshot-button:hover {
+    opacity: 1;
+}
+#screenshot-button:active {
+    transform: scale(0.95);
+}
