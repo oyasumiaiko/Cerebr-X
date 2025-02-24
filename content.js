@@ -1084,9 +1084,9 @@ function captureAndDropScreenshot() {
       // 在等待两帧后执行截图
       chrome.runtime.sendMessage({ action: 'capture_visible_tab' }, (response) => {
         sidebar.sidebar.style.display = sidebarDisplay; // 截图完成后恢复侧边栏显示
+        const iframe = sidebar.sidebar?.querySelector('.cerebr-sidebar__iframe');
         if (response && response.success && response.dataURL) {
           console.log('页面截图完成，发送到侧边栏');
-          const iframe = sidebar.sidebar?.querySelector('.cerebr-sidebar__iframe');
           if (iframe) {
             iframe.contentWindow.postMessage({
               type: 'DROP_IMAGE',

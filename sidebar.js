@@ -1175,30 +1175,40 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             e.preventDefault();
+            
+            if (e.altKey) {
+                e.preventDefault();
+                if (isComposing) return; // 如果正在输入法中则不处理
+                requestScreenshot(); // 发起截屏请求
+                waitForScreenshot().then(() => {
+                    sendMessage();
+                });
+                return;
+            }
 
             const text = this.textContent.trim();
-                if (e.ctrlKey) {
-                // Ctrl+Enter: 将输入内容作为selection类型发送
-                    const prompts = promptSettingsManager.getPrompts();
-                    const selectionPrompt = prompts.selection.prompt;
-                    if (selectionPrompt) {
-                    this.textContent = selectionPrompt.replace('<SELECTION>', text);
-                    }
+            if (e.ctrlKey) {
+            // Ctrl+Enter: 将输入内容作为selection类型发送
+                const prompts = promptSettingsManager.getPrompts();
+                const selectionPrompt = prompts.selection.prompt;
+                if (selectionPrompt) {
+                this.textContent = selectionPrompt.replace('<SELECTION>', text);
                 }
-            // 发送消息
-                sendMessage();
-        } else if (e.key === '-') {
-            // 检查输入框是否为空
-            if (!this.textContent.trim() && !this.querySelector('.image-tag')) {
-                e.preventDefault();
-                if (isTemporaryMode) {
-                    exitTemporaryMode();
-                } else {
-                    enterTemporaryMode();
-                }
-                console.log('临时模式状态:', isTemporaryMode); // 添加调试日志
             }
-        }
+            // 发送消息
+            sendMessage();
+            } else if (e.key === '-') {
+                // 检查输入框是否为空
+                if (!this.textContent.trim() && !this.querySelector('.image-tag')) {
+                    e.preventDefault();
+                    if (isTemporaryMode) {
+                        exitTemporaryMode();
+                    } else {
+                        enterTemporaryMode();
+                    }
+                    console.log('临时模式状态:', isTemporaryMode); // 添加调试日志
+                }
+            }
     });
 
     // 设置菜单开关函数
@@ -2047,7 +2057,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     closeButton.addEventListener('click', hideImagePreview);
     previewModal.addEventListener('click', (e) => {
-        if (e.target === previewModal) {
+        if (previewModal.contains(e.target)) {
             hideImagePreview();
         }
     });
@@ -3019,7 +3029,31 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
+    /**
+     * 轮询等待 image-container 中出现截屏图片
+     * 每 0.1 秒检查一次，最多等待 10 秒
+     * @returns {Promise<void>}
+     */
+    function waitForScreenshot() {
+        return new Promise((resolve, reject) => {
+            const startTime = Date.now();
+            const interval = setInterval(() => {
+                const screenshotImg = imageContainer.querySelector('img[alt="page-screenshot.png"]');
+                if (screenshotImg) {
+                    clearInterval(interval);
+                    resolve();
+                } else if (Date.now() - startTime > 5000) { // 5秒超时
+                    clearInterval(interval);
+                    console.warn('等待截屏图片超时');
+                    resolve();
+                }
+            }, 100);
+        });
+    }
+
     function requestScreenshot() {
-        window.parent.postMessage({ type: 'CAPTURE_SCREENSHOT' }, '*');
+        window.parent.postMessage({
+            type: 'CAPTURE_SCREENSHOT'
+        }, '*');
     }
 });
