@@ -196,6 +196,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // 处理截屏请求
+  if (message.action === 'capture_visible_tab') {
+    chrome.tabs.captureVisibleTab(null, { format: 'png', quality: 100 }, dataURL => {
+      if (chrome.runtime.lastError) {
+        console.error('captureVisibleTab error:', chrome.runtime.lastError.message);
+        sendResponse({ success: false, error: chrome.runtime.lastError.message });
+      } else {
+        sendResponse({ success: true, dataURL });
+      }
+    });
+    return true; // 指明 sendResponse 将异步调用
+  }
+
   return false;
 });
 

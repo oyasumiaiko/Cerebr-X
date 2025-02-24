@@ -1063,3 +1063,44 @@ async function extractTextFromPDF(url) {
     return null;
   }
 }
+
+// --- 修改截图功能，使用 captureVisibleTab 截取屏幕开始 ---
+/**
+ * 捕获当前可见标签页的屏幕截图并发送到侧边栏。
+ * 截图前会先隐藏侧边栏，并在等待两帧后再进行截图，最后恢复侧边栏显示。
+ */
+function captureAndDropScreenshot() {
+  const sidebarDisplay = sidebar.sidebar.style.display; // 保存侧边栏原始显示状态
+
+  requestAnimationFrame(() => {
+    sidebar.sidebar.style.display = 'none'; // 立即隐藏侧边栏
+    requestAnimationFrame(() => {
+      // 在等待两帧后执行截图
+      chrome.runtime.sendMessage({ action: 'capture_visible_tab' }, (response) => {
+        sidebar.sidebar.style.display = sidebarDisplay; // 截图完成后恢复侧边栏显示
+        if (response && response.success && response.dataURL) {
+          console.log('页面截图完成，发送到侧边栏');
+          const iframe = sidebar.sidebar?.querySelector('.cerebr-sidebar__iframe');
+          if (iframe) {
+            iframe.contentWindow.postMessage({
+              type: 'DROP_IMAGE',
+              imageData: { data: response.dataURL, name: 'page-screenshot.png' },
+            }, '*');
+          }
+        } else {
+          console.error('屏幕截图失败:', response && response.error);
+        }
+      });
+    });
+  });
+}
+// --- 修改截图功能，使用 captureVisibleTab 截取屏幕结束 ---
+
+// 新增：按 F9 直接测试截图，不用发送 CAPTURE_PAGE 消息
+document.addEventListener('keydown', (e) => {
+    // 使用 F9 键触发截图功能
+    if (e.code === 'F9') {
+        console.log('F9 按键触发截图');
+        captureAndDropScreenshot();
+    }
+});
