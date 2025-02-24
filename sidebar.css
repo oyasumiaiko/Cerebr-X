@@ -39,6 +39,15 @@
     --cerebr-message-ai-bg: hsl(0deg 0% 19.53% / 27%);
 }
 
+/* 全局调整 Font Awesome（outline）图标大小 */
+i.far {
+    font-size: 1.1rem; /* 如需更大请调整此数值 */
+    font-weight: 300;
+    display: inline-block;
+    width: 1.1rem;  /* 固定宽度，使图标等宽 */
+    text-align: center;
+}
+
 /* 基础样式 */
 body {
     margin: 0;
@@ -318,14 +327,18 @@ body {
 }
 
 /* 收藏按钮样式 */
-.favorite-btn.active svg {
-    fill: #ffb400;
-    stroke: #ffb400;
+.favorite-btn i {
+    color: var(--cerebr-icon-color);
+    transition: color 0.2s ease, transform 0.2s ease;
 }
 
-.favorite-btn.active:hover svg {
-    fill: #ffa000;
-    stroke: #ffa000;
+.favorite-btn.active i {
+    color: #ffb400;
+    transform: scale(1.1);
+}
+
+.favorite-btn.active:hover i {
+    color: #ffa000;
 }
 
 /* 开关样式 */

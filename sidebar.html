@@ -20,32 +20,32 @@
 </head>
 <body>
     <div id="collapse-button">
-        <i class="fas fa-chevron-left"></i>
+        <i class="far fa-chevron-left"></i>
     </div>
     <div id="chat-container"></div>
     <div id="context-menu">
         <div class="context-menu-item" id="copy-message">
-            <i class="fas fa-copy"></i>
+            <i class="far fa-copy"></i>
             复制消息
         </div>
         <div class="context-menu-item" id="copy-code" style="display: none;">
-            <i class="fas fa-code"></i>
+            <i class="far fa-code"></i>
             复制代码
         </div>
         <div class="context-menu-item" id="stop-update">
-            <i class="fas fa-stop"></i>
+            <i class="far fa-stop"></i>
             停止更新
         </div>
         <div class="context-menu-item" id="delete-message">
-            <i class="fas fa-trash-alt"></i>
+            <i class="far fa-trash-alt"></i>
             删除消息
         </div>
         <div class="context-menu-item" id="regenerate-message" style="display: none;">
-            <i class="fas fa-redo"></i>
+            <i class="far fa-redo"></i>
             重新生成
         </div>
         <div class="context-menu-item" id="clear-chat-context">
-            <i class="fas fa-trash"></i>
+            <i class="far fa-trash"></i>
             清空聊天
         </div>
     </div>
@@ -111,19 +111,7 @@
                             <path d="M2 4h12M2 8h8M2 12h4" stroke="currentColor" stroke-width="1.5"/>
                         </svg>
                     </div>
-                    <div class="menu-item" id="prompt-settings-toggle">
-                        <i class="fas fa-cogs"></i>
-                        <span>提示词设置</span>
-                    </div>
-                    <div class="menu-item" id="api-settings-toggle">
-                        <i class="fas fa-plug"></i>
-                        <span>API 设置</span>
-                    </div>
-                    <div class="menu-item" id="debug-chat-tree-btn">
-                        <span>调试聊天记录树</span>
-                    </div>
                     <div class="menu-item" id="favorite-apis" style="display: none;">
-                        <i class="fas fa-star"></i>
                         <span>收藏的API</span>
                         <div class="favorite-apis-list"></div>
                     </div>
@@ -142,12 +130,24 @@
                         <input type="range" id="scale-factor" min="0.5" max="2" step="0.1" value="1">
                         <span id="scale-value">1.0x</span>
                     </div>
+                    <div class="menu-item" id="debug-chat-tree-btn">
+                        <i class="far fa-bug"></i>
+                        <span>调试聊天记录树</span>
+                    </div>
+                    <div class="menu-item" id="prompt-settings-toggle">
+                        <i class="far fa-cogs"></i>
+                        <span>提示词设置</span>
+                    </div>
+                    <div class="menu-item" id="api-settings-toggle">
+                        <i class="far fa-plug"></i>
+                        <span>API 设置</span>
+                    </div>
                     <div class="menu-item" id="fullscreen-toggle">
-                        <i class="fas fa-expand"></i>
+                        <i class="far fa-expand"></i>
                         <span>全屏模式</span>
                     </div>
                     <div class="menu-item" id="chat-history-menu">
-                        <i class="fas fa-history"></i>
+                        <i class="far fa-history"></i>
                         <span>聊天记录</span>
                     </div>
                 </div>
@@ -170,24 +170,16 @@
                     <div class="api-card-title"></div>
                     <div class="api-card-actions">
                         <button class="card-button select-btn" title="选择">
-                            <i class="fas fa-check"></i>
+                            <i class="far fa-check"></i>
                         </button>
                         <button class="card-button favorite-btn" title="收藏">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M8 2L9.8 5.6L14 6.2L11 9.1L11.8 13.2L8 11.3L4.2 13.2L5 9.1L2 6.2L6.2 5.6L8 2Z" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
+                            <i class="far fa-star"></i>
                         </button>
                         <button class="card-button duplicate-btn" title="复制">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M13 5H7V11H13V5Z" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M10 3H4V9" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
+                            <i class="far fa-clone"></i>
                         </button>
                         <button class="card-button delete-btn" title="删除">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M3 4H13" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M5 4V12H11V4" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
+                            <i class="far fa-trash-alt"></i>
                         </button>
                     </div>
                 </div>
