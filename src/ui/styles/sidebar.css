@@ -145,7 +145,7 @@ body {
 /* 新增：使 #image-container 独占一行，与输入区域分离 */
 .message .image-content,
 #image-container {
-    width: -webkit-fill-available;
+    /* width: -webkit-fill-available; */
     padding: 4px;
     padding-bottom: 0px;
     display: flex;
