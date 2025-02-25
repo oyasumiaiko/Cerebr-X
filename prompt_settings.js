@@ -132,7 +132,16 @@ class PromptSettings {
         };
 
         promptTypes.forEach(type => {
-            const promptGroup = document.querySelector(`#${type}-prompt`).closest('.prompt-group');
+            const promptElement = document.querySelector(`#${type}-prompt`);
+            if (!promptElement) {
+                return;
+            }
+            
+            const promptGroup = promptElement.closest('.prompt-group');
+            if (!promptGroup) {
+                return;
+            }
+            
             const modelSelectContainer = document.createElement('div');
             modelSelectContainer.className = 'model-select-container';
             
@@ -143,11 +152,13 @@ class PromptSettings {
             const select = document.createElement('select');
             select.id = `${type}-model`;
             select.className = 'model-select';
+            select.setAttribute('data-prompt-type', type);
 
             // 动态更新模型选项的函数
-            const updateModelOptions = () => {
+            const updateModelOptions = (currentSelectedValue) => {
                 const models = getAvailableModels();
-                const currentValue = select.value; // 保存当前选中的值
+                // 保存当前选中的值
+                const valueToKeep = currentSelectedValue || select.value || 'follow_current';
                 select.innerHTML = ''; // 清空现有选项
 
                 // 添加"跟随当前 API 设置"选项
@@ -170,11 +181,11 @@ class PromptSettings {
                     select.appendChild(option);
                 });
 
-                // 恢复之前选中的值，如果该值仍然存在于选项中
-                if (currentValue === 'follow_current' || models.includes(currentValue)) {
-                    select.value = currentValue;
+                // 尝试恢复选中的值
+                if (valueToKeep === 'follow_current' || models.includes(valueToKeep)) {
+                    select.value = valueToKeep;
                 } else {
-                    select.value = 'follow_current'; // 如果之前的值不再存在，则默认使用"跟随当前 API 设置"
+                    select.value = 'follow_current';
                 }
             };
 
@@ -182,13 +193,21 @@ class PromptSettings {
             updateModelOptions();
 
             // 监听 API 配置变化
-            window.addEventListener('apiConfigsUpdated', updateModelOptions);
+            window.addEventListener('apiConfigsUpdated', () => {
+                // 保持当前选中的值
+                updateModelOptions(select.value);
+            });
 
             modelSelectContainer.appendChild(label);
             modelSelectContainer.appendChild(select);
             promptGroup.appendChild(modelSelectContainer);
             
             this.modelSelects[type] = select;
+            
+            // 为选择添加变化监听器 - 自动保存
+            select.addEventListener('change', () => {
+                this.autoSavePromptSettings();
+            });
         });
     }
 
@@ -278,58 +297,87 @@ class PromptSettings {
         this.resetPromptsButton.addEventListener('click', () => {
             if (confirm('确定要恢复所有默认提示词和模型设置吗？这将覆盖当前的所有自定义设置。')) {
                 this.resetPrompts();
+                // 自动保存重置后的设置
+                this.autoSavePromptSettings();
             }
         });
 
         // 保存按钮
-        this.savePromptsButton.addEventListener('click', () => this.savePromptSettings());
+        this.savePromptsButton.addEventListener('click', () => this.savePromptSettings(true));
     }
 
     // 加载提示词设置
     async loadPromptSettings() {
         try {
             const result = await chrome.storage.sync.get(['prompts']);
+            
             if (result.prompts) {
+                // 先加载提示词文本，因为它不依赖模型选项
                 Object.keys(DEFAULT_PROMPTS).forEach(type => {
                     const promptData = result.prompts[type] || DEFAULT_PROMPTS[type];
-                    this[`${type}Prompt`].value = (typeof promptData.prompt !== 'undefined') ? promptData.prompt : promptData;
-                    if (this.modelSelects[type]) {
-                        this.modelSelects[type].value = promptData.model || DEFAULT_PROMPTS[type].model;
+                    if (this[`${type}Prompt`]) {
+                        const promptValue = (typeof promptData.prompt !== 'undefined') ? 
+                            promptData.prompt : 
+                            (typeof promptData === 'string' ? promptData : DEFAULT_PROMPTS[type].prompt);
+                        this[`${type}Prompt`].value = promptValue;
                     }
                 });
+                
+                // 当确保DOM已渲染后，设置模型选择
+                // 使用requestAnimationFrame确保在下一帧渲染后执行
+                requestAnimationFrame(() => {
+                    Object.keys(DEFAULT_PROMPTS).forEach(type => {
+                        if (this.modelSelects[type]) {
+                            const promptData = result.prompts[type] || DEFAULT_PROMPTS[type];
+                            const modelValue = promptData.model || DEFAULT_PROMPTS[type].model;
+                            if (this.modelSelects[type].querySelector(`option[value="${modelValue}"]`)) {
+                                this.modelSelects[type].value = modelValue;
+                            }
+                        }
+                    });
+                });
             } else {
-                // 如果没有保存的设置，使用默认值
                 this.resetPrompts();
             }
         } catch (error) {
             console.error('加载提示词设置失败:', error);
-            // 如果加载失败，使用默认值
             this.resetPrompts();
         }
     }
 
-    // 保存提示词设置
-    async savePromptSettings() {
+    // 自动保存提示词设置（不关闭面板）
+    async autoSavePromptSettings() {
         try {
-            const prompts = {};
-            Object.keys(DEFAULT_PROMPTS).forEach(type => {
-                const textarea = this[`${type}Prompt`];
-                if (!textarea) {
-                    // console.error(`找不到提示词文本框: ${type}`);
-                    return;
-                }
-
-                prompts[type] = {
-                    prompt: textarea.value,
-                    // 如果存在模型选择下拉框就使用其值，否则使用默认值
-                    model: this.modelSelects[type]?.value || DEFAULT_PROMPTS[type].model
-                };
-            });
-
+            const prompts = this.collectCurrentPromptSettings();
             await chrome.storage.sync.set({ prompts });
             
-            // 立即关闭设置页面
-            this.promptSettings.classList.remove('visible');
+            // 显示轻微的保存提示但不关闭面板
+            const saveButton = this.savePromptsButton;
+            const originalText = saveButton.textContent;
+            const originalBackground = saveButton.style.background;
+            
+            saveButton.textContent = '已自动保存';
+            saveButton.style.background = 'rgba(52, 199, 89, 0.4)';
+            
+            setTimeout(() => {
+                saveButton.textContent = originalText;
+                saveButton.style.background = originalBackground;
+            }, 800);
+        } catch (error) {
+            console.error('自动保存提示词设置失败:', error);
+        }
+    }
+
+    // 保存提示词设置
+    async savePromptSettings(shouldClosePanel = true) {
+        try {
+            const prompts = this.collectCurrentPromptSettings();
+            await chrome.storage.sync.set({ prompts });
+            
+            // 只有在需要关闭面板时才关闭
+            if (shouldClosePanel) {
+                this.promptSettings.classList.remove('visible');
+            }
             
             // 显示保存成功提示
             const saveButton = this.savePromptsButton;
@@ -342,7 +390,31 @@ class PromptSettings {
             }, 2000);
         } catch (error) {
             console.error('保存提示词设置失败:', error);
+            alert('保存设置失败，请重试');
         }
+    }
+    
+    // 收集当前的提示词设置
+    collectCurrentPromptSettings() {
+        const prompts = {};
+        Object.keys(DEFAULT_PROMPTS).forEach(type => {
+            const textarea = this[`${type}Prompt`];
+            if (!textarea) {
+                return;
+            }
+
+            // 获取模型值
+            let modelValue = DEFAULT_PROMPTS[type].model;
+            if (this.modelSelects[type]) {
+                modelValue = this.modelSelects[type].value;
+            }
+
+            prompts[type] = {
+                prompt: textarea.value,
+                model: modelValue
+            };
+        });
+        return prompts;
     }
 
     // 重置提示词为默认值
