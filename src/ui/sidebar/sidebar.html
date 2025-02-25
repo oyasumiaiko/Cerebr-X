@@ -63,12 +63,20 @@
                     </svg>
                 </button>
                 <div id="settings-menu">
-                    <div class="menu-item" id="theme-toggle">
-                        <span>深色模式</span>
-                        <label class="switch">
-                            <input type="checkbox" id="theme-switch">
-                            <span class="slider"></span>
-                        </label>
+                    <div class="menu-item" id="theme-selector">
+                        <span>主题选择</span>
+                        <div class="theme-selector-wrapper">
+                            <select id="theme-select" class="theme-select">
+                                <!-- 动态加载主题选项 -->
+                            </select>
+                            <span class="theme-switch-container">
+                                <label class="switch">
+                                    <input type="checkbox" id="theme-switch">
+                                    <span class="slider"></span>
+                                </label>
+                                <span class="theme-switch-label">深色模式</span>
+                            </span>
+                        </div>
                     </div>
                     <div class="menu-item">
                         <span>自动滚动</span>

@@ -31,6 +31,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const settingsButton = document.getElementById('settings-button');
     const settingsMenu = document.getElementById('settings-menu');
     const toggleTheme = document.getElementById('toggle-theme');
+    const themeSwitch = document.getElementById('theme-switch');
+    const themeSelect = document.getElementById('theme-select'); // 添加主题选择下拉框
     const sidebarWidth = document.getElementById('sidebar-width');
     const fontSize = document.getElementById('font-size');
     const widthValue = document.getElementById('width-value');
@@ -47,7 +49,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const promptSettings = document.getElementById('prompt-settings');
     const inputContainer = document.getElementById('input-container');
     const regenerateButton = document.getElementById('regenerate-message');
-    const themeSwitch = document.getElementById('theme-switch');
     const autoScrollSwitch = document.getElementById('auto-scroll-switch');
     const clearOnSearchSwitch = document.getElementById('clear-on-search-switch');
     const scaleFactor = document.getElementById('scale-factor');
@@ -252,6 +253,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 创建设置管理器实例
     const settingsManager = createSettingsManager({
         themeSwitch,
+        themeSelect, // 添加主题选择下拉框
         sidebarWidth,
         widthValue,
         fontSize,

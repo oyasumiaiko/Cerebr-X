@@ -3,10 +3,13 @@
  * 负责管理应用程序的所有用户界面设置，如主题、尺寸、字体大小等
  */
 
+import { createThemeManager } from './theme_manager.js';
+
 /**
  * 创建设置管理器
  * @param {Object} options - 配置选项
  * @param {HTMLElement} options.themeSwitch - 主题切换开关元素
+ * @param {HTMLElement} options.themeSelect - 主题选择下拉框元素
  * @param {HTMLElement} options.sidebarWidth - 侧边栏宽度滑块元素
  * @param {HTMLElement} options.widthValue - 宽度显示值元素
  * @param {HTMLElement} options.fontSize - 字体大小滑块元素
@@ -25,6 +28,7 @@ export function createSettingsManager(options) {
   // 从options中提取UI元素
   const {
     themeSwitch,
+    themeSelect,
     sidebarWidth,
     widthValue,
     fontSize,
@@ -39,9 +43,12 @@ export function createSettingsManager(options) {
     setMessageSenderChatHistory
   } = options;
 
+  // 创建主题管理器
+  const themeManager = createThemeManager();
+
   // 默认设置
   const DEFAULT_SETTINGS = {
-    theme: 'auto',  // 'light', 'dark', 'auto'
+    theme: 'auto',  // 默认为自动跟随系统
     sidebarWidth: 800,
     fontSize: 14,
     scaleFactor: 1.0,
@@ -115,24 +122,39 @@ export function createSettingsManager(options) {
   
   // 应用主题
   function applyTheme(themeValue) {
-    const root = document.documentElement;
-    root.classList.remove('dark-theme', 'light-theme');
+    // 使用主题管理器应用主题
+    themeManager.applyTheme(themeValue);
     
-    let isDark = false;
+    // 保存主题ID到HTML元素，方便系统主题变化时判断
+    document.documentElement.setAttribute('data-theme', themeValue);
     
-    if (themeValue === 'auto') {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      isDark = prefersDark;
-    } else {
-      isDark = themeValue === 'dark';
+    // 更新主题选择下拉框
+    if (themeSelect) {
+      themeSelect.value = themeValue;
     }
     
-    root.classList.add(isDark ? 'dark-theme' : 'light-theme');
-    
-    // 更新开关状态
+    // 更新开关状态 - 仅当使用dark主题或其变种时才打开开关
     if (themeSwitch) {
-      themeSwitch.checked = isDark;
+      const isDark = themeValue === 'dark' || 
+                     themeValue.includes('dark') || 
+                     themeValue === 'monokai' || 
+                     themeValue === 'nord' || 
+                     themeValue === 'vscode-dark' || 
+                     themeValue === 'night-blue';
+      
+      const isAuto = themeValue === 'auto';
+      
+      if (isAuto) {
+        // 如果是自动模式，根据系统设置决定开关状态
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        themeSwitch.checked = prefersDark;
+      } else {
+        themeSwitch.checked = isDark;
+      }
     }
+    
+    // 通知父窗口主题变化
+    themeManager.notifyThemeChange(themeValue);
   }
   
   // 应用侧边栏宽度
@@ -276,10 +298,59 @@ export function createSettingsManager(options) {
   
   // 设置UI元素事件处理
   function setupEventListeners() {
-    // 主题开关
+    // 主题切换监听
     if (themeSwitch) {
-      themeSwitch.addEventListener('change', () => {
-        setTheme(themeSwitch.checked ? 'dark' : 'light');
+      themeSwitch.addEventListener('change', function() {
+        // 获取当前选择的主题
+        const currentTheme = themeSelect ? themeSelect.value : 'auto';
+        
+        if (currentTheme === 'auto') {
+          // 自动模式下不改变主题，仅调整反馈UI
+          applyTheme('auto');
+          return;
+        }
+        
+        // 查找是否存在对应的亮色/暗色主题对
+        const isCurrentlyDark = currentTheme.includes('dark') || 
+                               currentTheme === 'monokai' || 
+                               currentTheme === 'nord' || 
+                               currentTheme === 'vscode-dark' || 
+                               currentTheme === 'night-blue';
+        
+        let newTheme = currentTheme;
+        
+        // 尝试切换到对应的明暗主题
+        if (this.checked && !isCurrentlyDark) {
+          // 切换到暗色
+          if (currentTheme === 'light') newTheme = 'dark';
+          else if (currentTheme === 'github-light') newTheme = 'github-dark';
+          else if (currentTheme === 'solarized-light') newTheme = 'solarized-dark';
+          else newTheme = 'dark'; // 默认暗色
+        } else if (!this.checked && isCurrentlyDark) {
+          // 切换到亮色
+          if (currentTheme === 'dark') newTheme = 'light';
+          else if (currentTheme === 'github-dark') newTheme = 'github-light';
+          else if (currentTheme === 'solarized-dark') newTheme = 'solarized-light';
+          else newTheme = 'light'; // 默认亮色
+        }
+        
+        if (newTheme !== currentTheme) {
+          setTheme(newTheme);
+          if (themeSelect) {
+            themeSelect.value = newTheme;
+          }
+        }
+      });
+    }
+    
+    // 主题选择下拉框监听
+    if (themeSelect) {
+      // 初始化主题选项
+      populateThemeOptions();
+      
+      themeSelect.addEventListener('change', function() {
+        const selectedTheme = this.value;
+        setTheme(selectedTheme);
       });
     }
     
@@ -356,6 +427,31 @@ export function createSettingsManager(options) {
         setSidebarPosition(e.target.checked ? 'right' : 'left');
       });
     }
+  }
+  
+  // 填充主题选项
+  function populateThemeOptions() {
+    if (!themeSelect) return;
+    
+    // 清空现有选项
+    themeSelect.innerHTML = '';
+    
+    // 获取所有可用主题
+    const themes = themeManager.getAvailableThemes();
+    
+    // 添加主题选项
+    themes.forEach(theme => {
+      const option = document.createElement('option');
+      option.value = theme.id;
+      option.textContent = theme.name;
+      if (theme.description) {
+        option.title = theme.description;
+      }
+      themeSelect.appendChild(option);
+    });
+    
+    // 设置当前选中的主题
+    themeSelect.value = currentSettings.theme;
   }
   
   // ===== 设置操作方法 =====

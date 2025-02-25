@@ -2611,3 +2611,95 @@ body.hide-references .reference-number.superscript {
 :root.dark-theme .legend-color.image-color {
     background-color: #ff9f0a;
 }
+
+/* 添加主题选择器相关样式 */
+.theme-selector-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+
+.theme-select {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--cerebr-border-color);
+    background: var(--cerebr-input-bg);
+    color: var(--cerebr-text-color);
+    font-size: var(--cerebr-font-size);
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 16px;
+}
+
+.theme-select:hover, .theme-select:focus {
+    border-color: var(--cerebr-blue);
+}
+
+.theme-select option {
+    background: var(--cerebr-background-color);
+    color: var(--cerebr-text-color);
+    padding: 8px;
+}
+
+.theme-switch-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.theme-switch-label {
+    font-size: 13px;
+    white-space: nowrap;
+    color: var(--cerebr-text-color);
+    opacity: 0.8;
+}
+
+/* 主题预览卡片 - 用于将来扩展 */
+.theme-preview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.theme-preview-card {
+    position: relative;
+    border-radius: 6px;
+    height: 80px;
+    cursor: pointer;
+    overflow: hidden;
+    transition: transform 0.2s;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border: 2px solid transparent;
+}
+
+.theme-preview-card:hover {
+    transform: translateY(-2px);
+}
+
+.theme-preview-card.active {
+    border-color: var(--cerebr-blue);
+}
+
+.theme-preview-card-name {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.5);
+    color: white;
+    padding: 4px;
+    font-size: 12px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
