@@ -36,8 +36,7 @@ export function createChatHistoryUI(options) {
   let currentConversationId = null;
   let currentPageInfo = null;
   
-  // 内存管理设置
-  let memoryManagementEnabled = true;  // 是否启用内存管理
+  // 内存管理设置 - 始终启用
   let activeConversation = null;       // 当前活动的会话对象
   let maxLoadedConversations = 5;      // 最大加载到内存的会话数
   let loadedConversations = new Map(); // 已加载到内存的会话缓存
@@ -156,8 +155,6 @@ export function createChatHistoryUI(options) {
    * @param {Object} conversation - 会话对象
    */
   function updateConversationInCache(conversation) {
-    if (!memoryManagementEnabled) return;
-    
     // 更新会话缓存和使用时间戳
     loadedConversations.set(conversation.id, conversation);
     conversationUsageTimestamp.set(conversation.id, Date.now());
@@ -197,7 +194,7 @@ export function createChatHistoryUI(options) {
    * @returns {Promise<Object>} 会话对象
    */
   async function getConversationFromCacheOrLoad(conversationId, forceReload = false) {
-    if (!memoryManagementEnabled || forceReload || !loadedConversations.has(conversationId)) {
+    if (forceReload || !loadedConversations.has(conversationId)) {
       // 从数据库加载并更新缓存
       const conversation = await getConversationById(conversationId);
       if (conversation) {
@@ -704,42 +701,6 @@ export function createChatHistoryUI(options) {
       const restoreButton = document.createElement('button');
       restoreButton.textContent = '还原';
       restoreButton.addEventListener('click', restoreConversations);
-      
-      // 添加内存管理开关
-      const memoryMgmtContainer = document.createElement('div');
-      memoryMgmtContainer.className = 'switch-container';
-      
-      const memoryMgmtLabel = document.createElement('span');
-      memoryMgmtLabel.textContent = '内存管理';
-      memoryMgmtLabel.className = 'switch-label';
-      
-      const memoryMgmtSwitch = document.createElement('label');
-      memoryMgmtSwitch.className = 'switch small-switch';
-      
-      const memoryMgmtInput = document.createElement('input');
-      memoryMgmtInput.type = 'checkbox';
-      memoryMgmtInput.checked = memoryManagementEnabled;
-      memoryMgmtInput.addEventListener('change', () => {
-        memoryManagementEnabled = memoryMgmtInput.checked;
-        console.log(`内存管理已${memoryManagementEnabled ? '启用' : '禁用'}`);
-        
-        // 如果禁用内存管理，清空缓存
-        if (!memoryManagementEnabled) {
-          loadedConversations.clear();
-          conversationUsageTimestamp.clear();
-        }
-      });
-      
-      const sliderSpan = document.createElement('span');
-      sliderSpan.className = 'slider';
-      
-      memoryMgmtSwitch.appendChild(memoryMgmtInput);
-      memoryMgmtSwitch.appendChild(sliderSpan);
-      
-      memoryMgmtContainer.appendChild(memoryMgmtLabel);
-      memoryMgmtContainer.appendChild(memoryMgmtSwitch);
-      
-      headerActions.appendChild(memoryMgmtContainer);
 
       const closeBtn = document.createElement('button');
       closeBtn.textContent = '关闭';
@@ -871,14 +832,6 @@ export function createChatHistoryUI(options) {
   }
   
   /**
-   * 设置内存管理状态
-   * @param {boolean} enabled - 是否启用内存管理
-   */
-  function setMemoryManagementEnabled(enabled) {
-    memoryManagementEnabled = enabled;
-  }
-  
-  /**
    * 清理内存缓存
    */
   function clearMemoryCache() {
@@ -912,7 +865,6 @@ export function createChatHistoryUI(options) {
     refreshChatHistory,
     updatePageInfo,
     getCurrentConversationId: () => currentConversationId,
-    setMemoryManagementEnabled,
     clearMemoryCache
   };
 } 

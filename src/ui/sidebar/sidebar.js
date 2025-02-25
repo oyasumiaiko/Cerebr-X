@@ -16,7 +16,8 @@ const MEMORY_MANAGEMENT = {
     FORCED_CLEANUP_INTERVAL: 30 * 60 * 1000, // 30分钟强制清理一次
     USER_IDLE_THRESHOLD: 3 * 60 * 1000, // 3分钟无操作视为空闲
     lastUserActivity: Date.now(),
-    isMemoryCleanupEnabled: true
+    // 调试开关 - 仅供开发使用，生产环境始终为true
+    isEnabled: true
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -444,19 +445,17 @@ document.addEventListener('DOMContentLoaded', async () => {
      * 初始化内存管理机制
      */
     function initMemoryManagement() {
-        // 设置用户活动跟踪
+        // 设置用户活动跟踪 - 使用事件委托减少事件监听器数量
         document.addEventListener('click', updateUserActivity);
         document.addEventListener('keypress', updateUserActivity);
-        document.addEventListener('mousemove', throttle(updateUserActivity, 5000)); // 限制mousemove触发频率
+        document.addEventListener('mousemove', throttle(updateUserActivity, 5000));
         
         // 设置定期清理定时器
         setInterval(checkAndCleanupMemory, MEMORY_MANAGEMENT.IDLE_CLEANUP_INTERVAL);
         setInterval(forcedMemoryCleanup, MEMORY_MANAGEMENT.FORCED_CLEANUP_INTERVAL);
         
-        // 添加内存管理切换到设置菜单
-        addMemoryManagementToggleToSettings();
-        
-        console.log('内存管理机制已初始化');
+        // 初始化时记录日志
+        console.log(`内存管理系统已初始化: 空闲清理间隔=${MEMORY_MANAGEMENT.IDLE_CLEANUP_INTERVAL/1000}秒, 强制清理间隔=${MEMORY_MANAGEMENT.FORCED_CLEANUP_INTERVAL/60000}分钟`);
     }
     
     /**
@@ -470,11 +469,11 @@ document.addEventListener('DOMContentLoaded', async () => {
      * 检查并清理内存（仅在用户空闲时）
      */
     function checkAndCleanupMemory() {
-        if (!MEMORY_MANAGEMENT.isMemoryCleanupEnabled) return;
+        if (!MEMORY_MANAGEMENT.isEnabled) return;
         
         const idleTime = Date.now() - MEMORY_MANAGEMENT.lastUserActivity;
         if (idleTime > MEMORY_MANAGEMENT.USER_IDLE_THRESHOLD) {
-            console.log('用户空闲，执行内存清理');
+            console.log(`用户已空闲${(idleTime/1000).toFixed(0)}秒，执行内存清理`);
             chatHistoryUI.clearMemoryCache();
         }
     }
@@ -483,58 +482,10 @@ document.addEventListener('DOMContentLoaded', async () => {
      * 强制执行内存清理，无论用户是否活跃
      */
     function forcedMemoryCleanup() {
-        if (!MEMORY_MANAGEMENT.isMemoryCleanupEnabled) return;
+        if (!MEMORY_MANAGEMENT.isEnabled) return;
         
         console.log('执行定期强制内存清理');
         chatHistoryUI.clearMemoryCache();
-    }
-    
-    /**
-     * 添加内存管理切换到设置菜单
-     */
-    function addMemoryManagementToggleToSettings() {
-        // 创建内存管理菜单项
-        const memoryMgmtItem = document.createElement('div');
-        memoryMgmtItem.className = 'menu-item';
-        
-        const span = document.createElement('span');
-        span.textContent = '内存自动管理';
-        memoryMgmtItem.appendChild(span);
-        
-        const label = document.createElement('label');
-        label.className = 'switch';
-        
-        const input = document.createElement('input');
-        input.type = 'checkbox';
-        input.id = 'memory-management-switch';
-        input.checked = MEMORY_MANAGEMENT.isMemoryCleanupEnabled;
-        
-        input.addEventListener('change', function() {
-            MEMORY_MANAGEMENT.isMemoryCleanupEnabled = this.checked;
-            chatHistoryUI.setMemoryManagementEnabled(this.checked);
-            console.log(`内存自动管理已${this.checked ? '启用' : '禁用'}`);
-            
-            // 如果启用，立即清理一次
-            if (this.checked) {
-                chatHistoryUI.clearMemoryCache();
-            }
-        });
-        
-        const slider = document.createElement('span');
-        slider.className = 'slider';
-        
-        label.appendChild(input);
-        label.appendChild(slider);
-        memoryMgmtItem.appendChild(label);
-        
-        // 添加到设置菜单的合适位置
-        const insertBeforeElement = document.getElementById('clear-chat');
-        if (insertBeforeElement && insertBeforeElement.parentNode) {
-            insertBeforeElement.parentNode.insertBefore(memoryMgmtItem, insertBeforeElement);
-        } else {
-            // 如果找不到参考元素，则添加到设置菜单末尾
-            settingsMenu.appendChild(memoryMgmtItem);
-        }
     }
     
     /**
