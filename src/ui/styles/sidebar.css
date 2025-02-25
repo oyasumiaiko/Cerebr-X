@@ -260,6 +260,7 @@ body {
     transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
     border: 1px solid rgba(255, 255, 255, 0.1);
     z-index: 10000;
+    user-select: none;
 }
 
 #settings-menu.visible {
@@ -2207,4 +2208,95 @@ body.hide-references .reference-number.superscript {
 }
 #screenshot-button:active {
     transform: scale(0.95);
+}
+
+/* 搜索加载指示器 */
+.search-loading-indicator {
+    text-align: center;
+    padding: 10px;
+    color: var(--cerebr-text-color);
+    font-style: italic;
+    animation: pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse {
+    0% { opacity: 0.5; }
+    50% { opacity: 1; }
+    100% { opacity: 0.5; }
+}
+
+/* 内存管理开关容器 */
+.switch-container {
+    display: flex;
+    align-items: center;
+    margin-right: 10px;
+}
+
+.switch-label {
+    margin-right: 8px;
+    font-size: 14px;
+}
+
+/* 小开关样式 */
+.small-switch {
+    position: relative;
+    display: inline-block;
+    width: 36px;
+    height: 18px;
+}
+
+.small-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.small-switch .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--cerebr-border-color);
+    transition: .4s;
+    border-radius: 34px;
+}
+
+.small-switch .slider:before {
+    position: absolute;
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 2px;
+    bottom: 2px;
+    background-color: var(--cerebr-bg-color);
+    transition: .4s;
+    border-radius: 50%;
+}
+
+.small-switch input:checked + .slider {
+    background-color: var(--cerebr-primary-color);
+}
+
+.small-switch input:focus + .slider {
+    box-shadow: 0 0 1px var(--cerebr-primary-color);
+}
+
+.small-switch input:checked + .slider:before {
+    transform: translateX(18px);
+}
+
+/* 添加更多间距 */
+#chat-history-panel .panel-header {
+    margin-bottom: 20px;
+}
+
+#chat-history-panel .header-actions {
+    display: flex;
+    align-items: center;
+}
+
+#chat-history-panel .switch-container {
+    margin-right: 12px;
 }

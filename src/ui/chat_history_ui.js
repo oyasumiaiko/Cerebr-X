@@ -3,7 +3,14 @@
  * @module ChatHistoryUI
  */
 
-import { getAllConversations, putConversation, deleteConversation, getConversationById } from '../storage/indexeddb_helper.js';
+import { 
+  getAllConversationMetadata, 
+  getAllConversations, 
+  putConversation, 
+  deleteConversation, 
+  getConversationById,
+  releaseConversationMemory
+} from '../storage/indexeddb_helper.js';
 
 /**
  * 创建聊天历史UI管理器
@@ -28,6 +35,13 @@ export function createChatHistoryUI(options) {
 
   let currentConversationId = null;
   let currentPageInfo = null;
+  
+  // 内存管理设置
+  let memoryManagementEnabled = true;  // 是否启用内存管理
+  let activeConversation = null;       // 当前活动的会话对象
+  let maxLoadedConversations = 5;      // 最大加载到内存的会话数
+  let loadedConversations = new Map(); // 已加载到内存的会话缓存
+  let conversationUsageTimestamp = new Map(); // 记录会话最后使用时间
 
   /**
    * 提取消息的纯文本内容
@@ -101,7 +115,8 @@ export function createChatHistoryUI(options) {
     // 如果是更新操作并且已存在记录，则固定使用首次保存的 url
     if (isUpdate && currentConversationId) {
       try {
-        const existingConversation = await getConversationById(currentConversationId);
+        // 使用false参数，不加载完整内容，只获取元数据
+        const existingConversation = await getConversationById(currentConversationId, false);
         if (existingConversation) {
           urlToSave = existingConversation.url;
           titleToSave = existingConversation.title;
@@ -125,19 +140,107 @@ export function createChatHistoryUI(options) {
 
     // 使用 IndexedDB 存储对话记录
     await putConversation(conversation);
+    
+    // 更新当前会话ID和活动会话
     currentConversationId = conversation.id;
+    activeConversation = conversation;
+    
+    // 更新内存缓存
+    updateConversationInCache(conversation);
+    
     console.log(`已${isUpdate ? '更新' : '保存'}对话记录:`, conversation);
+  }
+
+  /**
+   * 更新会话缓存
+   * @param {Object} conversation - 会话对象
+   */
+  function updateConversationInCache(conversation) {
+    if (!memoryManagementEnabled) return;
+    
+    // 更新会话缓存和使用时间戳
+    loadedConversations.set(conversation.id, conversation);
+    conversationUsageTimestamp.set(conversation.id, Date.now());
+    
+    // 如果已加载的会话超过最大限制，释放最久未使用的会话
+    if (loadedConversations.size > maxLoadedConversations) {
+      let oldestId = null;
+      let oldestTime = Date.now();
+      
+      // 找出最久未使用的会话
+      for (const [id, timestamp] of conversationUsageTimestamp.entries()) {
+        // 跳过当前活动会话
+        if (id === activeConversation?.id) continue;
+        
+        if (timestamp < oldestTime) {
+          oldestTime = timestamp;
+          oldestId = id;
+        }
+      }
+      
+      // 释放最久未使用的会话内存
+      if (oldestId) {
+        const oldConversation = loadedConversations.get(oldestId);
+        if (oldConversation) {
+          // 释放内存但保留在缓存中的引用
+          loadedConversations.set(oldestId, releaseConversationMemory(oldConversation));
+          console.log(`释放会话内存: ${oldestId}`);
+        }
+      }
+    }
+  }
+
+  /**
+   * 从缓存获取会话，如果不在缓存中则从数据库加载
+   * @param {string} conversationId - 会话ID 
+   * @param {boolean} [forceReload=false] - 是否强制从数据库重新加载
+   * @returns {Promise<Object>} 会话对象
+   */
+  async function getConversationFromCacheOrLoad(conversationId, forceReload = false) {
+    if (!memoryManagementEnabled || forceReload || !loadedConversations.has(conversationId)) {
+      // 从数据库加载并更新缓存
+      const conversation = await getConversationById(conversationId);
+      if (conversation) {
+        updateConversationInCache(conversation);
+      }
+      return conversation;
+    } else {
+      // 从缓存获取并更新使用时间戳
+      const conversation = loadedConversations.get(conversationId);
+      conversationUsageTimestamp.set(conversationId, Date.now());
+      
+      // 检查是否需要从数据库加载完整内容
+      if (conversation && conversation.messages && conversation.messages.some(msg => msg.contentRef && !msg.content)) {
+        console.log(`从数据库加载部分内容: ${conversationId}`);
+        const fullConversation = await getConversationById(conversationId);
+        if (fullConversation) {
+          updateConversationInCache(fullConversation);
+        }
+        return fullConversation;
+      }
+      
+      return conversation;
+    }
   }
 
   /**
    * 加载选中的对话记录到当前聊天窗口
    * @param {Object} conversation - 对话记录对象
    */
-  function loadConversationIntoChat(conversation) {
+  async function loadConversationIntoChat(conversation) {
+    // 如果传入的是简化版会话对象（可能只有id），则加载完整版
+    let fullConversation = conversation;
+    if (!conversation.messages || conversation.messages.length === 0) {
+      fullConversation = await getConversationFromCacheOrLoad(conversation.id);
+    }
+    
+    // 设置为当前活动会话
+    activeConversation = fullConversation;
+    
     // 清空当前聊天容器
     chatContainer.innerHTML = '';
     // 遍历对话中的每条消息并显示
-    conversation.messages.forEach(msg => {
+    fullConversation.messages.forEach(msg => {
       const role = msg.role.toLowerCase() === 'assistant' ? 'ai' : msg.role;
       let messageElem = null;
 
@@ -162,13 +265,13 @@ export function createChatHistoryUI(options) {
       messageElem.setAttribute('data-message-id', msg.id);
     });
     // 恢复加载的对话历史到聊天管理器
-    chatHistory.messages = conversation.messages.slice();
+    chatHistory.messages = fullConversation.messages.slice();
     // 若存在消息，则设置第一条消息的 id 为根节点
-    chatHistory.root = conversation.messages.length > 0 ? conversation.messages[0].id : null;
+    chatHistory.root = fullConversation.messages.length > 0 ? fullConversation.messages[0].id : null;
     // 将 currentNode 更新为最后一条消息的 id
-    chatHistory.currentNode = conversation.messages.length > 0 ? conversation.messages[conversation.messages.length - 1].id : null;
+    chatHistory.currentNode = fullConversation.messages.length > 0 ? fullConversation.messages[fullConversation.messages.length - 1].id : null;
     // 保存加载的对话记录ID，用于后续更新操作
-    currentConversationId = conversation.id;
+    currentConversationId = fullConversation.id;
   }
 
   /**
@@ -185,6 +288,7 @@ export function createChatHistoryUI(options) {
     clearHistory();
     // 重置当前会话ID，确保下次发送新消息创建新会话
     currentConversationId = null;
+    activeConversation = null;
   }
 
   /**
@@ -305,6 +409,12 @@ export function createChatHistoryUI(options) {
       await deleteConversation(conversationId);
       menu.remove();
 
+      // 从缓存中移除
+      if (loadedConversations.has(conversationId)) {
+        loadedConversations.delete(conversationId);
+        conversationUsageTimestamp.delete(conversationId);
+      }
+
       // 刷新聊天记录面板
       const panel = document.getElementById('chat-history-panel');
       if (panel) {
@@ -330,164 +440,235 @@ export function createChatHistoryUI(options) {
    * @param {HTMLElement} panel - 聊天历史面板元素
    * @param {string} filterText - 过滤文本
    */
-  function loadConversationHistories(panel, filterText) {
+  async function loadConversationHistories(panel, filterText) {
     const listContainer = panel.querySelector('#chat-history-list');
     if (!listContainer) return;
 
     listContainer.innerHTML = '';
-    getAllConversations().then(histories => {
-      if (filterText) {
-        const lowerFilter = filterText.toLowerCase();
-        histories = histories.filter(conv => {
-          const url = (conv.url || '').toLowerCase();
-          const summary = (conv.summary || '').toLowerCase();
-          const messagesContent = conv.messages && conv.messages.length
-            ? conv.messages.map(msg => msg.content || '').join(' ')
-            : '';
-          const lowerMessages = messagesContent.toLowerCase();
-          return url.includes(lowerFilter) || summary.includes(lowerFilter) || lowerMessages.includes(lowerFilter);
-        });
+    
+    // 使用元数据加载，减少内存占用
+    const histories = await getAllConversationMetadata();
+    
+    if (filterText) {
+      const lowerFilter = filterText.toLowerCase();
+      // 对于有过滤条件的情况，需要加载完整内容进行搜索
+      // 这里为了避免内存压力，我们逐个加载并搜索，而不是一次性加载所有内容
+      const filteredHistories = [];
+      
+      // 显示加载指示器
+      const loadingIndicator = document.createElement('div');
+      loadingIndicator.textContent = '正在搜索...';
+      loadingIndicator.className = 'search-loading-indicator';
+      listContainer.appendChild(loadingIndicator);
+      
+      // 异步搜索每个会话
+      for (const historyMeta of histories) {
+        // 先检查元数据是否匹配
+        const url = (historyMeta.url || '').toLowerCase();
+        const summary = (historyMeta.summary || '').toLowerCase();
+        
+        if (url.includes(lowerFilter) || summary.includes(lowerFilter)) {
+          filteredHistories.push(historyMeta);
+          continue;
+        }
+        
+        // 如果元数据不匹配，则加载完整内容并搜索
+        try {
+          const fullConversation = await getConversationById(historyMeta.id);
+          if (fullConversation) {
+            const messagesContent = fullConversation.messages && fullConversation.messages.length
+              ? fullConversation.messages.map(msg => {
+                  if (typeof msg.content === 'string') return msg.content || '';
+                  if (Array.isArray(msg.content)) {
+                    return msg.content.map(part => part.type === 'text' ? part.text : '').join(' ');
+                  }
+                  return '';
+                }).join(' ')
+              : '';
+              
+            const lowerMessages = messagesContent.toLowerCase();
+            if (lowerMessages.includes(lowerFilter)) {
+              filteredHistories.push(fullConversation);
+            } else {
+              // 释放内存
+              if (fullConversation.id !== activeConversation?.id) {
+                loadedConversations.delete(fullConversation.id);
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`搜索会话 ${historyMeta.id} 失败:`, error);
+        }
       }
-
+      
+      // 移除加载指示器
+      loadingIndicator.remove();
+      
+      // 显示过滤结果
+      if (filteredHistories.length === 0) {
+        const emptyMsg = document.createElement('div');
+        emptyMsg.textContent = '没有匹配的聊天记录';
+        listContainer.appendChild(emptyMsg);
+        return;
+      }
+      
+      displayConversationList(filteredHistories, filterText, listContainer);
+    } else {
+      // 没有过滤条件，直接显示元数据列表
       if (histories.length === 0) {
         const emptyMsg = document.createElement('div');
         emptyMsg.textContent = '暂无聊天记录';
         listContainer.appendChild(emptyMsg);
         return;
       }
-      // 按结束时间降序排序
-      histories.sort((a, b) => b.endTime - a.endTime);
+      
+      displayConversationList(histories, '', listContainer);
+    }
+  }
+  
+  /**
+   * 显示会话列表
+   * @param {Array<Object>} histories - 会话历史数组
+   * @param {string} filterText - 过滤文本
+   * @param {HTMLElement} listContainer - 列表容器元素
+   */
+  function displayConversationList(histories, filterText, listContainer) {
+    // 按结束时间降序排序
+    histories.sort((a, b) => b.endTime - a.endTime);
 
-      // 根据会话的开始时间进行分组
-      const groups = {};
-      const groupLatestTime = {}; // 用于记录各分组中最新的会话时间以便排序
-      histories.forEach(conv => {
-        const convDate = new Date(conv.startTime);
-        const groupLabel = getGroupLabel(convDate);
-        if (!groups[groupLabel]) {
-          groups[groupLabel] = [];
-          groupLatestTime[groupLabel] = convDate.getTime();
-        } else {
-          groupLatestTime[groupLabel] = Math.max(groupLatestTime[groupLabel], convDate.getTime());
+    // 根据会话的开始时间进行分组
+    const groups = {};
+    const groupLatestTime = {}; // 用于记录各分组中最新的会话时间以便排序
+    histories.forEach(conv => {
+      const convDate = new Date(conv.startTime);
+      const groupLabel = getGroupLabel(convDate);
+      if (!groups[groupLabel]) {
+        groups[groupLabel] = [];
+        groupLatestTime[groupLabel] = convDate.getTime();
+      } else {
+        groupLatestTime[groupLabel] = Math.max(groupLatestTime[groupLabel], convDate.getTime());
+      }
+      groups[groupLabel].push(conv);
+    });
+
+    // 根据每个分组中最新的时间降序排序分组
+    const sortedGroupLabels = Object.keys(groups).sort((a, b) => groupLatestTime[b] - groupLatestTime[a]);
+
+    sortedGroupLabels.forEach(groupLabel => {
+      // 创建分组标题
+      const groupHeader = document.createElement('div');
+      groupHeader.className = 'chat-history-group-header';
+      groupHeader.textContent = groupLabel;
+      listContainer.appendChild(groupHeader);
+
+      groups[groupLabel].forEach(conv => {
+        const item = document.createElement('div');
+        item.className = 'chat-history-item';
+        // 保存会话ID作为属性，便于后续加载
+        item.setAttribute('data-id', conv.id);
+
+        const summaryDiv = document.createElement('div');
+        summaryDiv.className = 'summary';
+        let displaySummary = conv.summary || '';
+        if (filterText && filterText.trim() !== "") {
+          const regex = new RegExp(`(${filterText})`, 'gi');
+          displaySummary = displaySummary.replace(regex, '<mark>$1</mark>');
         }
-        groups[groupLabel].push(conv);
-      });
+        summaryDiv.innerHTML = displaySummary;
+        
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'info';
+        const convDate = new Date(conv.startTime);
+        const relativeTime = formatRelativeTime(convDate);
 
-      // 根据每个分组中最新的时间降序排序分组
-      const sortedGroupLabels = Object.keys(groups).sort((a, b) => groupLatestTime[b] - groupLatestTime[a]);
-
-      sortedGroupLabels.forEach(groupLabel => {
-        // 创建分组标题
-        const groupHeader = document.createElement('div');
-        groupHeader.className = 'chat-history-group-header';
-        groupHeader.textContent = groupLabel;
-        listContainer.appendChild(groupHeader);
-
-        groups[groupLabel].forEach(conv => {
-          const item = document.createElement('div');
-          item.className = 'chat-history-item';
-
-          const summaryDiv = document.createElement('div');
-          summaryDiv.className = 'summary';
-          let displaySummary = conv.summary;
-          if (filterText && filterText.trim() !== "") {
-            const regex = new RegExp(`(${filterText})`, 'gi');
-            displaySummary = displaySummary.replace(regex, '<mark>$1</mark>');
+        // 提取 URL 中的 domain
+        let domain = '';
+        if (conv.url) {
+          try {
+            const urlObj = new URL(conv.url);
+            domain = urlObj.hostname;
+          } catch (error) {
+            domain = conv.url;
           }
-          summaryDiv.innerHTML = displaySummary;
-          const infoDiv = document.createElement('div');
-          infoDiv.className = 'info';
-          const convDate = new Date(conv.startTime);
-          const relativeTime = formatRelativeTime(convDate);
+        } else {
+          domain = '未知';
+        }
 
-          // 提取 URL 中的 domain
-          let domain = '';
-          if (conv.url) {
-            try {
-              const urlObj = new URL(conv.url);
-              domain = urlObj.hostname;
-            } catch (error) {
-              domain = conv.url;
-            }
-          } else {
-            domain = '未知';
-          }
+        let title = conv.title;
 
-          let title = conv.title;
+        const displayInfos = [relativeTime, `消息数: ${conv.messageCount}`, domain].filter(Boolean).join(' · ');
+        infoDiv.textContent = displayInfos;
+        // 鼠标悬停显示具体的日期时间
+        const details = [convDate.toLocaleString(), title, conv.url].filter(Boolean).join('\n');
+        infoDiv.title = details;
 
-          const displayInfos = [relativeTime, `消息数: ${conv.messageCount}`, domain].filter(Boolean).join(' · ');
-          infoDiv.textContent = displayInfos;
-          // 新增：鼠标悬停显示具体的日期时间
+        item.appendChild(summaryDiv);
+        item.appendChild(infoDiv);
 
-          const details = [convDate.toLocaleString(), title, conv.url].filter(Boolean).join('\n');
-          infoDiv.title = details;
-
-          item.appendChild(summaryDiv);
-          item.appendChild(infoDiv);
-
-          // 如果有筛选关键字, 尝试提取所有匹配关键字附近的内容作为 snippet
-          if (filterText && filterText.trim() !== "") {
-            let snippets = [];
-            let totalMatches = 0;
-            // 对 filterText 进行转义，避免正则特殊字符问题
-            const escapedFilter = filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const lowerFilter = filterText.toLowerCase();
-            // 预先构造用于高亮的正则对象
-            const highlightRegex = new RegExp(escapedFilter, 'gi');
-            if (conv.messages && Array.isArray(conv.messages)) {
-              for (const msg of conv.messages) {
-                const plainText = extractMessagePlainText(msg);
-                if (plainText) {
-                  const content = plainText;
-                  const contentLower = content.toLowerCase();
-                  // 若当前消息中未包含关键字，则跳过
-                  if (contentLower.indexOf(lowerFilter) === -1) continue;
-                  let startIndex = 0;
-                  while (true) {
-                    const index = contentLower.indexOf(lowerFilter, startIndex);
-                    if (index === -1) break;
-                    totalMatches++;
-                    if (snippets.length < 5) {
-                      const snippetStart = Math.max(0, index - 30);
-                      const snippetEnd = Math.min(content.length, index + filterText.length + 30);
-                      let snippet = content.substring(snippetStart, snippetEnd);
-                      // 高亮 snippet 中所有匹配关键字，复用 highlightRegex
-                      snippet = snippet.replace(highlightRegex, '<mark>$&</mark>');
-                      snippets.push(snippet);
-                    }
-                    startIndex = index + 1;
+        // 如果有筛选关键字且对象中包含完整消息，尝试提取所有匹配关键字附近的内容作为 snippet
+        if (filterText && filterText.trim() !== "" && conv.messages) {
+          let snippets = [];
+          let totalMatches = 0;
+          // 对 filterText 进行转义，避免正则特殊字符问题
+          const escapedFilter = filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const lowerFilter = filterText.toLowerCase();
+          // 预先构造用于高亮的正则对象
+          const highlightRegex = new RegExp(escapedFilter, 'gi');
+          if (conv.messages && Array.isArray(conv.messages)) {
+            for (const msg of conv.messages) {
+              const plainText = extractMessagePlainText(msg);
+              if (plainText) {
+                const content = plainText;
+                const contentLower = content.toLowerCase();
+                // 若当前消息中未包含关键字，则跳过
+                if (contentLower.indexOf(lowerFilter) === -1) continue;
+                let startIndex = 0;
+                while (true) {
+                  const index = contentLower.indexOf(lowerFilter, startIndex);
+                  if (index === -1) break;
+                  totalMatches++;
+                  if (snippets.length < 5) {
+                    const snippetStart = Math.max(0, index - 30);
+                    const snippetEnd = Math.min(content.length, index + filterText.length + 30);
+                    let snippet = content.substring(snippetStart, snippetEnd);
+                    // 高亮 snippet 中所有匹配关键字，复用 highlightRegex
+                    snippet = snippet.replace(highlightRegex, '<mark>$&</mark>');
+                    snippets.push(snippet);
                   }
+                  startIndex = index + 1;
                 }
               }
             }
-            if (snippets.length > 0) {
-              const snippetDiv = document.createElement('div');
-              snippetDiv.className = 'highlight-snippet';
-              let displaySnippets = snippets.map(s => '…' + s + '…');
-              if (totalMatches > snippets.length) {
-                displaySnippets.push(`…… 共 ${totalMatches} 匹配`);
-              }
-              snippetDiv.innerHTML = displaySnippets.join('<br>');
-              item.appendChild(snippetDiv);
-            }
           }
+          if (snippets.length > 0) {
+            const snippetDiv = document.createElement('div');
+            snippetDiv.className = 'highlight-snippet';
+            let displaySnippets = snippets.map(s => '…' + s + '…');
+            if (totalMatches > snippets.length) {
+              displaySnippets.push(`…… 共 ${totalMatches} 匹配`);
+            }
+            snippetDiv.innerHTML = displaySnippets.join('<br>');
+            item.appendChild(snippetDiv);
+          }
+        }
 
-          // 添加聊天记录项的点击事件（加载对话）
-          item.addEventListener('click', () => {
-            loadConversationIntoChat(conv);
-            // 保持聊天记录面板打开
-          });
-          // 新增：添加右键事件，显示删除菜单
-          item.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            showChatHistoryItemContextMenu(e, conv.id);
-          });
-
-          listContainer.appendChild(item);
+        // 添加聊天记录项的点击事件
+        item.addEventListener('click', async () => {
+          // 加载对话到聊天窗口
+          const conversation = await getConversationFromCacheOrLoad(conv.id);
+          if (conversation) {
+            loadConversationIntoChat(conversation);
+          }
         });
+        
+        // 添加右键事件，显示删除菜单
+        item.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          showChatHistoryItemContextMenu(e, conv.id);
+        });
+
+        listContainer.appendChild(item);
       });
-    }).catch(err => {
-      console.error("加载聊天记录失败", err);
     });
   }
 
@@ -523,6 +704,42 @@ export function createChatHistoryUI(options) {
       const restoreButton = document.createElement('button');
       restoreButton.textContent = '还原';
       restoreButton.addEventListener('click', restoreConversations);
+      
+      // 添加内存管理开关
+      const memoryMgmtContainer = document.createElement('div');
+      memoryMgmtContainer.className = 'switch-container';
+      
+      const memoryMgmtLabel = document.createElement('span');
+      memoryMgmtLabel.textContent = '内存管理';
+      memoryMgmtLabel.className = 'switch-label';
+      
+      const memoryMgmtSwitch = document.createElement('label');
+      memoryMgmtSwitch.className = 'switch small-switch';
+      
+      const memoryMgmtInput = document.createElement('input');
+      memoryMgmtInput.type = 'checkbox';
+      memoryMgmtInput.checked = memoryManagementEnabled;
+      memoryMgmtInput.addEventListener('change', () => {
+        memoryManagementEnabled = memoryMgmtInput.checked;
+        console.log(`内存管理已${memoryManagementEnabled ? '启用' : '禁用'}`);
+        
+        // 如果禁用内存管理，清空缓存
+        if (!memoryManagementEnabled) {
+          loadedConversations.clear();
+          conversationUsageTimestamp.clear();
+        }
+      });
+      
+      const sliderSpan = document.createElement('span');
+      sliderSpan.className = 'slider';
+      
+      memoryMgmtSwitch.appendChild(memoryMgmtInput);
+      memoryMgmtSwitch.appendChild(sliderSpan);
+      
+      memoryMgmtContainer.appendChild(memoryMgmtLabel);
+      memoryMgmtContainer.appendChild(memoryMgmtSwitch);
+      
+      headerActions.appendChild(memoryMgmtContainer);
 
       const closeBtn = document.createElement('button');
       closeBtn.textContent = '关闭';
@@ -585,6 +802,7 @@ export function createChatHistoryUI(options) {
    */
   async function backupConversations() {
     try {
+      // 使用加载所有会话的完整数据进行备份
       const allConversations = await getAllConversations();
       const jsonStr = JSON.stringify(allConversations, null, 2);
       const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -624,7 +842,7 @@ export function createChatHistoryUI(options) {
         let countAdded = 0;
         for (const conv of backupData) {
           try {
-            const existing = await getConversationById(conv.id);
+            const existing = await getConversationById(conv.id, false);
             if (!existing) {
               await putConversation(conv);
               countAdded++;
@@ -651,6 +869,35 @@ export function createChatHistoryUI(options) {
   function updatePageInfo(pageInfo) {
     currentPageInfo = pageInfo;
   }
+  
+  /**
+   * 设置内存管理状态
+   * @param {boolean} enabled - 是否启用内存管理
+   */
+  function setMemoryManagementEnabled(enabled) {
+    memoryManagementEnabled = enabled;
+  }
+  
+  /**
+   * 清理内存缓存
+   */
+  function clearMemoryCache() {
+    // 保留当前活动会话
+    const activeId = activeConversation?.id;
+    const activeConv = activeId ? loadedConversations.get(activeId) : null;
+    
+    // 清空缓存
+    loadedConversations.clear();
+    conversationUsageTimestamp.clear();
+    
+    // 恢复当前活动会话到缓存
+    if (activeId && activeConv) {
+      loadedConversations.set(activeId, activeConv);
+      conversationUsageTimestamp.set(activeId, Date.now());
+    }
+    
+    console.log('内存缓存已清理');
+  }
 
   return {
     saveCurrentConversation,
@@ -664,6 +911,8 @@ export function createChatHistoryUI(options) {
     restoreConversations, 
     refreshChatHistory,
     updatePageInfo,
-    getCurrentConversationId: () => currentConversationId
+    getCurrentConversationId: () => currentConversationId,
+    setMemoryManagementEnabled,
+    clearMemoryCache
   };
 } 

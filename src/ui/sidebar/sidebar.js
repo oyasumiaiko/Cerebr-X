@@ -10,6 +10,15 @@ import { createSettingsManager } from '../settings_manager.js'; // 导入设置�
 import { createContextMenuManager } from '../context_menu_manager.js'; // 导入上下文菜单管理模块
 import { createUIManager } from '../ui_manager.js'; // 导入UI管理模块
 
+// 内存管理相关配置
+const MEMORY_MANAGEMENT = {
+    IDLE_CLEANUP_INTERVAL: 5 * 60 * 1000, // 5分钟检查一次空闲清理
+    FORCED_CLEANUP_INTERVAL: 30 * 60 * 1000, // 30分钟强制清理一次
+    USER_IDLE_THRESHOLD: 3 * 60 * 1000, // 3分钟无操作视为空闲
+    lastUserActivity: Date.now(),
+    isMemoryCleanupEnabled: true
+};
+
 document.addEventListener('DOMContentLoaded', async () => {
     // DOM 元素获取
     const chatContainer = document.getElementById('chat-container');
@@ -424,6 +433,135 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 使用当前聊天记录树 chatHistory（由 createChatHistoryManager() 提供）初始化调试窗口
             initTreeDebugger(chatHistory);
         });
+    }
+
+    // ====================== 内存管理设置 ======================
+    
+    // 初始化内存管理
+    initMemoryManagement();
+    
+    /**
+     * 初始化内存管理机制
+     */
+    function initMemoryManagement() {
+        // 设置用户活动跟踪
+        document.addEventListener('click', updateUserActivity);
+        document.addEventListener('keypress', updateUserActivity);
+        document.addEventListener('mousemove', throttle(updateUserActivity, 5000)); // 限制mousemove触发频率
+        
+        // 设置定期清理定时器
+        setInterval(checkAndCleanupMemory, MEMORY_MANAGEMENT.IDLE_CLEANUP_INTERVAL);
+        setInterval(forcedMemoryCleanup, MEMORY_MANAGEMENT.FORCED_CLEANUP_INTERVAL);
+        
+        // 添加内存管理切换到设置菜单
+        addMemoryManagementToggleToSettings();
+        
+        console.log('内存管理机制已初始化');
+    }
+    
+    /**
+     * 更新用户最后活动时间
+     */
+    function updateUserActivity() {
+        MEMORY_MANAGEMENT.lastUserActivity = Date.now();
+    }
+    
+    /**
+     * 检查并清理内存（仅在用户空闲时）
+     */
+    function checkAndCleanupMemory() {
+        if (!MEMORY_MANAGEMENT.isMemoryCleanupEnabled) return;
+        
+        const idleTime = Date.now() - MEMORY_MANAGEMENT.lastUserActivity;
+        if (idleTime > MEMORY_MANAGEMENT.USER_IDLE_THRESHOLD) {
+            console.log('用户空闲，执行内存清理');
+            chatHistoryUI.clearMemoryCache();
+        }
+    }
+    
+    /**
+     * 强制执行内存清理，无论用户是否活跃
+     */
+    function forcedMemoryCleanup() {
+        if (!MEMORY_MANAGEMENT.isMemoryCleanupEnabled) return;
+        
+        console.log('执行定期强制内存清理');
+        chatHistoryUI.clearMemoryCache();
+    }
+    
+    /**
+     * 添加内存管理切换到设置菜单
+     */
+    function addMemoryManagementToggleToSettings() {
+        // 创建内存管理菜单项
+        const memoryMgmtItem = document.createElement('div');
+        memoryMgmtItem.className = 'menu-item';
+        
+        const span = document.createElement('span');
+        span.textContent = '内存自动管理';
+        memoryMgmtItem.appendChild(span);
+        
+        const label = document.createElement('label');
+        label.className = 'switch';
+        
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.id = 'memory-management-switch';
+        input.checked = MEMORY_MANAGEMENT.isMemoryCleanupEnabled;
+        
+        input.addEventListener('change', function() {
+            MEMORY_MANAGEMENT.isMemoryCleanupEnabled = this.checked;
+            chatHistoryUI.setMemoryManagementEnabled(this.checked);
+            console.log(`内存自动管理已${this.checked ? '启用' : '禁用'}`);
+            
+            // 如果启用，立即清理一次
+            if (this.checked) {
+                chatHistoryUI.clearMemoryCache();
+            }
+        });
+        
+        const slider = document.createElement('span');
+        slider.className = 'slider';
+        
+        label.appendChild(input);
+        label.appendChild(slider);
+        memoryMgmtItem.appendChild(label);
+        
+        // 添加到设置菜单的合适位置
+        const insertBeforeElement = document.getElementById('clear-chat');
+        if (insertBeforeElement && insertBeforeElement.parentNode) {
+            insertBeforeElement.parentNode.insertBefore(memoryMgmtItem, insertBeforeElement);
+        } else {
+            // 如果找不到参考元素，则添加到设置菜单末尾
+            settingsMenu.appendChild(memoryMgmtItem);
+        }
+    }
+    
+    /**
+     * 函数节流工具，限制函数调用频率
+     * @param {Function} func - 要节流的函数
+     * @param {number} limit - 最小调用间隔（毫秒）
+     * @returns {Function} 节流后的函数
+     */
+    function throttle(func, limit) {
+        let lastFunc;
+        let lastRan;
+        return function() {
+            const context = this;
+            const args = arguments;
+            if (!lastRan) {
+                func.apply(context, args);
+                lastRan = Date.now();
+            } else {
+                clearTimeout(lastFunc);
+                lastFunc = setTimeout(function() {
+                    if ((Date.now() - lastRan) >= limit) {
+                        func.apply(context, args);
+                        lastRan = Date.now();
+                    }
+                }, limit - (Date.now() - lastRan));
+            }
+        };
     }
 
     // ====================== 辅助函数 ======================
