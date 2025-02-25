@@ -115,20 +115,27 @@ export function createChatHistoryUI(options) {
       summary = content.substring(0, 50);
     }
 
-    let urlToSave = currentPageInfo?.url || '';
-    let titleToSave = currentPageInfo?.title || '';
-    // 如果是更新操作并且已存在记录，则固定使用首次保存的 url
+    let urlToSave = '';
+    let titleToSave = '';
+    
+    // 如果是更新操作并且已存在记录，则固定使用首次保存的 url 和 title
     if (isUpdate && currentConversationId) {
       try {
         // 使用false参数，不加载完整内容，只获取元数据
         const existingConversation = await getConversationById(currentConversationId, false);
         if (existingConversation) {
-          urlToSave = existingConversation.url;
-          titleToSave = existingConversation.title;
+          urlToSave = existingConversation.url || '';
+          titleToSave = existingConversation.title || '';
         }
       } catch (error) {
         console.error("获取会话记录失败:", error);
       }
+    } else {
+      // 如果是首次保存，使用当前页面信息
+      urlToSave = currentPageInfo?.url || '';
+      titleToSave = currentPageInfo?.title || '';
+      
+      console.log(`首次保存会话，使用当前页面信息: URL=${urlToSave}, 标题=${titleToSave}`);
     }
 
     const generateConversationId = () => `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;

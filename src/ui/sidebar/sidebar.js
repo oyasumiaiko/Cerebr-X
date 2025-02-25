@@ -560,4 +560,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             type: 'CAPTURE_SCREENSHOT'
         }, '*');
     }
+
+    // ====================== 初始化时请求页面信息 ======================
+    
+    // 在初始化完成后，主动请求当前页面信息，确保在首次保存聊天记录时有正确的页面信息
+    setTimeout(() => {
+        console.log('初始化完成，主动请求当前页面信息');
+        window.parent.postMessage({
+            type: 'REQUEST_PAGE_INFO'
+        }, '*');
+    }, 500);
 });

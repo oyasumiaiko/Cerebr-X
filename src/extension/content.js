@@ -389,6 +389,22 @@ class CerebrSidebar {
         case 'CAPTURE_SCREENSHOT':
           captureAndDropScreenshot();
           break;
+        case 'REQUEST_PAGE_INFO':
+          console.log('收到请求页面信息消息');
+          const iframe = this.sidebar?.querySelector('.cerebr-sidebar__iframe');
+          if (iframe) {
+            iframe.contentWindow.postMessage({
+              type: 'URL_CHANGED',
+              url: window.location.href,
+              title: document.title,
+              referrer: document.referrer,
+              lastModified: document.lastModified,
+              lang: document.documentElement.lang,
+              charset: document.characterSet
+            }, '*');
+            console.log('已发送当前页面信息到侧边栏');
+          }
+          break;
       }
     });
   }
