@@ -125,9 +125,6 @@ export function createSettingsManager(options) {
     // 使用主题管理器应用主题
     themeManager.applyTheme(themeValue);
     
-    // 保存主题ID到HTML元素，方便系统主题变化时判断
-    document.documentElement.setAttribute('data-theme', themeValue);
-    
     // 更新主题选择下拉框
     if (themeSelect) {
       themeSelect.value = themeValue;
@@ -153,7 +150,7 @@ export function createSettingsManager(options) {
       }
     }
     
-    // 通知父窗口主题变化
+    // 通知主题管理器主题变更
     themeManager.notifyThemeChange(themeValue);
   }
   
@@ -454,6 +451,11 @@ export function createSettingsManager(options) {
     themeSelect.value = currentSettings.theme;
     
     // 渲染主题预览卡片
+    updateThemePreview();
+  }
+  
+  // 更新主题预览，在主题变更后调用
+  function updateThemePreview() {
     const previewContainer = document.querySelector('.theme-preview-grid');
     if (previewContainer) {
       themeManager.renderThemePreview(previewContainer, (themeId) => {
@@ -544,6 +546,9 @@ export function createSettingsManager(options) {
   
   // 初始化
   function init() {
+    // 先初始化主题管理器
+    themeManager.init();
+    
     setupEventListeners();
     setupSystemThemeListener();
     return initSettings();

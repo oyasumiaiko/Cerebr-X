@@ -555,6 +555,9 @@ export function createThemeManager() {
 
     const root = document.documentElement;
     
+    // 更新data-theme属性，供主题预览识别当前主题
+    root.setAttribute('data-theme', themeId);
+    
     // 清除所有主题相关的类
     root.classList.remove('dark-theme', 'light-theme');
     
@@ -735,9 +738,16 @@ export function createThemeManager() {
     });
   }
 
-  // 初始化函数
-  function init() {
+  /**
+   * 初始化函数
+   * @param {string} [initialThemeId] - 初始应用的主题ID，若未提供则使用'auto'
+   */
+  function init(initialThemeId) {
     setupSystemThemeListener();
+    
+    // 应用初始主题
+    const themeToApply = initialThemeId || document.documentElement.getAttribute('data-theme') || 'auto';
+    applyTheme(themeToApply);
   }
 
   // 返回主题管理器接口
