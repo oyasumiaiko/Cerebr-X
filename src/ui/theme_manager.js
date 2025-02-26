@@ -19,12 +19,14 @@ export function createThemeManager() {
       id: 'auto',
       name: '跟随系统',
       description: '自动跟随系统深浅色模式设置',
+      type: 'auto',
       variables: {} // 自动模式不需要变量，会根据系统设置选择light或dark
     },
     {
       id: 'light',
       name: '浅色',
       description: '默认浅色主题',
+      type: 'light',
       variables: {
         '--cerebr-opacity': '0.6',
         '--cerebr-bg-color': 'rgba(255, 255, 255, var(--cerebr-opacity))',
@@ -43,6 +45,7 @@ export function createThemeManager() {
       id: 'dark',
       name: '深色',
       description: '默认深色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.8',
         '--cerebr-bg-color': 'rgba(38, 43, 51, var(--cerebr-opacity))',
@@ -61,6 +64,7 @@ export function createThemeManager() {
       id: 'github-light',
       name: 'GitHub Light',
       description: 'GitHub 风格浅色主题',
+      type: 'light',
       variables: {
         '--cerebr-opacity': '0.7',
         '--cerebr-bg-color': 'rgba(246, 248, 250, var(--cerebr-opacity))',
@@ -79,6 +83,7 @@ export function createThemeManager() {
       id: 'github-dark',
       name: 'GitHub Dark',
       description: 'GitHub 风格深色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.8',
         '--cerebr-bg-color': 'rgba(13, 17, 23, var(--cerebr-opacity))',
@@ -97,6 +102,7 @@ export function createThemeManager() {
       id: 'vscode-dark',
       name: 'VS Code Dark+',
       description: 'Visual Studio Code 深色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.8',
         '--cerebr-bg-color': 'rgba(30, 30, 30, var(--cerebr-opacity))',
@@ -115,6 +121,7 @@ export function createThemeManager() {
       id: 'night-blue',
       name: '夜空蓝',
       description: '深蓝色夜间主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.8',
         '--cerebr-bg-color': 'rgba(25, 30, 42, var(--cerebr-opacity))',
@@ -133,6 +140,7 @@ export function createThemeManager() {
       id: 'monokai',
       name: 'Monokai',
       description: '经典 Monokai 主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.8',
         '--cerebr-bg-color': 'rgba(39, 40, 34, var(--cerebr-opacity))',
@@ -151,6 +159,7 @@ export function createThemeManager() {
       id: 'solarized-light',
       name: 'Solarized Light',
       description: '护眼浅色主题',
+      type: 'light',
       variables: {
         '--cerebr-opacity': '0.7',
         '--cerebr-bg-color': 'rgba(253, 246, 227, var(--cerebr-opacity))',
@@ -169,6 +178,7 @@ export function createThemeManager() {
       id: 'solarized-dark',
       name: 'Solarized Dark',
       description: '护眼深色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.8',
         '--cerebr-bg-color': 'rgba(0, 43, 54, var(--cerebr-opacity))',
@@ -187,6 +197,7 @@ export function createThemeManager() {
       id: 'nord',
       name: 'Nord',
       description: '北欧风格主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.8',
         '--cerebr-bg-color': 'rgba(46, 52, 64, var(--cerebr-opacity))',
@@ -205,6 +216,7 @@ export function createThemeManager() {
       id: 'dracula',
       name: 'Dracula',
       description: '经典吸血鬼深色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(40, 42, 54, var(--cerebr-opacity))',
@@ -223,6 +235,7 @@ export function createThemeManager() {
       id: 'tokyo-night',
       name: 'Tokyo Night',
       description: '东京之夜深色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(26, 27, 38, var(--cerebr-opacity))',
@@ -241,6 +254,7 @@ export function createThemeManager() {
       id: 'tokyo-night-light',
       name: 'Tokyo Night Day',
       description: '东京白日浅色主题',
+      type: 'light',
       variables: {
         '--cerebr-opacity': '0.75',
         '--cerebr-bg-color': 'rgba(213, 214, 219, var(--cerebr-opacity))',
@@ -259,6 +273,7 @@ export function createThemeManager() {
       id: 'material-ocean',
       name: 'Material Ocean',
       description: '深海蓝材质主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(15, 17, 26, var(--cerebr-opacity))',
@@ -277,6 +292,7 @@ export function createThemeManager() {
       id: 'material-lighter',
       name: 'Material Lighter',
       description: '浅色材质主题',
+      type: 'light',
       variables: {
         '--cerebr-opacity': '0.7',
         '--cerebr-bg-color': 'rgba(250, 250, 250, var(--cerebr-opacity))',
@@ -295,6 +311,7 @@ export function createThemeManager() {
       id: 'synthwave',
       name: 'Synthwave',
       description: '复古赛博朋克主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(39, 16, 62, var(--cerebr-opacity))',
@@ -313,6 +330,7 @@ export function createThemeManager() {
       id: 'apple-light',
       name: 'Apple Light',
       description: 'macOS浅色主题',
+      type: 'light',
       variables: {
         '--cerebr-opacity': '0.65',
         '--cerebr-bg-color': 'rgba(255, 255, 255, var(--cerebr-opacity))',
@@ -331,6 +349,7 @@ export function createThemeManager() {
       id: 'apple-dark',
       name: 'Apple Dark',
       description: 'macOS深色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.8',
         '--cerebr-bg-color': 'rgba(28, 28, 30, var(--cerebr-opacity))',
@@ -349,6 +368,7 @@ export function createThemeManager() {
       id: 'gruvbox-dark',
       name: 'Gruvbox Dark',
       description: '复古暖色调深色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(40, 40, 40, var(--cerebr-opacity))',
@@ -367,6 +387,7 @@ export function createThemeManager() {
       id: 'gruvbox-light',
       name: 'Gruvbox Light',
       description: '复古暖色调浅色主题',
+      type: 'light',
       variables: {
         '--cerebr-opacity': '0.75',
         '--cerebr-bg-color': 'rgba(251, 241, 199, var(--cerebr-opacity))',
@@ -385,6 +406,7 @@ export function createThemeManager() {
       id: 'ayu-mirage',
       name: 'Ayu Mirage',
       description: '柔和中性色调主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.8',
         '--cerebr-bg-color': 'rgba(31, 33, 42, var(--cerebr-opacity))',
@@ -403,6 +425,7 @@ export function createThemeManager() {
       id: 'ayu-light',
       name: 'Ayu Light',
       description: '柔和浅色调主题',
+      type: 'light',
       variables: {
         '--cerebr-opacity': '0.7',
         '--cerebr-bg-color': 'rgba(250, 250, 250, var(--cerebr-opacity))',
@@ -421,6 +444,7 @@ export function createThemeManager() {
       id: 'catppuccin-mocha',
       name: 'Catppuccin Mocha',
       description: '柔和深色咖啡主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(30, 30, 46, var(--cerebr-opacity))',
@@ -439,6 +463,7 @@ export function createThemeManager() {
       id: 'catppuccin-latte',
       name: 'Catppuccin Latte',
       description: '柔和浅色奶茶主题',
+      type: 'light',
       variables: {
         '--cerebr-opacity': '0.75',
         '--cerebr-bg-color': 'rgba(239, 241, 245, var(--cerebr-opacity))',
@@ -457,6 +482,7 @@ export function createThemeManager() {
       id: 'onedark-pro',
       name: 'One Dark Pro',
       description: '专业深色开发主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(40, 44, 52, var(--cerebr-opacity))',
@@ -475,6 +501,7 @@ export function createThemeManager() {
       id: 'palenight',
       name: 'Palenight',
       description: '紫色调深夜主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(41, 45, 62, var(--cerebr-opacity))',
@@ -493,6 +520,7 @@ export function createThemeManager() {
       id: 'rosepine',
       name: 'Rosé Pine',
       description: '舒适柔和深色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(25, 23, 36, var(--cerebr-opacity))',
@@ -511,6 +539,7 @@ export function createThemeManager() {
       id: 'rosepine-dawn',
       name: 'Rosé Pine Dawn',
       description: '舒适柔和浅色主题',
+      type: 'light',
       variables: {
         '--cerebr-opacity': '0.75',
         '--cerebr-bg-color': 'rgba(250, 244, 237, var(--cerebr-opacity))',
@@ -529,6 +558,7 @@ export function createThemeManager() {
       id: 'github-dimmed',
       name: 'GitHub Dimmed',
       description: 'GitHub 柔和灰暗主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(34, 39, 46, var(--cerebr-opacity))',
@@ -547,6 +577,7 @@ export function createThemeManager() {
       id: 'night-owl',
       name: 'Night Owl',
       description: '夜猫子编程主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(1, 22, 39, var(--cerebr-opacity))',
@@ -565,6 +596,7 @@ export function createThemeManager() {
       id: 'cobalt2',
       name: 'Cobalt2',
       description: '深蓝高对比度主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(0, 35, 53, var(--cerebr-opacity))',
@@ -583,6 +615,7 @@ export function createThemeManager() {
       id: 'winter-is-coming',
       name: 'Winter is Coming',
       description: '蓝色冷调主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(20, 30, 51, var(--cerebr-opacity))',
@@ -601,6 +634,7 @@ export function createThemeManager() {
       id: 'horizon',
       name: 'Horizon',
       description: '温暖橙粉色调主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(28, 30, 39, var(--cerebr-opacity))',
@@ -619,6 +653,7 @@ export function createThemeManager() {
       id: 'noctis',
       name: 'Noctis',
       description: '低对比舒适夜间主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(32, 32, 32, var(--cerebr-opacity))',
@@ -637,6 +672,7 @@ export function createThemeManager() {
       id: 'radical',
       name: 'Radical',
       description: '紫粉色高对比主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(20, 19, 34, var(--cerebr-opacity))',
@@ -655,6 +691,7 @@ export function createThemeManager() {
       id: 'slack-dark',
       name: 'Slack Dark',
       description: 'Slack风格深色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(31, 41, 55, var(--cerebr-opacity))',
@@ -673,6 +710,7 @@ export function createThemeManager() {
       id: 'eva-dark',
       name: 'Eva Dark',
       description: '多彩现代深色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(41, 45, 60, var(--cerebr-opacity))',
@@ -691,6 +729,7 @@ export function createThemeManager() {
       id: 'embark',
       name: 'Embark',
       description: '深紫色系主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(30, 30, 46, var(--cerebr-opacity))',
@@ -709,6 +748,7 @@ export function createThemeManager() {
       id: 'andromeda',
       name: 'Andromeda',
       description: '星际科幻深色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(35, 37, 46, var(--cerebr-opacity))',
@@ -727,6 +767,7 @@ export function createThemeManager() {
       id: 'shades-of-purple',
       name: 'Shades of Purple',
       description: '紫色系高彩度主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(42, 35, 81, var(--cerebr-opacity))',
@@ -745,6 +786,7 @@ export function createThemeManager() {
       id: 'deepdark-material',
       name: 'Deep Dark Material',
       description: '黑暗物质深色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(21, 21, 21, var(--cerebr-opacity))',
@@ -763,6 +805,7 @@ export function createThemeManager() {
       id: 'hubble',
       name: 'Hubble',
       description: '星空深蓝主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(14, 24, 44, var(--cerebr-opacity))',
@@ -781,6 +824,7 @@ export function createThemeManager() {
       id: 'green-forest',
       name: 'Green Forest',
       description: '森林绿色主题',
+      type: 'dark',
       variables: {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(21, 32, 22, var(--cerebr-opacity))',
@@ -832,7 +876,7 @@ export function createThemeManager() {
     root.classList.remove('dark-theme', 'light-theme');
     
     // 应用主题类和变量
-    if (themeId === 'auto') {
+    if (theme.type === 'auto') {
       // 跟随系统主题
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       root.classList.add(prefersDark ? 'dark-theme' : 'light-theme');
@@ -843,12 +887,8 @@ export function createThemeManager() {
         root.style.setProperty(key, value);
       });
     } else {
-      // 为dark主题及其变种添加dark-theme类，其他添加light-theme类
-      if (themeId === 'dark' || themeId.includes('dark') || themeId === 'monokai' || themeId === 'nord' || themeId === 'vscode-dark' || themeId === 'night-blue') {
-        root.classList.add('dark-theme');
-      } else {
-        root.classList.add('light-theme');
-      }
+      // 根据主题类型添加对应的类
+      root.classList.add(theme.type === 'dark' ? 'dark-theme' : 'light-theme');
       
       // 应用主题CSS变量
       Object.entries(theme.variables).forEach(([key, value]) => {
