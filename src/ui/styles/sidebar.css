@@ -1227,10 +1227,6 @@ body.temporary-mode::after {
     background: rgba(255, 255, 255, 0.05);
 }
 
-#message-input.temporary-mode:empty::before {
-    content: attr(placeholder);
-    opacity: 0.5;
-}
 
 .loading-message {
     opacity: 0.7;

@@ -18,6 +18,7 @@
  * @param {HTMLElement} options.imageContainer - 图片容器元素
  * @param {Function} options.scrollToBottom - 滚动到底部的函数
  * @param {Function} options.getPrompts - 获取提示词设置的函数
+ * @param {Object} options.uiManager - UI管理器实例
  * @returns {Object} 消息发送器实例
  */
 export function createMessageSender(options) {
@@ -32,7 +33,8 @@ export function createMessageSender(options) {
     messageInput,
     imageContainer,
     scrollToBottom,
-    getPrompts
+    getPrompts,
+    uiManager
   } = options;
 
   // 私有状态
@@ -51,6 +53,8 @@ export function createMessageSender(options) {
   function clearInputs() {
     messageInput.innerHTML = '';
     imageContainer.innerHTML = '';
+    // 重置输入框高度
+    uiManager.resetInputHeight();
   }
 
   /**

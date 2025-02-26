@@ -243,7 +243,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         messageInput,
         imageContainer,
         scrollToBottom,
-        getPrompts: () => promptSettingsManager.getPrompts()
+        getPrompts: () => promptSettingsManager.getPrompts(),
+        uiManager // 添加 uiManager 实例
     });
     
     // 同步当前会话ID

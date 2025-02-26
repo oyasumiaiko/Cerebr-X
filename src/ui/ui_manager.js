@@ -52,6 +52,16 @@ export function createUIManager(options) {
   }
 
   /**
+   * 重置输入框高度
+   * 在发送消息后调用此方法重置输入框高度
+   */
+  function resetInputHeight() {
+    if (messageInput) {
+      adjustTextareaHeight(messageInput);
+    }
+  }
+
+  /**
    * 更新发送按钮状态
    */
   function updateSendButtonState() {
@@ -283,6 +293,7 @@ export function createUIManager(options) {
     adjustTextareaHeight,
     updateSendButtonState,
     toggleSettingsMenu,
-    closeExclusivePanels
+    closeExclusivePanels,
+    resetInputHeight
   };
 } 
