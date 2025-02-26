@@ -606,21 +606,50 @@ export function createMessageProcessor(options) {
   }
 
   /**
-   * 根据正则折叠消息文本，将从文本开头到首次出现 "\n# " 之间的部分折叠为可展开元素
+   * 根据正则折叠消息文本，使用自定义正则表达式和摘要文本
    * @param {string} text - 原始消息文本
    * @returns {string} 处理后的消息文本，其中符合条件的部分被包裹在一个折叠元素中
    */
   function foldMessageContent(text) {
-    const regex = /^([\s\S]*?)(?=\n# )/;
-    const match = text.match(regex);
-    if (!match || match[1].trim() === '') {
+    // 尝试从 Chrome 存储中获取折叠设置
+    let regexPattern = /^([\s\S]*?)(?=\n# )/; // 默认正则
+    let summary = '搜索过程'; // 默认摘要文本
+    
+    // 如果存在全局设置，则使用自定义设置
+    if (window.cerebr?.settings?.prompts) {
+      try {
+        // 从设置中获取正则表达式
+        if (window.cerebr.settings.prompts.foldPattern) {
+          const patternStr = window.cerebr.settings.prompts.foldPattern.prompt;
+          if (patternStr) {
+            regexPattern = new RegExp(patternStr);
+          }
+        }
+        
+        // 从设置中获取摘要文本
+        if (window.cerebr.settings.prompts.foldSummary) {
+          const summaryText = window.cerebr.settings.prompts.foldSummary.prompt;
+          if (summaryText) {
+            summary = summaryText;
+          }
+        }
+      } catch (error) {
+        console.error('解析折叠设置时出错:', error);
+      }
+    }
+    
+    // 应用正则表达式
+    const match = text.match(regexPattern);
+    if (!match || (match[1] && match[1].trim() === '')) {
       return text;
     }
+    
     const foldedPart = match[1];
-    const remainingPart = text.slice(match[1].length);
+    const remainingPart = text.slice(match[0].length);
+    
     // 将折叠部分包裹在 <blockquote> 中，以实现 Markdown 引用效果
     const quotedFoldedPart = `<blockquote>${foldedPart}</blockquote>`;
-    return `<details class="folded-message"><summary>搜索过程</summary><div>\n${quotedFoldedPart}</div></details>\n${remainingPart}`;
+    return `<details class="folded-message"><summary>${summary}</summary><div>\n${quotedFoldedPart}</div></details>\n${remainingPart}`;
   }
 
   /**

@@ -81,6 +81,15 @@ const DEFAULT_PROMPTS = {
 
 请用清晰的结构和通俗的语言进行解释，确保内容准确、全面且易于理解。`,
         model: 'follow_current'
+    },
+    // 添加消息折叠相关设置
+    foldPattern: {
+        prompt: `^([\\s\\S]*?)(?=\\n# )`,
+        model: 'follow_current'
+    },
+    foldSummary: {
+        prompt: `搜索过程`,
+        model: 'follow_current'
     }
 };
 
@@ -98,6 +107,9 @@ class PromptSettings {
         this.summaryPrompt = document.getElementById('summary-prompt');
         this.queryPrompt = document.getElementById('query-prompt');
         this.imagePrompt = document.getElementById('image-prompt');
+        // 添加消息折叠相关元素
+        this.foldPatternPrompt = document.getElementById('fold-pattern-prompt');
+        this.foldSummaryPrompt = document.getElementById('fold-summary-prompt');
 
         // 模型选择下拉框
         this.modelSelects = {};
@@ -115,7 +127,7 @@ class PromptSettings {
 
     // 初始化模型选择下拉框
     initModelSelects() {
-        const promptTypes = ['selection', 'query', 'pdf', 'summary', 'image']; 
+        const promptTypes = ['selection', 'query', 'pdf', 'summary', 'image', 'foldPattern', 'foldSummary']; 
 
         // 获取所有可用的模型
         const getAvailableModels = () => {
@@ -281,7 +293,9 @@ class PromptSettings {
             'query': '非联网模型划词提示词',
             'selection': '联网模型划词提示词',
             'pdf': 'PDF快速总结提示词',
-            'image': '图片默认提示词'
+            'image': '图片默认提示词',
+            'foldPattern': '消息折叠正则表达式',
+            'foldSummary': '折叠消息摘要文本'
         };
         return nameMap[promptType] || promptType;
     }
@@ -351,6 +365,9 @@ class PromptSettings {
             const prompts = this.collectCurrentPromptSettings();
             await chrome.storage.sync.set({ prompts });
             
+            // 触发提示词设置更新事件
+            document.dispatchEvent(new CustomEvent('promptSettingsUpdated'));
+            
             // 显示轻微的保存提示但不关闭面板
             const saveButton = this.savePromptsButton;
             const originalText = saveButton.textContent;
@@ -373,6 +390,9 @@ class PromptSettings {
         try {
             const prompts = this.collectCurrentPromptSettings();
             await chrome.storage.sync.set({ prompts });
+            
+            // 触发提示词设置更新事件
+            document.dispatchEvent(new CustomEvent('promptSettingsUpdated'));
             
             // 只有在需要关闭面板时才关闭
             if (shouldClosePanel) {
@@ -425,6 +445,9 @@ class PromptSettings {
                 this.modelSelects[type].value = DEFAULT_PROMPTS[type].model;
             }
         });
+        
+        // 触发提示词设置更新事件
+        document.dispatchEvent(new CustomEvent('promptSettingsUpdated'));
     }
 
     // 获取当前提示词

@@ -90,7 +90,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 导入并初始化提示词设置
     const promptSettingsManager = new PromptSettings();
 
-    // ====================== 核心函数定义 ======================
+    // ====================== 第一阶段：创建基础模块 ======================
     
     /**
      * 滚动到底部函数
@@ -153,6 +153,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ====================== 第一阶段：创建基础模块 ======================
     
+    // 创建全局 cerebr 对象，用于在不同模块间共享数据
+    window.cerebr = window.cerebr || {};
+    // 将提示词设置暴露给全局对象，以便在其他模块中访问
+    window.cerebr.settings = {
+        prompts: promptSettingsManager.getPrompts()
+    };
+    
+    // 监听提示词设置变化，更新全局对象
+    document.addEventListener('promptSettingsUpdated', () => {
+        window.cerebr.settings.prompts = promptSettingsManager.getPrompts();
+    });
+
     // 创建图片处理器实例
     const imageHandler = createImageHandler({
         previewModal,
