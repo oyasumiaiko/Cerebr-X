@@ -62,7 +62,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sidebarPositionSwitch = document.getElementById('sidebar-position-switch');
 
     // 应用程序状态
-    let shouldAutoScroll = true; // 控制是否自动滚动
     let isFullscreen = false; // 全屏模式
     let isComposing = false; // 跟踪输入法状态
 
@@ -102,7 +101,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        if (shouldAutoScroll) {
+        if (messageSender.getShouldAutoScroll()) {
             requestAnimationFrame(() => {
                 chatContainer.scrollTo({
                     top: chatContainer.scrollHeight,
@@ -216,8 +215,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         collapseButton,
         chatHistoryUI,
         imageHandler,
-        setShouldAutoScroll: (value) => shouldAutoScroll = value,
-        renderFavoriteApis: null // 后面会设置
+        setShouldAutoScroll: (value) => messageSender.setShouldAutoScroll(value),
+        renderFavoriteApis: null
     });
     
     // 重要：首先绑定closeExclusivePanels的实现

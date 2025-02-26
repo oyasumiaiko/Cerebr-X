@@ -47,6 +47,22 @@ export function createMessageSender(options) {
   let currentConversationId = null;
 
   /**
+   * 获取是否应该自动滚动
+   * @returns {boolean} 是否应该自动滚动
+   */
+  function getShouldAutoScroll() {
+    return shouldAutoScroll;
+  }
+
+  /**
+   * 设置是否应该自动滚动
+   * @param {boolean} value - 是否应该自动滚动
+   */
+  function setShouldAutoScroll(value) {
+    shouldAutoScroll = value;
+  }
+
+  /**
    * 清空消息输入框和图片容器
    * @private
    */
@@ -594,6 +610,8 @@ export function createMessageSender(options) {
     getTemporaryModeState,
     setSendChatHistory,
     setCurrentConversationId,
-    getCurrentConversationId
+    getCurrentConversationId,
+    getShouldAutoScroll,
+    setShouldAutoScroll
   };
 } 
