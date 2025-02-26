@@ -356,8 +356,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         isFullscreen = !isFullscreen;
         // 直接向父窗口发送消息
         window.parent.postMessage({
-            type: 'TOGGLE_FULLSCREEN',
-            isFullscreen: isFullscreen
+            type: 'TOGGLE_FULLSCREEN_FROM_IFRAME',
+            // isFullscreen: isFullscreen
         }, '*');
     });
 

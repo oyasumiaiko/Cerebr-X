@@ -382,9 +382,9 @@ class CerebrSidebar {
           this.toggle(false);  // 明确传入 false 表示关闭
           break;
 
-        case 'TOGGLE_FULLSCREEN':
+        case 'TOGGLE_FULLSCREEN_FROM_IFRAME':
           console.log('处理全屏切换消息:', event.data.isFullscreen);
-          this.toggleFullscreen(event.data.isFullscreen);
+          this.toggleFullscreen();
           break;
         case 'CAPTURE_SCREENSHOT':
           captureAndDropScreenshot();
@@ -603,6 +603,10 @@ class CerebrSidebar {
 
   // 添加全屏模式切换方法
   toggleFullscreen(isFullscreen) {
+    // 如果isFullscreen为undefined，则根据当前状态切换
+    if (isFullscreen === undefined) {
+      isFullscreen = !this.isFullscreen;
+    }
     console.log('切换全屏模式:', isFullscreen);
     this.isFullscreen = isFullscreen;
 
@@ -705,6 +709,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   try {
+    // 接收来自background.js的消息
     const iframe = sidebar.sidebar?.querySelector('.cerebr-sidebar__iframe');
 
     switch (message.type) {
@@ -717,9 +722,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'CLOSE_SIDEBAR':
         sidebar.toggle(false);  // 明确传入 false 表示关闭
         break;
-      case 'TOGGLE_FULLSCREEN':
-        sidebar.toggle(true);  // 确保侧边栏打开
-        sidebar.toggleFullscreen(!sidebar.isFullscreen);  // 切换全屏状态
+      case 'TOGGLE_FULLSCREEN_FROM_BACKGROUND':
+        sidebar.toggleFullscreen();  // 切换全屏状态
         break;
       case 'QUICK_SUMMARY':
         sidebar.toggle(true);  // 明确传入 true 表示打开

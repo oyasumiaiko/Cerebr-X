@@ -71,7 +71,7 @@ chrome.commands.onCommand.addListener(async (command) => {
   } else if (command === 'capture_screenshot') {
     await handleTabCommand('CAPTURE_SCREENSHOT');
   } else if (command === 'toggle_fullscreen') {
-    await handleTabCommand('TOGGLE_FULLSCREEN');
+    await handleTabCommand('TOGGLE_FULLSCREEN_FROM_BACKGROUND');
   }
 });
 
