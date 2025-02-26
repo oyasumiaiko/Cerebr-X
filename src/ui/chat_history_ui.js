@@ -601,24 +601,13 @@ export function createChatHistoryUI(options) {
         const convDate = new Date(conv.startTime);
         const relativeTime = formatRelativeTime(convDate);
 
-        // 提取 URL 中的 domain
-        let domain = '';
-        if (conv.url) {
-          try {
-            const urlObj = new URL(conv.url);
-            domain = urlObj.hostname;
-          } catch (error) {
-            domain = conv.url;
-          }
-        } else {
-          domain = '未知';
-        }
-
+        // 使用新的URL处理函数
+        const domain = getDisplayUrl(conv.url);
         let title = conv.title;
 
         const displayInfos = [relativeTime, `消息数: ${conv.messageCount}`, domain].filter(Boolean).join(' · ');
         infoDiv.textContent = displayInfos;
-        // 鼠标悬停显示具体的日期时间
+        // 鼠标悬停显示具体的日期时间和完整URL
         const details = [convDate.toLocaleString(), title, conv.url].filter(Boolean).join('\n');
         infoDiv.title = details;
 
@@ -1166,6 +1155,23 @@ export function createChatHistoryUI(options) {
     }
     
     console.log('内存缓存已清理');
+  }
+
+  // 添加URL处理函数
+  function getDisplayUrl(url) {
+    try {
+      if (url.startsWith('file:///')) {
+        // 解码URL并获取文件名
+        const decodedUrl = decodeURIComponent(url);
+        return decodedUrl.split('/').pop();
+      }
+      // 非file协议，返回域名
+      const urlObj = new URL(url);
+      return urlObj.hostname;
+    } catch (error) {
+      console.error('处理URL失败:', error);
+      return url || '未知';
+    }
   }
 
   return {
