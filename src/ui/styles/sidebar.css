@@ -1,3 +1,15 @@
+/* Global Unified Basic Styles */
+*, *::before, *::after {
+  /* box-sizing: border-box; */
+}
+
+/* Unified input styles */
+input, textarea, select {
+  outline: none;
+}
+
+/* --- End Global Unified Basic Styles --- */
+
 /* 根变量（默认浅色主题） */
 :root {
     --cerebr-opacity: 0.6;
@@ -2753,6 +2765,28 @@ body.hide-references .reference-number.superscript {
 
 .theme-preview-card:hover .theme-preview-card-name {
     opacity: 1;
+}
+
+/* 清除搜索框按钮样式 */
+.filter-container {
+  display: flex;
+  align-items: center;
+}
+.filter-container input {
+  flex: 1;
+  min-width: 0;
+}
+.clear-filter-btn {
+  background: none;
+  border: none;
+  color: inherit;
+  padding: 4px 8px;
+  font-size: 14px;
+  cursor: pointer;
+  margin-left: 5px;
+}
+.clear-filter-btn:hover {
+  background-color: rgba(0, 0, 0, 0.1);
 }
 
 

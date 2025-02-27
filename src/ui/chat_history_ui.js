@@ -1021,6 +1021,18 @@ export function createChatHistoryUI(options) {
         }, 300);
       });
       filterContainer.appendChild(filterInput);
+      
+      // 新增清除按钮，放在搜索框右边
+      const clearButton = document.createElement('button');
+      clearButton.textContent = '清除';
+      clearButton.className = 'clear-filter-btn';
+      clearButton.style.marginLeft = '5px';
+      clearButton.addEventListener('click', () => {
+        filterInput.value = '';
+        loadConversationHistories(panel, '');
+      });
+      filterContainer.appendChild(clearButton);
+      
       historyContent.appendChild(filterContainer);
 
       // 列表容器
