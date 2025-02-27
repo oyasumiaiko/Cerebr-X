@@ -456,6 +456,17 @@ export function createChatHistoryUI(options) {
   }
 
   /**
+   * Computes the scrollTop value based on whether the filter has changed.
+   * @param {string} previousFilter - The previous filter keyword.
+   * @param {string} currentFilter - The current filter keyword.
+   * @param {number} currentScrollTop - The current scrollTop value.
+   * @returns {number} Returns 0 if the filter has changed, otherwise returns currentScrollTop.
+  */
+  function computeScrollTop(previousFilter, currentFilter, currentScrollTop) {
+    return previousFilter === currentFilter ? currentScrollTop : 0;
+  }
+
+  /**
    * 加载聊天历史记录列表
    * @param {HTMLElement} panel - 聊天历史面板元素
    * @param {string} filterText - 过滤文本
@@ -465,7 +476,10 @@ export function createChatHistoryUI(options) {
     panel.dataset.currentFilter = filterText;
     const listContainer = panel.querySelector('#chat-history-list');
     if (!listContainer) return;
-
+    const oldFilter = panel.dataset.prevFilter || "";
+    const currentScroll = listContainer.scrollTop || 0;
+    const newScrollPos = computeScrollTop(oldFilter, filterText, currentScroll);
+    panel.dataset.prevFilter = filterText;
     listContainer.innerHTML = '';
     
     // 获取所有对话元数据
@@ -538,20 +552,28 @@ export function createChatHistoryUI(options) {
         const emptyMsg = document.createElement('div');
         emptyMsg.textContent = '没有匹配的聊天记录';
         listContainer.appendChild(emptyMsg);
+        // Restore scroll position based on filter change
+        listContainer.scrollTop = newScrollPos;
         return;
       }
       
       displayConversationList(filteredHistories, filterText, listContainer);
+      // Restore scroll position based on filter change
+      listContainer.scrollTop = newScrollPos;
     } else {
       // 没有过滤条件，直接显示元数据列表
       if (histories.length === 0) {
         const emptyMsg = document.createElement('div');
         emptyMsg.textContent = '暂无聊天记录';
         listContainer.appendChild(emptyMsg);
+        // Restore scroll position based on filter change
+        listContainer.scrollTop = newScrollPos;
         return;
       }
       
       displayConversationList(histories, '', listContainer);
+      // Restore scroll position based on filter change
+      listContainer.scrollTop = newScrollPos;
     }
   }
   
@@ -1052,12 +1074,12 @@ export function createChatHistoryUI(options) {
       }
     }
     
-    // 加载默认（不过滤）的对话记录列表
-    loadConversationHistories(panel, '');
-
-    // 设置面板显示，并触发 CSS 淡入动画
-    panel.style.display = 'flex';  // 面板采用 flex 布局
-    void panel.offsetWidth;  // 强制重排，让 CSS transition 起效
+    // 使用已有的筛选值，而不是默认空字符串
+    const filterInput = panel.querySelector('.filter-container input[type="text"]');
+    const currentFilter = filterInput ? filterInput.value : '';
+    loadConversationHistories(panel, currentFilter);
+    panel.style.display = 'flex';
+    void panel.offsetWidth;  
     panel.classList.add('visible');
   }
 
