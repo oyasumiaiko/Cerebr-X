@@ -894,31 +894,25 @@ const pdfContentCache = new Map();
 async function waitForContent() {
   return new Promise((resolve) => {
     const checkContent = () => {
-      // 检查是否有主要内容元素
-      const mainElements = document.querySelectorAll('body, p, h2, article, [role="article"], [role="main"], [data-testid="tweet"]');
-
       // 检查网络请求是否都已完成
       const requestsCompleted = requestManager.isRequestsCompleted();
 
-      if (mainElements.length > 0 && requestsCompleted) {
-        console.log(`页面内容已加载，网络请求已完成（已稳定${requestManager.relayRequestCompletedTime}秒无新请求）`);
+      if (requestsCompleted) {
+        console.log(`网络请求已完成（已稳定${requestManager.relayRequestCompletedTime}秒无新请求）`);
         resolve();
       } else {
         const reason = [];
-        if (mainElements.length === 0) reason.push('主要内容未找到');
-        if (!requestsCompleted) {
-          const pendingCount = requestManager.getPendingRequestsCount();
-          if (pendingCount > 0) {
-            reason.push(`还有 ${pendingCount} 个网络请求未完成`);
+        const pendingCount = requestManager.getPendingRequestsCount();
+        if (pendingCount > 0) {
+          reason.push(`还有 ${pendingCount} 个网络请求未完成`);
           }
           const waitTime = requestManager.getWaitTimeInSeconds();
           if (waitTime > 0) {
             reason.push(`等待请求稳定，剩余 ${waitTime} 秒`);
-          } else if (!requestManager.lastRequestCompletedTime) {
-            reason.push('等待首个请求完成');
-          }
+        } else if (!requestManager.lastRequestCompletedTime) {
+          reason.push('等待首个请求完成');
         }
-        console.log('等待页面加载...', reason.join(', '));
+        console.log('等待网络请求完成...', reason.join(', '));
         setTimeout(checkContent, 1000);
       }
     };
