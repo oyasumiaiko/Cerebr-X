@@ -66,17 +66,43 @@ export async function getAllConversationMetadata() {
 
 /**
  * 获取全部对话记录(包含完整消息内容)
+ * @param {boolean} [loadFullContent=true] - 是否加载完整消息内容
  * @returns {Promise<Array<Object>>} 包含所有对话记录的数组
  */
-export async function getAllConversations() {
+export async function getAllConversations(loadFullContent = true) {
   const db = await openChatHistoryDB();
-  return new Promise((resolve, reject) => {
+  
+  // 获取所有会话基本信息
+  const conversations = await new Promise((resolve, reject) => {
     const transaction = db.transaction('conversations', 'readonly');
     const store = transaction.objectStore('conversations');
     const request = store.getAll();
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+
+  // 如果不需要加载完整内容或没有会话，直接返回
+  if (!loadFullContent || !conversations || conversations.length === 0) {
+    return conversations;
+  }
+
+  // 加载所有引用的消息内容
+  const transaction = db.transaction('messageContents', 'readonly');
+  const contentStore = transaction.objectStore('messageContents');
+
+  // 处理每个会话，使用 attachContentToMessage 替换重复逻辑
+  for (const conversation of conversations) {
+    if (conversation.messages) {
+      for (let i = 0; i < conversation.messages.length; i++) {
+        const msg = conversation.messages[i];
+        if (msg.contentRef) {
+          conversation.messages[i] = await attachContentToMessage(msg, contentStore);
+        }
+      }
+    }
+  }
+
+  return conversations;
 }
 
 /**
@@ -102,10 +128,8 @@ export async function putConversation(conversation, separateContent = true) {
     for (const msg of conversationToStore.messages) {
       const messageToStore = { ...msg };
       
-      // 如果消息内容是数组且包含图片，或者消息内容字符串超过10KB
-      const isLargeContent = 
-        (Array.isArray(msg.content) && msg.content.some(part => part.type === 'image_url')) ||
-        (typeof msg.content === 'string' && msg.content.length > 10240);
+      // 如果消息内容是数组且包含图片
+      const isLargeContent = (Array.isArray(msg.content) && msg.content.some(part => part.type === 'image_url'));
       
       if (isLargeContent) {
         // 创建内容引用对象
@@ -180,6 +204,29 @@ export async function deleteConversation(conversationId) {
 }
 
 /**
+ * 纯函数：从消息对象中加载并附加引用的消息内容，返回新的消息对象
+ * @param {Object} msg - 原始消息对象
+ * @param {IDBObjectStore} contentStore - 用于获取消息内容的对象仓库
+ * @returns {Promise<Object>} 返回一个新消息对象，包含解引用后的内容
+ */
+async function attachContentToMessage(msg, contentStore) {
+  if (!msg.contentRef) return msg;
+  try {
+    const contentRecord = await new Promise((resolve, reject) => {
+      const request = contentStore.get(msg.contentRef);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    if (contentRecord) {
+      return { ...msg, content: contentRecord.content };
+    }
+  } catch (error) {
+    console.error(`加载消息内容失败: ${msg.contentRef}`, error);
+  }
+  return msg;
+}
+
+/**
  * 根据对话 ID 获取单条对话记录，可选择是否加载完整消息内容
  * @param {string} conversationId - 要查找的对话记录 id
  * @param {boolean} [loadFullContent=true] - 是否加载完整消息内容
@@ -206,24 +253,11 @@ export async function getConversationById(conversationId, loadFullContent = true
   const transaction = db.transaction('messageContents', 'readonly');
   const contentStore = transaction.objectStore('messageContents');
   
+  // 遍历每条消息，利用纯函数附加引用的内容
   for (let i = 0; i < conversation.messages.length; i++) {
     const msg = conversation.messages[i];
     if (msg.contentRef) {
-      try {
-        // 加载引用的内容
-        const contentRef = await new Promise((resolve, reject) => {
-          const request = contentStore.get(msg.contentRef);
-          request.onsuccess = () => resolve(request.result);
-          request.onerror = () => reject(request.error);
-        });
-        
-        if (contentRef) {
-          // 恢复原始内容
-          msg.content = contentRef.content;
-        }
-      } catch (error) {
-        console.error(`加载消息内容失败: ${msg.contentRef}`, error);
-      }
+      conversation.messages[i] = await attachContentToMessage(msg, contentStore);
     }
   }
   
@@ -288,9 +322,10 @@ export function releaseConversationMemory(conversation) {
 export async function getDatabaseStats() {
   try {
     const db = await openChatHistoryDB();
+    const encoder = new TextEncoder();
     
     // 获取所有会话
-    const conversations = await getAllConversations();
+    const conversations = await getAllConversations(false);
     
     // 获取所有分离的消息内容
     const contentRefs = await new Promise((resolve, reject) => {
@@ -325,15 +360,17 @@ export async function getDatabaseStats() {
           // 检查内容类型和大小
           if (msg.content) {
             if (typeof msg.content === 'string') {
-              totalTextSize += msg.content.length * 2; // 估算UTF-16字符串大小
-              largestMessage = Math.max(largestMessage, msg.content.length * 2);
+              const size = encoder.encode(msg.content).length;
+              totalTextSize += size;
+              largestMessage = Math.max(largestMessage, size);
             } else if (Array.isArray(msg.content)) {
               // 处理图片和文本混合内容
               let msgSize = 0;
               msg.content.forEach(part => {
                 if (part.type === 'text' && part.text) {
-                  msgSize += part.text.length * 2;
-                  totalTextSize += part.text.length * 2;
+                  const textSize = encoder.encode(part.text).length;
+                  msgSize += textSize;
+                  totalTextSize += textSize;
                 } else if (part.type === 'image_url' && part.image_url && part.image_url.url) {
                   // 估算base64图片大小（大约是base64字符串长度的3/4）
                   const imageSize = Math.round((part.image_url.url.length * 3) / 4);
@@ -353,11 +390,11 @@ export async function getDatabaseStats() {
     contentRefs.forEach(ref => {
       if (ref.content) {
         if (typeof ref.content === 'string') {
-          totalTextSize += ref.content.length * 2;
+          totalTextSize += encoder.encode(ref.content).length;
         } else if (Array.isArray(ref.content)) {
           ref.content.forEach(part => {
             if (part.type === 'text' && part.text) {
-              totalTextSize += part.text.length * 2;
+              totalTextSize += encoder.encode(part.text).length;
             } else if (part.type === 'image_url' && part.image_url && part.image_url.url) {
               // 估算base64图片大小
               totalImageSize += Math.round((part.image_url.url.length * 3) / 4);
