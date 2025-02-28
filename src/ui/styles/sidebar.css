@@ -25,7 +25,7 @@ input, textarea, select {
     --cerebr-icon-color: #666;
     --cerebr-border-color: #e1e4e8;
     --cerebr-hover-color: rgba(0, 0, 0, 0.02);
-    --cerebr-background-color: #ffffff;
+    --cerebr-tooltip-bg: #ffffff;
     --cerebr-highlight: rgb(0, 105, 255);
     --cerebr-bg-opacity: 0.8;
     --cerebr-accent: #6d7fcc;
@@ -57,7 +57,7 @@ input, textarea, select {
     --cerebr-icon-color: #abb2bf;
     --cerebr-border-color: #30363d;
     --cerebr-hover-color: rgba(255, 255, 255, 0.05);
-    --cerebr-background-color: #21252b;
+    --cerebr-tooltip-bg: #21252b;
     
     /* 深色主题代码块相关颜色变量 */
     --cerebr-code-bg: #282c34;
@@ -1367,7 +1367,7 @@ body.temporary-mode::after {
     bottom: 100%;
     left: 50%;
     transform: translateX(-50%) translateY(-0.2em);
-    background: var(--cerebr-background-color);
+    background: var(--cerebr-tooltip-bg);
     border: 1px solid var(--cerebr-border-color);
     border-radius: 4px;
     box-shadow: 0 0px 2px rgba(0, 0, 0, 0.1);
@@ -1464,7 +1464,7 @@ body.hide-references .reference-number.superscript {
     border-spacing: 0;
     width: 100%;
     margin: 1em 0;
-    background-color: var(--cerebr-background-color);
+    background-color: var(--cerebr-tooltip-bg);
     border: 1px solid var(--cerebr-border-color);
     border-radius: 6px;
     overflow: hidden;
@@ -1584,7 +1584,7 @@ body.hide-references .reference-number.superscript {
     bottom: 100%;
     left: 0;
     right: 0;
-    background: var(--cerebr-background-color);
+    background: var(--cerebr-tooltip-bg);
     border: 1px solid var(--cerebr-border-color);
     border-radius: 6px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -1648,7 +1648,7 @@ body.hide-references .reference-number.superscript {
 
 /* Dark theme support */
 :root.dark-theme .source-tooltip {
-    background: var(--cerebr-background-color);
+    background: var(--cerebr-tooltip-bg);
     border-color: var(--cerebr-border-color);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
@@ -1978,7 +1978,7 @@ body.hide-references .reference-number.superscript {
 
 /* 下拉选项样式 */
 .model-select option {
-    background-color: var(--cerebr-background-color);
+    background-color: var(--cerebr-tooltip-bg);
     color: var(--cerebr-text-color);
     padding: 8px;
 }
@@ -2642,7 +2642,7 @@ body.hide-references .reference-number.superscript {
 }
 
 .theme-select option {
-    background: var(--cerebr-background-color);
+    background: var(--cerebr-tooltip-bg);
     color: var(--cerebr-text-color);
     padding: 8px;
 }
