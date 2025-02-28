@@ -249,6 +249,15 @@ export function createSettingsManager(options) {
       sidebarPositionSwitch.checked = position === 'right';
     }
     
+    const collapseButton = document.getElementById('collapse-button');
+    if (collapseButton) {
+      if (position === 'left') {
+        collapseButton.classList.add('position-left');
+      } else {
+        collapseButton.classList.remove('position-left');
+      }
+    }
+    
     // 通知父窗口侧边栏位置变化
     notifySidebarPositionChange(position);
   }
