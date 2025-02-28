@@ -234,19 +234,14 @@ export function createMessageSender(options) {
       loadingMessage = messageProcessor.appendMessage('正在处理...', 'ai', true);
       loadingMessage.classList.add('loading-message');
 
+      let pageContentLength = 0;
       // 如果不是临时模式，获取网页内容
       if (!isTemporaryMode) {
         loadingMessage.textContent = '正在获取网页内容...';
         const pageContentResponse = await getPageContent();
         if (pageContentResponse) {
           pageContent = pageContentResponse;
-          // 创建字数统计元素
-          const footer = document.createElement('div');
-          footer.classList.add('content-length-footer');
-          const contentLength = pageContent.content ? pageContent.content.length : 0;
-          footer.textContent = `↑ ${contentLength.toLocaleString()}`;
-          // 添加到用户消息下方
-          userMessageDiv?.appendChild(footer);
+          pageContentLength = pageContent.content ? pageContent.content.length : 0;
         } else {
           pageContent = null;
           console.error('获取网页内容失败。');
@@ -280,6 +275,22 @@ export function createMessageSender(options) {
           customParams: config.customParams
         };
         userMessageDiv.setAttribute('data-api-config', JSON.stringify(configToSave));
+      }
+
+      // 添加字数统计元素
+      addContentLengthFooter(userMessageDiv);
+
+      function addContentLengthFooter(userMessageDiv) {
+        // 创建字数统计元素
+        const footer = document.createElement('div');
+        footer.classList.add('content-length-footer');
+        if (pageContentLength > 0) {
+          footer.textContent = `↑ ${pageContentLength.toLocaleString()}`;
+        }
+        footer.textContent += ` ${config.modelName}`;
+
+        // 添加到用户消息下方
+        userMessageDiv?.appendChild(footer);
       }
 
       // 更新加载状态消息
