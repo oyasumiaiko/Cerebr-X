@@ -38,6 +38,12 @@ input, textarea, select {
     --cerebr-yellow: #ffcc00;
     --cerebr-purple: #bf5af2;
     --cerebr-teal: #5ac8fa;
+    
+    /* 代码块相关颜色变量 */
+    --cerebr-code-bg: #f6f8fa;
+    --cerebr-code-color: #24292e;
+    --cerebr-code-border: #e1e4e8;
+    --cerebr-inline-code-bg: rgba(0, 0, 0, 0.1);
 }
 
 /* 深色主题变量 */
@@ -52,6 +58,12 @@ input, textarea, select {
     --cerebr-border-color: #30363d;
     --cerebr-hover-color: rgba(255, 255, 255, 0.05);
     --cerebr-background-color: #21252b;
+    
+    /* 深色主题代码块相关颜色变量 */
+    --cerebr-code-bg: #282c34;
+    --cerebr-code-color: #abb2bf;
+    --cerebr-code-border: transparent;
+    --cerebr-inline-code-bg: rgba(255, 255, 255, 0.1);
 }
 
 
@@ -694,30 +706,30 @@ input:checked + .slider:before {
     font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
     font-size: calc(var(--cerebr-font-size) - 2px);
     white-space: pre-wrap;
-    /* 浅色模式默认样式 */
-    background: #f6f8fa;
-    color: #24292e;
-    border: 1px solid #e1e4e8;
+    background: var(--cerebr-code-bg);
+    color: var(--cerebr-code-color);
 }
 
 /* 深色模式样式 */
+/*
 :root.dark-theme .message pre code {
     background: #282c34;
     color: #abb2bf;
     border: none;
 }
+*/
 
 /* 系统深色模式 */
 @media (prefers-color-scheme: dark) {
-    :root:not(.light-theme) .message pre code {
-        background: #282c34;
-        color: #abb2bf;
-        border: none;
+    :root:not(.light-theme):not(.dark-theme) {
+        --cerebr-code-bg: #282c34;
+        --cerebr-code-color: #abb2bf;
+        --cerebr-inline-code-bg: rgba(255, 255, 255, 0.1);
     }
 }
 
 .message code {
-    background: rgba(0, 0, 0, 0.1);
+    background: var(--cerebr-inline-code-bg);
     padding: 2px 4px;
     border-radius: 4px;
     font-family: 'Menlo', 'Monaco', 'Courier New', monospace;

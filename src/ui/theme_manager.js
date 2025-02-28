@@ -38,7 +38,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#e1e4e8',
         '--cerebr-hover-color': 'rgba(0, 0, 0, 0.03)',
         '--cerebr-background-color': '#ffffff',
-        '--cerebr-highlight': '#0366d6'
+        '--cerebr-highlight': '#0366d6',
+        '--cerebr-code-bg': '#f6f8fa',
+        '--cerebr-code-color': '#24292e',
+        '--cerebr-code-border': '#e1e4e8',
+        '--cerebr-inline-code-bg': 'rgba(0, 0, 0, 0.1)'
       }
     },
     {
@@ -57,7 +61,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#30363d',
         '--cerebr-hover-color': 'rgba(255, 255, 255, 0.05)',
         '--cerebr-background-color': '#21252b',
-        '--cerebr-highlight': '#61afef'
+        '--cerebr-highlight': '#61afef',
+        '--cerebr-code-bg': '#282c34',
+        '--cerebr-code-color': '#abb2bf',
+        '--cerebr-code-border': 'transparent',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -76,7 +84,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#e1e4e8',
         '--cerebr-hover-color': 'rgba(3, 102, 214, 0.05)',
         '--cerebr-background-color': '#f6f8fa',
-        '--cerebr-highlight': '#0366d6'
+        '--cerebr-highlight': '#0366d6',
+        '--cerebr-code-bg': '#f6f8fa',
+        '--cerebr-code-color': '#24292e',
+        '--cerebr-code-border': '#e1e4e8',
+        '--cerebr-inline-code-bg': 'rgba(0, 0, 0, 0.1)'
       }
     },
     {
@@ -95,7 +107,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#30363d',
         '--cerebr-hover-color': 'rgba(56, 139, 253, 0.1)',
         '--cerebr-background-color': '#0d1117',
-        '--cerebr-highlight': '#58a6ff'
+        '--cerebr-highlight': '#58a6ff',
+        '--cerebr-code-bg': '#161b22',
+        '--cerebr-code-color': '#c9d1d9',
+        '--cerebr-code-border': '#30363d',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -114,7 +130,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#454545',
         '--cerebr-hover-color': 'rgba(255, 255, 255, 0.1)',
         '--cerebr-background-color': '#1e1e1e',
-        '--cerebr-highlight': '#007acc'
+        '--cerebr-highlight': '#007acc',
+        '--cerebr-code-bg': '#1e1e1e',
+        '--cerebr-code-color': '#d4d4d4',
+        '--cerebr-code-border': '#454545',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -133,7 +153,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#2d384a',
         '--cerebr-hover-color': 'rgba(100, 149, 237, 0.15)',
         '--cerebr-background-color': '#192132',
-        '--cerebr-highlight': '#61afef'
+        '--cerebr-highlight': '#61afef',
+        '--cerebr-code-bg': '#151a26',
+        '--cerebr-code-color': '#e3e9f0',
+        '--cerebr-code-border': '#2d384a',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -152,7 +176,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#49483e',
         '--cerebr-hover-color': 'rgba(166, 226, 46, 0.1)',
         '--cerebr-background-color': '#272822',
-        '--cerebr-highlight': '#f92672'
+        '--cerebr-highlight': '#f92672',
+        '--cerebr-code-bg': '#272822',
+        '--cerebr-code-color': '#f8f8f2',
+        '--cerebr-code-border': '#49483e',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -171,7 +199,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#eee8d5',
         '--cerebr-hover-color': 'rgba(38, 139, 210, 0.1)',
         '--cerebr-background-color': '#fdf6e3',
-        '--cerebr-highlight': '#2aa198'
+        '--cerebr-highlight': '#2aa198',
+        '--cerebr-code-bg': '#eee8d5',
+        '--cerebr-code-color': '#657b83',
+        '--cerebr-code-border': '#d5d2be',
+        '--cerebr-inline-code-bg': 'rgba(0, 0, 0, 0.05)'
       }
     },
     {
@@ -190,7 +222,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#073642',
         '--cerebr-hover-color': 'rgba(38, 139, 210, 0.1)',
         '--cerebr-background-color': '#002b36',
-        '--cerebr-highlight': '#2aa198'
+        '--cerebr-highlight': '#2aa198',
+        '--cerebr-code-bg': '#073642',
+        '--cerebr-code-color': '#93a1a1',
+        '--cerebr-code-border': '#094352',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -209,7 +245,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#3b4252',
         '--cerebr-hover-color': 'rgba(136, 192, 208, 0.1)',
         '--cerebr-background-color': '#2e3440',
-        '--cerebr-highlight': '#81a1c1'
+        '--cerebr-highlight': '#81a1c1',
+        '--cerebr-code-bg': '#3b4252',
+        '--cerebr-code-color': '#e5e9f0',
+        '--cerebr-code-border': '#434c5e',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -228,7 +268,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#44475a',
         '--cerebr-hover-color': 'rgba(189, 147, 249, 0.1)',
         '--cerebr-background-color': '#282a36',
-        '--cerebr-highlight': '#ff79c6'
+        '--cerebr-highlight': '#ff79c6',
+        '--cerebr-code-bg': '#282a36',
+        '--cerebr-code-color': '#f8f8f2',
+        '--cerebr-code-border': '#44475a',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -247,7 +291,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#292e42',
         '--cerebr-hover-color': 'rgba(103, 110, 149, 0.1)',
         '--cerebr-background-color': '#1a1b26',
-        '--cerebr-highlight': '#7aa2f7'
+        '--cerebr-highlight': '#7aa2f7',
+        '--cerebr-code-bg': '#24283b',
+        '--cerebr-code-color': '#a9b1d6',
+        '--cerebr-code-border': '#292e42',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -266,7 +314,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#9699a3',
         '--cerebr-hover-color': 'rgba(90, 74, 120, 0.05)',
         '--cerebr-background-color': '#d5d6db',
-        '--cerebr-highlight': '#34548a'
+        '--cerebr-highlight': '#34548a',
+        '--cerebr-code-bg': '#e1e2e7',
+        '--cerebr-code-color': '#343b58',
+        '--cerebr-code-border': '#cbccd1',
+        '--cerebr-inline-code-bg': 'rgba(0, 0, 0, 0.05)'
       }
     },
     {
@@ -285,7 +337,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#1f2233',
         '--cerebr-hover-color': 'rgba(84, 207, 216, 0.1)',
         '--cerebr-background-color': '#0f111a',
-        '--cerebr-highlight': '#82aaff'
+        '--cerebr-highlight': '#82aaff',
+        '--cerebr-code-bg': '#0f111a',
+        '--cerebr-code-color': '#8f93a2',
+        '--cerebr-code-border': '#1f2233',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -304,7 +360,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#e7eaec',
         '--cerebr-hover-color': 'rgba(0, 188, 212, 0.05)',
         '--cerebr-background-color': '#fafafa',
-        '--cerebr-highlight': '#2196f3'
+        '--cerebr-highlight': '#2196f3',
+        '--cerebr-code-bg': '#f5f5f5',
+        '--cerebr-code-color': '#546e7a',
+        '--cerebr-code-border': '#e7eaec',
+        '--cerebr-inline-code-bg': 'rgba(0, 0, 0, 0.05)'
       }
     },
     {
@@ -323,7 +383,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#482a74',
         '--cerebr-hover-color': 'rgba(255, 126, 219, 0.15)',
         '--cerebr-background-color': '#2a1b3d',
-        '--cerebr-highlight': '#fe4450'
+        '--cerebr-highlight': '#fe4450',
+        '--cerebr-code-bg': '#241b2f',
+        '--cerebr-code-color': '#ff7edb',
+        '--cerebr-code-border': '#482a74',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -342,7 +406,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#e4e4e4',
         '--cerebr-hover-color': 'rgba(0, 122, 255, 0.05)',
         '--cerebr-background-color': '#ffffff',
-        '--cerebr-highlight': '#007aff'
+        '--cerebr-highlight': '#007aff',
+        '--cerebr-code-bg': '#f6f8fa',
+        '--cerebr-code-color': '#333333',
+        '--cerebr-code-border': '#e4e4e4',
+        '--cerebr-inline-code-bg': 'rgba(0, 0, 0, 0.05)'
       }
     },
     {
@@ -361,7 +429,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#3d3d41',
         '--cerebr-hover-color': 'rgba(10, 132, 255, 0.1)',
         '--cerebr-background-color': '#1c1c1e',
-        '--cerebr-highlight': '#0a84ff'
+        '--cerebr-highlight': '#0a84ff',
+        '--cerebr-code-bg': '#2c2c2e',
+        '--cerebr-code-color': '#e4e4e4',
+        '--cerebr-code-border': '#3d3d41',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -380,7 +452,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#504945',
         '--cerebr-hover-color': 'rgba(251, 73, 52, 0.1)',
         '--cerebr-background-color': '#282828',
-        '--cerebr-highlight': '#fb4934'
+        '--cerebr-highlight': '#fb4934',
+        '--cerebr-code-bg': '#3c3836',
+        '--cerebr-code-color': '#ebdbb2',
+        '--cerebr-code-border': '#504945',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -399,7 +475,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#d5c4a1',
         '--cerebr-hover-color': 'rgba(157, 0, 6, 0.05)',
         '--cerebr-background-color': '#fbf1c7',
-        '--cerebr-highlight': '#9d0006'
+        '--cerebr-highlight': '#9d0006',
+        '--cerebr-code-bg': '#ebdbb2',
+        '--cerebr-code-color': '#3c3836',
+        '--cerebr-code-border': '#d5c4a1',
+        '--cerebr-inline-code-bg': 'rgba(0, 0, 0, 0.05)'
       }
     },
     {
@@ -418,7 +498,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#373e4c',
         '--cerebr-hover-color': 'rgba(255, 204, 102, 0.1)',
         '--cerebr-background-color': '#1f212a',
-        '--cerebr-highlight': '#f29e74'
+        '--cerebr-highlight': '#f29e74',
+        '--cerebr-code-bg': '#272d38',
+        '--cerebr-code-color': '#cccac2',
+        '--cerebr-code-border': '#373e4c',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -437,7 +521,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#e8e8e8',
         '--cerebr-hover-color': 'rgba(255, 153, 64, 0.05)',
         '--cerebr-background-color': '#fafafa',
-        '--cerebr-highlight': '#ff9940'
+        '--cerebr-highlight': '#ff9940',
+        '--cerebr-code-bg': '#f8f9fa',
+        '--cerebr-code-color': '#5c6166',
+        '--cerebr-code-border': '#e8e8e8',
+        '--cerebr-inline-code-bg': 'rgba(0, 0, 0, 0.05)'
       }
     },
     {
@@ -456,7 +544,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#45475a',
         '--cerebr-hover-color': 'rgba(203, 166, 247, 0.1)',
         '--cerebr-background-color': '#1e1e2e',
-        '--cerebr-highlight': '#f5c2e7'
+        '--cerebr-highlight': '#f5c2e7',
+        '--cerebr-code-bg': '#313244',
+        '--cerebr-code-color': '#cdd6f4',
+        '--cerebr-code-border': '#45475a',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -475,7 +567,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#bcc0cc',
         '--cerebr-hover-color': 'rgba(136, 57, 239, 0.05)',
         '--cerebr-background-color': '#eff1f5',
-        '--cerebr-highlight': '#8839ef'
+        '--cerebr-highlight': '#8839ef',
+        '--cerebr-code-bg': '#e6e9ef',
+        '--cerebr-code-color': '#4c4f69',
+        '--cerebr-code-border': '#bcc0cc',
+        '--cerebr-inline-code-bg': 'rgba(0, 0, 0, 0.05)'
       }
     },
     {
@@ -494,7 +590,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#3e4451',
         '--cerebr-hover-color': 'rgba(198, 120, 221, 0.1)',
         '--cerebr-background-color': '#282c34',
-        '--cerebr-highlight': '#e06c75'
+        '--cerebr-highlight': '#e06c75',
+        '--cerebr-code-bg': '#282c34',
+        '--cerebr-code-color': '#abb2bf',
+        '--cerebr-code-border': '#3e4451',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -513,7 +613,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#4e5579',
         '--cerebr-hover-color': 'rgba(199, 146, 234, 0.1)',
         '--cerebr-background-color': '#292d3e',
-        '--cerebr-highlight': '#ff5370'
+        '--cerebr-highlight': '#ff5370',
+        '--cerebr-code-bg': '#292d3e',
+        '--cerebr-code-color': '#bfc7d5',
+        '--cerebr-code-border': '#4e5579',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -532,7 +636,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#42384d',
         '--cerebr-hover-color': 'rgba(196, 167, 231, 0.1)',
         '--cerebr-background-color': '#191724',
-        '--cerebr-highlight': '#eb6f92'
+        '--cerebr-highlight': '#eb6f92',
+        '--cerebr-code-bg': '#1f1d2e',
+        '--cerebr-code-color': '#e0def4',
+        '--cerebr-code-border': '#42384d',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -551,7 +659,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#e5e0d9',
         '--cerebr-hover-color': 'rgba(144, 122, 169, 0.05)',
         '--cerebr-background-color': '#faf4ed',
-        '--cerebr-highlight': '#d7827e'
+        '--cerebr-highlight': '#d7827e',
+        '--cerebr-code-bg': '#f2ede9',
+        '--cerebr-code-color': '#575279',
+        '--cerebr-code-border': '#e5e0d9',
+        '--cerebr-inline-code-bg': 'rgba(0, 0, 0, 0.05)'
       }
     },
     {
@@ -570,7 +682,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#444c56',
         '--cerebr-hover-color': 'rgba(83, 155, 245, 0.1)',
         '--cerebr-background-color': '#22272e',
-        '--cerebr-highlight': '#539bf5'
+        '--cerebr-highlight': '#539bf5',
+        '--cerebr-code-bg': '#2d333b',
+        '--cerebr-code-color': '#adbac7',
+        '--cerebr-code-border': '#444c56',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -589,7 +705,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#5f7e97',
         '--cerebr-hover-color': 'rgba(130, 170, 255, 0.1)',
         '--cerebr-background-color': '#011627',
-        '--cerebr-highlight': '#c792ea'
+        '--cerebr-highlight': '#c792ea',
+        '--cerebr-code-bg': '#011627',
+        '--cerebr-code-color': '#d6deeb',
+        '--cerebr-code-border': '#5f7e97',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -608,7 +728,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#0d3a58',
         '--cerebr-hover-color': 'rgba(255, 198, 0, 0.1)',
         '--cerebr-background-color': '#002535',
-        '--cerebr-highlight': '#ffc600'
+        '--cerebr-highlight': '#ffc600',
+        '--cerebr-code-bg': '#002535',
+        '--cerebr-code-color': '#e0edff',
+        '--cerebr-code-border': '#0d3a58',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -627,7 +751,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#264172',
         '--cerebr-hover-color': 'rgba(149, 208, 249, 0.1)',
         '--cerebr-background-color': '#0e1729',
-        '--cerebr-highlight': '#219fd5'
+        '--cerebr-highlight': '#219fd5',
+        '--cerebr-code-bg': '#0e1729',
+        '--cerebr-code-color': '#b7ceff',
+        '--cerebr-code-border': '#264172',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -646,7 +774,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#32374d',
         '--cerebr-hover-color': 'rgba(233, 86, 120, 0.1)',
         '--cerebr-background-color': '#1c1e27',
-        '--cerebr-highlight': '#fab795'
+        '--cerebr-highlight': '#fab795',
+        '--cerebr-code-bg': '#232534',
+        '--cerebr-code-color': '#e0e0e0',
+        '--cerebr-code-border': '#32374d',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -665,7 +797,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#3c3c3c',
         '--cerebr-hover-color': 'rgba(114, 183, 192, 0.1)',
         '--cerebr-background-color': '#202020',
-        '--cerebr-highlight': '#cec5a9'
+        '--cerebr-highlight': '#cec5a9',
+        '--cerebr-code-bg': '#252525',
+        '--cerebr-code-color': '#c5cddb',
+        '--cerebr-code-border': '#3c3c3c',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -684,7 +820,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#38364d',
         '--cerebr-hover-color': 'rgba(254, 66, 142, 0.1)',
         '--cerebr-background-color': '#141322',
-        '--cerebr-highlight': '#a9ff68'
+        '--cerebr-highlight': '#a9ff68',
+        '--cerebr-code-bg': '#1e1c31',
+        '--cerebr-code-color': '#e0e0e0',
+        '--cerebr-code-border': '#38364d',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -703,7 +843,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#4b5563',
         '--cerebr-hover-color': 'rgba(54, 197, 240, 0.1)',
         '--cerebr-background-color': '#1e293b',
-        '--cerebr-highlight': '#ecb22e'
+        '--cerebr-highlight': '#ecb22e',
+        '--cerebr-code-bg': '#1a202c',
+        '--cerebr-code-color': '#e2e8f0',
+        '--cerebr-code-border': '#4b5563',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -722,7 +866,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#3b3f54',
         '--cerebr-hover-color': 'rgba(86, 182, 194, 0.1)',
         '--cerebr-background-color': '#292d3c',
-        '--cerebr-highlight': '#7cd850'
+        '--cerebr-highlight': '#7cd850',
+        '--cerebr-code-bg': '#292d3c',
+        '--cerebr-code-color': '#f8f8f2',
+        '--cerebr-code-border': '#3b3f54',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -741,7 +889,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#3e3859',
         '--cerebr-hover-color': 'rgba(161, 239, 211, 0.1)',
         '--cerebr-background-color': '#1e1c31',
-        '--cerebr-highlight': '#f48fb1'
+        '--cerebr-highlight': '#f48fb1',
+        '--cerebr-code-bg': '#2d2b40',
+        '--cerebr-code-color': '#cbe3e7',
+        '--cerebr-code-border': '#3e3859',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -760,7 +912,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#4a4c57',
         '--cerebr-hover-color': 'rgba(199, 143, 235, 0.1)',
         '--cerebr-background-color': '#23252e',
-        '--cerebr-highlight': '#26c7d0'
+        '--cerebr-highlight': '#26c7d0',
+        '--cerebr-code-bg': '#23252e',
+        '--cerebr-code-color': '#d5ced9',
+        '--cerebr-code-border': '#4a4c57',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -779,7 +935,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#5d4d96',
         '--cerebr-hover-color': 'rgba(250, 208, 0, 0.1)',
         '--cerebr-background-color': '#2d2b55',
-        '--cerebr-highlight': '#ff9d00'
+        '--cerebr-highlight': '#ff9d00',
+        '--cerebr-code-bg': '#2d2b55',
+        '--cerebr-code-color': '#fff9f9',
+        '--cerebr-code-border': '#5d4d96',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -798,7 +958,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#303030',
         '--cerebr-hover-color': 'rgba(77, 182, 172, 0.1)',
         '--cerebr-background-color': '#151515',
-        '--cerebr-highlight': '#ff5370'
+        '--cerebr-highlight': '#ff5370',
+        '--cerebr-code-bg': '#1a1a1a',
+        '--cerebr-code-color': '#cccccc',
+        '--cerebr-code-border': '#303030',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -817,7 +981,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#28375c',
         '--cerebr-hover-color': 'rgba(108, 164, 244, 0.1)',
         '--cerebr-background-color': '#0e182c',
-        '--cerebr-highlight': '#ee8e66'
+        '--cerebr-highlight': '#ee8e66',
+        '--cerebr-code-bg': '#0e182c',
+        '--cerebr-code-color': '#d8e5ff',
+        '--cerebr-code-border': '#28375c',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     },
     {
@@ -836,7 +1004,11 @@ export function createThemeManager() {
         '--cerebr-border-color': '#324233',
         '--cerebr-hover-color': 'rgba(135, 192, 149, 0.1)',
         '--cerebr-background-color': '#172018',
-        '--cerebr-highlight': '#d9c87c'
+        '--cerebr-highlight': '#d9c87c',
+        '--cerebr-code-bg': '#172018',
+        '--cerebr-code-color': '#d9e6dd',
+        '--cerebr-code-border': '#324233',
+        '--cerebr-inline-code-bg': 'rgba(255, 255, 255, 0.1)'
       }
     }
   ];
