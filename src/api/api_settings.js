@@ -38,6 +38,7 @@ export function createApiManager(options) {
           apiKey: '',
           baseUrl: 'https://api.openai.com/v1/chat/completions',
           modelName: 'gpt-4o',
+          displayName: '',
           temperature: 1,
           isFavorite: false  // 添加收藏状态字段
         }];
@@ -51,6 +52,7 @@ export function createApiManager(options) {
         apiKey: '',
         baseUrl: 'https://api.openai.com/v1/chat/completions',
         modelName: 'gpt-4o',
+        displayName: '',
         temperature: 1,
         isFavorite: false  // 添加收藏状态字段
       }];
@@ -136,10 +138,11 @@ export function createApiManager(options) {
 
     // 设置标题
     const titleElement = template.querySelector('.api-card-title');
-    titleElement.textContent = config.modelName || config.baseUrl || '新配置';
+    titleElement.textContent = config.displayName || config.modelName || config.baseUrl || '新配置';
 
     const apiKeyInput = template.querySelector('.api-key');
     const baseUrlInput = template.querySelector('.base-url');
+    const displayNameInput = template.querySelector('.display-name');
     const modelNameInput = template.querySelector('.model-name');
     const temperatureInput = template.querySelector('.temperature');
     const temperatureValue = template.querySelector('.temperature-value');
@@ -199,6 +202,7 @@ export function createApiManager(options) {
     // 使用 ?? 替代 || 来防止 0 被错误替换
     apiKeyInput.value = config.apiKey ?? '';
     baseUrlInput.value = config.baseUrl ?? 'https://api.openai.com/v1/chat/completions';
+    displayNameInput.value = config.displayName ?? '';
     modelNameInput.value = config.modelName ?? 'gpt-4o';
     temperatureInput.value = config.temperature ?? 1;
     temperatureValue.textContent = (config.temperature ?? 1).toFixed(1);
@@ -242,17 +246,18 @@ export function createApiManager(options) {
     template.querySelector('.api-card-actions').addEventListener('click', stopPropagation);
 
     // 输入变化时保存
-    [apiKeyInput, baseUrlInput, modelNameInput, temperatureInput].forEach(input => {
+    [apiKeyInput, baseUrlInput, displayNameInput, modelNameInput, temperatureInput].forEach(input => {
       input.addEventListener('change', () => {
         apiConfigs[index] = {
           ...apiConfigs[index],
           apiKey: apiKeyInput.value,
           baseUrl: baseUrlInput.value,
+          displayName: displayNameInput.value,
           modelName: modelNameInput.value,
           temperature: parseFloat(temperatureInput.value)
         };
         // 更新标题
-        titleElement.textContent = apiConfigs[index].modelName || apiConfigs[index].baseUrl || '新配置';
+        titleElement.textContent = apiConfigs[index].displayName || apiConfigs[index].modelName || apiConfigs[index].baseUrl || '新配置';
         saveAPIConfigs();
       });
     });
@@ -372,7 +377,7 @@ export function createApiManager(options) {
 
       const apiName = document.createElement('span');
       apiName.className = 'api-name';
-      apiName.textContent = config.modelName || config.baseUrl;
+      apiName.textContent = config.displayName || config.modelName || config.baseUrl;
 
       item.appendChild(apiName);
 
@@ -530,6 +535,7 @@ export function createApiManager(options) {
       baseUrl: partialConfig.baseUrl,
       apiKey: urlMatchedConfig?.apiKey || apiConfigs[selectedConfigIndex]?.apiKey || '',
       modelName: partialConfig.modelName,
+      displayName: partialConfig.displayName || '',
       temperature: partialConfig.temperature ?? 1.0,
       customParams: partialConfig.customParams || ''
     };
