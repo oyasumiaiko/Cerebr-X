@@ -79,7 +79,7 @@ class CerebrSidebar {
         lastUrl = currentUrl;
 
         // 获取iframe并发送消息
-        const iframe = this.sidebar?.querySelector('.cerebr-sidebar__iframe');
+        const iframe = sidebar.sidebar?.querySelector('.cerebr-sidebar__iframe');
         if (iframe) {
           console.log('发送URL变化消息到iframe');
           iframe.contentWindow.postMessage({
@@ -665,6 +665,9 @@ const picker = new ElementPicker({
   zIndex: 10000
 });
 
+let _iframe = null;
+let iframe = (_iframe || (_iframe = sidebar.sidebar?.querySelector('.cerebr-sidebar__iframe')));
+
 // 修改消息监听器
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type != 'REQUEST_STARTED' && message.type != 'REQUEST_COMPLETED' &&
@@ -1097,13 +1100,16 @@ async function extractPageContent(includeDOM) {
   return result;
 }
 
+
 function sendPlaceholderUpdate(message, timeout = 0) {
   console.log('发送placeholder更新:', message);
-  iframe.contentWindow.postMessage({
-    type: 'UPDATE_PLACEHOLDER',
-    placeholder: message,
-    timeout: timeout
-  }, '*');
+  if (iframe) {
+    iframe.contentWindow.postMessage({
+      type: 'UPDATE_PLACEHOLDER',
+      placeholder: message,
+      timeout: timeout
+    }, '*');
+  }
 };
 
 // PDF.js 库的路径
@@ -1118,7 +1124,8 @@ async function downloadPDFData(url) {
   // 添加缓存检查逻辑
   if (pdfDataCache.has(url)) {
     console.log('从缓存中获取PDF数据:', url);
-    return pdfDataCache.get(url);
+    const cached = pdfDataCache.get(url);
+    return new Uint8Array(cached.buffer.slice(0));
   }
 
   // 获取PDF文件的初始信息
@@ -1163,10 +1170,11 @@ async function downloadPDFData(url) {
     offset += chunk.length;
   }
 
-  // 将下载的PDF数据存入缓存
-  pdfDataCache.set(url, completeData);
+  // 将下载的PDF数据存入缓存的副本，并返回新的副本
+  const cachedCopy = new Uint8Array(completeData.buffer.slice(0));
+  pdfDataCache.set(url, cachedCopy);
 
-  return completeData;
+  return new Uint8Array(cachedCopy.buffer.slice(0));
 }
 
 async function parsePDFData(completeData) {
@@ -1192,19 +1200,6 @@ async function parsePDFData(completeData) {
 
 async function extractTextFromPDF(url) {
   try {
-    // 使用已存在的 sidebar 实例
-    if (!sidebar || !sidebar.sidebar) {
-      console.error('侧边栏实例不存在');
-      return null;
-    }
-
-    // 获取iframe
-    const iframe = sidebar.sidebar.querySelector('.cerebr-sidebar__iframe');
-    if (!iframe) {
-      console.error('找不到iframe元素');
-      return null;
-    }
-
     // 下载PDF文件
     sendPlaceholderUpdate('正在下载PDF文件...');
     const completeData = await downloadPDFData(url);
@@ -1299,6 +1294,28 @@ window.cerebrDebug = {
       console.error("Debug: PDF 内容提取失败:", error);
     }
   },
+  debugExtractPDFOutline: async function(pdfUrl) {
+    pdfUrl = pdfUrl || window.location.href;
+    console.log(`Debug: 开始提取 PDF 大纲, URL: ${pdfUrl}`);
+    try {
+      const outline = await extractPdfOutlineChapters(pdfUrl);
+      console.log("Debug: PDF 大纲提取结果:", outline);
+      return outline;
+    } catch (error) {
+      console.error("Debug: PDF 大纲提取失败:", error);
+    }
+  },
+  debugExtractPdfChapters: async function(pdfUrl) {
+    pdfUrl = pdfUrl || window.location.href;
+    console.log(`Debug: 开始提取 PDF 章节, URL: ${pdfUrl}`);
+    try {
+      const chapters = await debugExtractPdfChapters(pdfUrl);
+      console.log("Debug: PDF 章节提取结果:", chapters);
+      return chapters;
+    } catch (error) {
+      console.error("Debug: PDF 章节提取失败:", error);
+    }
+  },
   /**
    * 调试提取重要DOM结构
    * @returns {string} 清理过的重要DOM结构
@@ -1330,7 +1347,7 @@ window.cerebrDebug = {
     const htmlString = jsonDomToHtml(domTree);
     console.log("Debug: 可见 HTML 字符串：", htmlString);
     return htmlString;
-  }
+  },
 };
 
 /**
@@ -1551,134 +1568,50 @@ function extractVisibleViewportDOMTree(node) {
   return obj;
 }
 
-// 示例用法：提取 document.body 中位于视口内的 DOM 结构
-const visibleDOMTree = extractVisibleViewportDOMTree(document.body);
-console.log("当前视口中存在的 DOM 结构：", visibleDOMTree);
-
-// ====================== 新增：PDF工具函数 ======================
-
-/**
- * 根据传入的文本内容自动判断章节划分的正则表达式。
- * 优先检测英文的 'Chapter' 格式，再检测中文的 '第X章' 格式。
- * 
- * @param {string} text - 待检测的文本内容
- * @returns {RegExp|null} 如果匹配到多个章节则返回对应的正则表达式，否则返回null
- */
-function getChapterRegex(text) {
-  // 英文章节正则: 匹配 'Chapter' 后跟数字和任意字符，直到下一个 'Chapter' 或结尾
-  const englishRegex = /(?:^|\n)(Chapter\s+\d+.*?)(?=\nChapter\s+\d+|$)/gs;
-  const englishMatches = text.match(englishRegex);
-  if (englishMatches && englishMatches.length > 1) {
-    return englishRegex;
-  }
-  // 中文章节正则: 匹配 '第' 后跟数字及任意空白，再跟 '章' 开头的行
-  const chineseRegex = /(?:^|\n)(第\s*\d+\s*章.*?)(?=\n第\s*\d+\s*章|$)/gs;
-  const chineseMatches = text.match(chineseRegex);
-  if (chineseMatches && chineseMatches.length > 1) {
-    return chineseRegex;
-  }
-  return null;
-}
-
-/**
- * 将完整的文本按照给定正则表达式分割为章节块，并自动提取章节标题。
- * 
- * @param {string} text - 完整的PDF文本内容
- * @param {RegExp} chapterRegex - 用于匹配章节的正则表达式
- * @returns {Array<{chapterTitle: string, content: string}>} 章节数组，每个对象包含章节标题和章节内容
- */
-function splitTextIntoChapters(text, chapterRegex) {
-  const matches = Array.from(text.matchAll(chapterRegex));
-  const chapters = [];
-  if (matches.length === 0) return chapters;
-
-  for (let i = 0; i < matches.length; i++) {
-    const startIdx = matches[i].index;
-    const endIdx = (i < matches.length - 1) ? matches[i + 1].index : text.length;
-    const chapterBlock = text.slice(startIdx, endIdx).trim();
-    // 取第一行作为章节标题
-    const firstLineBreak = chapterBlock.indexOf('\n');
-    const chapterTitle = firstLineBreak !== -1 ? chapterBlock.slice(0, firstLineBreak).trim() : chapterBlock;
-    chapters.push({
-      chapterTitle,
-      content: chapterBlock
-    });
-  }
-  return chapters;
-}
-
-/**
- * 异步提取PDF文件的文本，并根据章节划分规则返回分章节内容。
- * 该函数依赖于已有的 extractTextFromPDF 函数和PDF.js库。
- * 
- * @param {string} pdfUrl - PDF文件的URL
- * @param {Object} [options] - 可选配置
- * @param {RegExp} [options.customChapterRegex] - 自定义的章节匹配正则表达式
- * @returns {Promise<{title: string, url: string, chapters: Array<{chapterTitle: string, content: string}>, fullText: string}>} 
- *          返回对象包含页面标题、url、完整文本及按章节分割的章节数组
- * @example
- * extractPdfChapters('https://example.com/sample.pdf').then(result => {
- *   console.log(result.chapters);
- * });
- */
-async function extractPdfChapters(pdfUrl, options = {}) {
-  // 调用已有的PDF文本提取函数
-  const pdfResult = await extractTextFromPDF(pdfUrl);
-  if (!pdfResult || !pdfResult.content) {
-    throw new Error('无法提取PDF文本内容');
-  }
-  const fullText = pdfResult.content;
-
-  // 使用自定义正则或根据文本自动检测
-  const chapterRegex = options.customChapterRegex || getChapterRegex(fullText);
-  let chapters = [];
-  if (chapterRegex) {
-    chapters = splitTextIntoChapters(fullText, chapterRegex);
-  } else {
-    // 如果未检测到章节标识, 则整体作为单个章节返回
-    chapters.push({
-      chapterTitle: '全文',
-      content: fullText
-    });
-  }
-  return {
-    title: pdfResult.title,
-    url: pdfResult.url,
-    fullText,
-    chapters
-  };
-}
-
-// 将新函数挂载到全局对象，便于调试和在iframe中调用
-window.pdfTools = {
-  getChapterRegex,
-  splitTextIntoChapters,
-  extractPdfChapters
-};
-
 // ====================== 新增：PDF结构章节工具函数 ======================
 
-/* 新增代码：PDF结构章节工具函数 (复用downloadPDFData) */
 /**
- * 递归处理PDF书签，提取章节信息。
- * @param {Array} outline - PDF.js返回的书签数组
- * @returns {Array<{chapterTitle: string, pageIndex?: number, children: Array}>} 章节数组
+ * 异步处理 PDF 书签，提取章节信息并获取页码
+ * @param {Object} pdf - PDF.js 的 PDF 文档对象
+ * @param {Array} outline - PDF.js 返回的书签数组
+ * @returns {Promise<Array<{chapterTitle: string, pageNumber: (number|null), children: Array}>>}
  */
-function processPdfOutline(outline) {
+async function processPdfOutlineEx(pdf, outline) {
   if (!outline) return [];
-  return outline.map(item => ({
-    chapterTitle: item.title || '未命名章节',
-    children: processPdfOutline(item.items || [])
-  }));
+  const result = [];
+  for (const item of outline) {
+    let pageNumber = null;
+    if (item.dest) {
+      try {
+        // 如果 dest 是字符串，先通过 getDestination 获取数组，否则直接使用
+        const destArray = typeof item.dest === 'string' ? await pdf.getDestination(item.dest) : item.dest;
+        if (destArray) {
+          const pageRef = destArray[0];
+          const pageIndex = await pdf.getPageIndex(pageRef);
+          // PDF 页码通常从1开始
+          pageNumber = pageIndex + 1;
+        }
+      } catch (e) {
+        console.error('获取页码失败:', e);
+      }
+    }
+    const children = await processPdfOutlineEx(pdf, item.items);
+    result.push({
+      chapterTitle: item.title || '未命名章节',
+      pageNumber: pageNumber,
+      children: children
+    });
+  }
+  return result;
 }
 
 /**
- * 异步提取PDF文件的结构信息，从PDF书签中分出章节。
- * 此函数复用已有的downloadPDFData函数处理PDF数据，并利用PDF.js获取PDF目录。
+ * 异步提取PDF文件的元数据和结构信息，从PDF书签中分出章节，并获取章节页码。
+ * 此函数复用已有的 downloadPDFData 函数处理PDF数据，并利用 PDF.js 获取PDF目录和元数据。
  * 
  * @param {string} pdfUrl - PDF文件的URL
  * @param {Object} [options] - 可选配置
- * @returns {Promise<{title: string, url: string, outline: Array}>} 包含PDF标题、URL和结构化章节信息
+ * @returns {Promise<{title: string, url: string, metadata: Object, outline: Array}>}
  * @example
  * extractPdfOutlineChapters('https://example.com/sample.pdf').then(result => {
  *   console.log(result.outline);
@@ -1692,24 +1625,140 @@ async function extractPdfOutlineChapters(pdfUrl, options = {}) {
   const loadingTask = pdfjsLib.getDocument({ data: completeData });
   const pdf = await loadingTask.promise;
 
+  // 提取元数据
+  let meta = {};
+  try {
+    const metaResult = await pdf.getMetadata();
+    meta = {
+      info: metaResult.info,
+      metadata: metaResult.metadata
+    };
+  } catch (e) {
+    console.error('获取PDF元数据失败:', e);
+  }
+
   // 尝试获取PDF的目录（书签）
   let outline = await pdf.getOutline();
   if (!outline) {
     // 没有书签时，构造默认单章节
     outline = [{ title: '全文', items: [] }];
   }
-  const processedOutline = processPdfOutline(outline);
+  const processedOutline = await processPdfOutlineEx(pdf, outline);
 
-  // 返回PDF的基本信息和章节结构
+  // 返回PDF的基本信息、元数据和章节结构
   return {
-    title: pdf?.fingerprint || '未知标题',
+    title: meta.metadata ? meta.metadata.get('DC:title') || meta.info.Title || pdf.fingerprint || '未知标题' : pdf.fingerprint || '未知标题',
     url: pdfUrl,
+    metadata: meta,
     outline: processedOutline
   };
 }
 
-// 将新的PDF结构章节函数挂载到全局对象，供外部调用
-window.pdfTools = window.pdfTools || {};
-window.pdfTools.extractPdfOutlineChapters = extractPdfOutlineChapters;
-
 // ====================== 结束：PDF结构章节工具函数 ======================
+
+// ====================== 新增：根据章节切分PDF文本 ======================
+/**
+ * 根据完整的页文本数组和章节outline切分PDF文本，按章节层次返回结构化的章节内容
+ * @param {string[]} fullPageTexts - PDF每页的文本数组，索引0对应页1
+ * @param {Array<{chapterTitle: string, pageNumber: (number|null), children: Array}>} outline - 章节outline，章节的 pageNumber 为起始页（从1计数）
+ * @returns {Array<{chapterTitle: string, pageNumber: number, content: string, children: Array}>} 切分后的章节内容数据
+ * @example
+ * const chapters = splitPdfTextByChapters(fullPageTexts, outline);
+ */
+function splitPdfTextByChapters(fullPageTexts, outline) {
+  const totalPages = fullPageTexts.length;
+  // 筛选出有效的章节（有pageNumber），并按pageNumber排序
+  const sortedOutline = outline.filter(item => item.pageNumber !== null).sort((a, b) => a.pageNumber - b.pageNumber);
+  const chapters = [];
+  for (let i = 0; i < sortedOutline.length; i++) {
+    const chapter = sortedOutline[i];
+    const start = chapter.pageNumber; // 起始页
+    // 下一个章节的起始页，或者若没有则取总页数+1
+    const end = (i < sortedOutline.length - 1) ? sortedOutline[i + 1].pageNumber : totalPages + 1;
+    // 截取从 start 到 end-1 页的内容
+    const content = fullPageTexts.slice(start - 1, end - 1).join('\n');
+
+    // 如果该章节有子章节，则递归切分
+    let children = [];
+    if (chapter.children && chapter.children.length > 0) {
+      children = splitPdfTextByChapters(fullPageTexts, chapter.children);
+    }
+
+    chapters.push({
+      chapterTitle: chapter.chapterTitle,
+      pageNumber: chapter.pageNumber,
+      content: content,
+      children: children
+    });
+  }
+  return chapters;
+}
+
+// ====================== 新增：从PDF数据解析每页文本 ======================
+/**
+ * 解析完整的PDF数据，返回每一页的文本数组，数组索引0对应第1页
+ * @param {Uint8Array} completeData - 下载的PDF数据
+ * @returns {Promise<string[]>} 每页的文本数组
+ * @example
+ * const pageTexts = await parsePDFToPageTexts(completeData);
+ */
+async function parsePDFToPageTexts(completeData) {
+  console.log('开始解析PDF为页文本数组');
+  // 克隆数据，确保传递给pdf.js的ArrayBuffer是新的
+  const freshData = new Uint8Array(completeData);
+  const loadingTask = pdfjsLib.getDocument({ data: freshData });
+  const pdf = await loadingTask.promise;
+  console.log('PDF加载成功，总页数:', pdf.numPages);
+  const pageTexts = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    sendPlaceholderUpdate(`正在提取第 ${i} 页文本...`);
+    console.log(`开始处理第 ${i} 页`);
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items.map(item => item.str).join(' ');
+    console.log(`第 ${i} 页提取的文本长度:`, pageText.length);
+    pageTexts.push(pageText);
+  }
+  return pageTexts;
+}
+
+// ====================== 新增：从PDF数据提取并切分章节文本 ======================
+/**
+ * 从给定的PDF URL中下载数据，提取每页文本，并结合目录将PDF文本按章节切分
+ * @param {string} pdfUrl - PDF文件的URL
+ * @returns {Promise<Array<{chapterTitle: string, pageNumber: number, content: string, children: Array}>>} 切分后的章节结构数据
+ * @example
+ * const chapters = await window.cerebrDebug.debugExtractPdfChapters('https://example.com/sample.pdf');
+ */
+async function debugExtractPdfChapters(pdfUrl) {
+  pdfUrl = pdfUrl || window.location.href;
+  console.log(`开始提取PDF章节数据, URL: ${pdfUrl}`);
+  
+  // 下载PDF数据
+  const completeData = await downloadPDFData(pdfUrl);
+  console.log('PDF下载完成，开始解析每页文本');
+  
+  // 获取每页文本数组；这里无需额外克隆，因为parsePDFToPageTexts内部会克隆数据
+  const fullPageTexts = await parsePDFToPageTexts(completeData);
+  console.log('成功提取每页文本, 页数:', fullPageTexts.length);
+  
+  // 为了获取目录和元数据，克隆PDF数据，不影响后续使用
+  const freshDataForOutline = new Uint8Array(completeData);
+  const loadingTask = pdfjsLib.getDocument({ data: freshDataForOutline });
+  const pdf = await loadingTask.promise;
+  
+  // 获取目录(书签)
+  let outline = await pdf.getOutline();
+  if (!outline) {
+    console.log('未检测到书签，使用默认章节');
+    outline = [{ title: '全文', items: [] }];
+  }
+  const processedOutline = await processPdfOutlineEx(pdf, outline);
+  console.log('目录处理结果:', processedOutline);
+  
+  // 根据章节信息切分文本，每个章节起始页由outline中的pageNumber获得
+  const chapters = splitPdfTextByChapters(fullPageTexts, processedOutline);
+  
+  console.log('切分后的章节数据:', chapters);
+  return chapters;
+}
