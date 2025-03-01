@@ -267,7 +267,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         abortCurrentRequest: messageSender.abortCurrentRequest,
         deleteMessageContent,
         clearChatHistory: chatHistoryUI.clearChatHistory,
-        sendMessage: messageSender.sendMessage
+        sendMessage: messageSender.sendMessage,
+        chatHistory  // 添加聊天历史数据对象
     });
     
     // 创建设置管理器实例

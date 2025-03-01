@@ -218,13 +218,7 @@ export function createMessageSender(options) {
           imageContainer.innerHTML
         );
         
-        // 保存元数据到用户消息，用于后续重新生成
-        if (injectedSystemMessages.length > 0) {
-          userMessageDiv.setAttribute('data-injected-system-messages', JSON.stringify(injectedSystemMessages));
-        }
-        if (currentPromptType) {
-          userMessageDiv.setAttribute('data-prompt-type', currentPromptType);
-        }
+        // 不再向DOM元素添加额外元数据，系统消息等信息已保存在chatHistory中
       }
 
       // 清空输入区域
@@ -264,23 +258,12 @@ export function createMessageSender(options) {
       const config = specificApiConfig || 
                     apiManager.getModelConfig(currentPromptType, prompts);
 
-      
-      // 如果用户消息存在，保存API配置信息到用户消息
-      if (userMessageDiv && config) {
-        // 只存储必要的配置信息，避免保存API密钥
-        const configToSave = {
-          baseUrl: config.baseUrl,
-          modelName: config.modelName,
-          temperature: config.temperature,
-          customParams: config.customParams
-        };
-        userMessageDiv.setAttribute('data-api-config', JSON.stringify(configToSave));
-      }
-
       // 添加字数统计元素
-      addContentLengthFooter(userMessageDiv);
+      addContentLengthFooter(userMessageDiv, pageContentLength, config);
 
-      function addContentLengthFooter(userMessageDiv) {
+      function addContentLengthFooter(userMessageDiv, pageContentLength, config) {
+        if (!userMessageDiv) return;
+        
         // 创建字数统计元素
         const footer = document.createElement('div');
         footer.classList.add('content-length-footer');
@@ -290,7 +273,7 @@ export function createMessageSender(options) {
         footer.textContent += ` ${config.modelName}`;
 
         // 添加到用户消息下方
-        userMessageDiv?.appendChild(footer);
+        userMessageDiv.appendChild(footer);
       }
 
       // 更新加载状态消息

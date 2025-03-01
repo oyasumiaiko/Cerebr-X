@@ -18,6 +18,7 @@
  * @param {Function} options.deleteMessageContent - 删除消息内容函数
  * @param {Function} options.clearChatHistory - 清空聊天历史函数
  * @param {Function} options.sendMessage - 发送消息函数
+ * @param {Object} options.chatHistory - 聊天历史数据对象
  * @returns {Object} 上下文菜单管理器实例
  */
 export function createContextMenuManager(options) {
@@ -34,7 +35,8 @@ export function createContextMenuManager(options) {
     abortCurrentRequest,
     deleteMessageContent,
     clearChatHistory,
-    sendMessage
+    sendMessage,
+    chatHistory
   } = options;
 
   // 私有状态
@@ -163,43 +165,33 @@ export function createContextMenuManager(options) {
         await deleteMessageContent(lastAiMessage);
       }
       
-      // 如果找到了用户消息，从中提取元数据
+      // 如果找到了用户消息，从聊天历史中获取完整信息
       if (lastUserMessage) {
         try {
-          // 获取原始消息文本
+          // 获取消息ID和原始文本
+          const messageId = lastUserMessage.getAttribute('data-message-id');
           const originalMessageText = lastUserMessage.getAttribute('data-original-text');
           
-          // 获取注入的系统消息 (如果有)
-          let injectedSystemMessages = [];
-          const injectedSystemMessagesStr = lastUserMessage.getAttribute('data-injected-system-messages');
-          if (injectedSystemMessagesStr) {
-            try {
-              injectedSystemMessages = JSON.parse(injectedSystemMessagesStr);
-            } catch (err) {
-              console.error('解析注入系统消息失败:', err);
-            }
+          if (!messageId || !chatHistory?.messages) {
+            console.error('未找到消息ID或聊天历史');
+            sendMessage({ originalMessageText });
+            hideContextMenu();
+            return;
           }
           
-          // 获取提示词类型 (如果有)
-          const promptType = lastUserMessage.getAttribute('data-prompt-type');
+          // 从聊天历史中找到对应消息节点
+          const messageNode = chatHistory.messages.find(msg => msg.id === messageId);
           
-          // 获取API配置 (如果有)
-          let apiConfig = null;
-          const apiConfigStr = lastUserMessage.getAttribute('data-api-config');
-          if (apiConfigStr) {
-            try {
-              apiConfig = JSON.parse(apiConfigStr);
-            } catch (err) {
-              console.error('解析API配置失败:', err);
-            }
+          if (!messageNode) {
+            console.error('在聊天历史中未找到对应消息');
+            sendMessage({ originalMessageText });
+            hideContextMenu();
+            return;
           }
-          
-          // 调用重新发送消息接口，传递所有收集的元数据
+
           sendMessage({
             originalMessageText,
-            injectedSystemMessages,
-            specificPromptType: promptType,
-            specificApiConfig: apiConfig
+            // 不再从DOM中获取API配置, 让message_sender使用当前的API配置
           });
         } catch (err) {
           console.error('准备重新生成消息时出错:', err);
