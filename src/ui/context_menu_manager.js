@@ -19,6 +19,8 @@
  * @param {Function} options.clearChatHistory - 清空聊天历史函数
  * @param {Function} options.sendMessage - 发送消息函数
  * @param {Object} options.chatHistory - 聊天历史数据对象
+ * @param {HTMLElement} options.forkConversationButton - 创建分支对话按钮
+ * @param {Function} options.createForkConversation - 创建分支对话函数
  * @returns {Object} 上下文菜单管理器实例
  */
 export function createContextMenuManager(options) {
@@ -36,7 +38,9 @@ export function createContextMenuManager(options) {
     deleteMessageContent,
     clearChatHistory,
     sendMessage,
-    chatHistory
+    chatHistory,
+    forkConversationButton,
+    createForkConversation
   } = options;
 
   // 私有状态
@@ -99,6 +103,18 @@ export function createContextMenuManager(options) {
       }
     } else {
       regenerateButton.style.display = 'none';
+    }
+    
+    // 始终显示创建分支对话按钮，但只有在有足够消息时才可用
+    if (forkConversationButton) {
+      const messageCount = chatContainer.querySelectorAll('.message').length;
+      if (messageCount > 1) {
+        forkConversationButton.style.display = 'flex';
+        forkConversationButton.classList.remove('disabled');
+      } else {
+        forkConversationButton.style.display = 'flex';
+        forkConversationButton.classList.add('disabled');
+      }
     }
   }
 
@@ -208,6 +224,25 @@ export function createContextMenuManager(options) {
   }
 
   /**
+   * 创建分支对话
+   * 截取从开始到当前选中消息的对话，创建一个新的会话
+   */
+  function forkConversation() {
+    if (currentMessageElement) {
+      const messageId = currentMessageElement.getAttribute('data-message-id');
+      if (!messageId || !chatHistory || !chatHistory.messages) {
+        console.error('无法创建分支对话: 缺少必要信息');
+        hideContextMenu();
+        return;
+      }
+      
+      // 调用外部提供的创建分支函数
+      createForkConversation(messageId);
+      hideContextMenu();
+    }
+  }
+
+  /**
    * 设置事件监听器
    */
   function setupEventListeners() {
@@ -241,6 +276,15 @@ export function createContextMenuManager(options) {
       hideContextMenu();
     });
 
+    // 添加创建分支对话按钮点击事件
+    if (forkConversationButton) {
+      forkConversationButton.addEventListener('click', () => {
+        if (!forkConversationButton.classList.contains('disabled')) {
+          forkConversation();
+        }
+      });
+    }
+
     // 点击其他地方隐藏菜单
     document.addEventListener('click', (e) => {
       if (!contextMenu.contains(e.target)) {
@@ -267,6 +311,7 @@ export function createContextMenuManager(options) {
     copyMessageContent,
     copyCodeContent,
     regenerateMessage,
+    forkConversation,
     getCurrentMessage: () => currentMessageElement
   };
 } 

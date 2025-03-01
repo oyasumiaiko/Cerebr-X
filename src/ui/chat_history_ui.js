@@ -22,6 +22,7 @@ import {
  * @param {Function} options.clearHistory - 清空聊天历史的函数
  * @param {Function} options.getPrompts - 获取提示词配置的函数
  * @param {Function} options.createImageTag - 创建图片标签的函数
+ * @param {Function} options.getCurrentConversationChain - 获取当前会话链的函数
  * @returns {Object} 聊天历史UI管理API
  */
 export function createChatHistoryUI(options) {
@@ -31,7 +32,8 @@ export function createChatHistoryUI(options) {
     chatHistory,
     clearHistory,
     getPrompts,
-    createImageTag
+    createImageTag,
+    getCurrentConversationChain
   } = options;
 
   let currentConversationId = null;
@@ -1211,13 +1213,161 @@ export function createChatHistoryUI(options) {
       if (url.startsWith('file:///')) {
         // 解码URL并获取文件名
         const decodedUrl = decodeURIComponent(url);
-        return decodedUrl.split('/').pop();
+        return decodedUrl.split('/').pop();     
       }
       // 非file协议，返回域名
       const urlObj = new URL(url);
       return urlObj.hostname;
     } catch (error) {
       return url || '未知';
+    }
+  }
+
+  /**
+   * 创建分支对话
+   * @param {string} targetMessageId - 目标消息ID，将截取从开始到该消息的对话
+   * @returns {Promise<void>}
+   */
+  async function createForkConversation(targetMessageId) {
+    if (!chatHistory || !chatHistory.messages || chatHistory.messages.length === 0) {
+      console.error('创建分支对话失败: 没有可用的聊天历史');
+      return;
+    }
+
+    try {
+      // 先保存当前会话以确保所有更改都已保存
+      await saveCurrentConversation(true);
+
+      // 查找目标消息
+      const targetMessage = chatHistory.messages.find(msg => msg.id === targetMessageId);
+      if (!targetMessage) {
+        console.error('创建分支对话失败: 找不到目标消息');
+        return;
+      }
+      
+      // 获取当前完整对话链
+      const currentChain = getCurrentConversationChain();
+      
+      // 截取从开始到目标消息的对话
+      const targetIndex = currentChain.findIndex(msg => msg.id === targetMessageId);
+      if (targetIndex === -1) {
+        console.error('创建分支对话失败: 目标消息不在当前对话链中');
+        return;
+      }
+      
+      // 保存当前对话的相关信息（页面信息等）
+      const currentConvId = currentConversationId;
+      let pageInfo = null;
+      if (currentConvId) {
+        const currentConversation = await getConversationFromCacheOrLoad(currentConvId);
+        if (currentConversation) {
+          pageInfo = {
+            url: currentConversation.url,
+            title: currentConversation.title
+          };
+        }
+      }
+      
+      // 创建新的ChatHistory对象
+      const newChatHistory = {
+        messages: [],
+        root: null,
+        currentNode: null
+      };
+      
+      // 复制截取的消息到新的ChatHistory
+      let previousId = null;
+      for (let i = 0; i <= targetIndex; i++) {
+        const originalMsg = currentChain[i];
+        const newMsg = {
+          ...JSON.parse(JSON.stringify(originalMsg)), // 深拷贝
+          id: `fork_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          parentId: previousId,
+          children: []
+        };
+        
+        if (previousId) {
+          const parentMsg = newChatHistory.messages.find(m => m.id === previousId);
+          if (parentMsg) {
+            parentMsg.children.push(newMsg.id);
+          }
+        }
+        
+        if (i === 0) {
+          newChatHistory.root = newMsg.id;
+        }
+        
+        if (i === targetIndex) {
+          newChatHistory.currentNode = newMsg.id;
+        }
+        
+        previousId = newMsg.id;
+        newChatHistory.messages.push(newMsg);
+      }
+      
+      // 生成新的会话ID
+      const newConversationId = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // 计算开始和结束时间
+      const timestamps = newChatHistory.messages.map(msg => msg.timestamp);
+      const startTime = Math.min(...timestamps);
+      const endTime = Math.max(...timestamps);
+      
+      // 提取第一条消息的纯文本内容作为摘要
+      const firstMessage = newChatHistory.messages.find(msg => msg.role === 'user');
+      const summary = firstMessage ? extractMessagePlainText(firstMessage).substring(0, 50) + ' (分支)' : '分支对话';
+      
+      // 创建新的会话对象
+      const newConversation = {
+        id: newConversationId,
+        messages: newChatHistory.messages,
+        summary: summary,
+        startTime: startTime,
+        endTime: endTime,
+        title: pageInfo?.title || '',
+        url: pageInfo?.url || '',
+        currentNode: newChatHistory.currentNode,
+        root: newChatHistory.root
+      };
+      
+      // 保存新会话到数据库
+      await putConversation(newConversation);
+      
+      // 清空当前会话并加载新创建的会话
+      chatHistory.messages = [];
+      chatHistory.root = null;
+      chatHistory.currentNode = null;
+      
+      // 清空聊天容器
+      chatContainer.innerHTML = '';
+      
+      // 加载新创建的会话
+      await loadConversationIntoChat(newConversation);
+      
+      // 更新当前会话ID
+      currentConversationId = newConversationId;
+      
+      // 通知消息发送器更新当前会话ID
+      if (window.cerebr && window.cerebr.messageSender) {
+        window.cerebr.messageSender.setCurrentConversationId(newConversationId);
+      }
+      
+      console.log('成功创建分支对话:', newConversationId);
+      
+      // 提示用户操作成功
+      const notification = document.createElement('div');
+      notification.className = 'notification';
+      notification.textContent = '已创建分支对话';
+      document.body.appendChild(notification);
+      
+      // 2秒后删除通知
+      setTimeout(() => {
+        notification.classList.add('fade-out');
+        setTimeout(() => notification.remove(), 500);
+      }, 2000);
+      
+    } catch (error) {
+      console.error('创建分支对话失败:', error);
     }
   }
 
@@ -1234,6 +1384,7 @@ export function createChatHistoryUI(options) {
     refreshChatHistory,
     updatePageInfo,
     getCurrentConversationId: () => currentConversationId,
-    clearMemoryCache
+    clearMemoryCache,
+    createForkConversation
   };
 } 

@@ -60,6 +60,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const debugTreeButton = document.getElementById('debug-chat-tree-btn');
     const screenshotButton = document.getElementById('screenshot-button');
     const sidebarPositionSwitch = document.getElementById('sidebar-position-switch');
+    const forkConversationButton = document.getElementById('fork-conversation');
 
     // 应用程序状态
     let isFullscreen = false; // 全屏模式
@@ -193,7 +194,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         chatHistory: chatHistory,
         clearHistory: clearHistory,
         getPrompts: () => promptSettingsManager.getPrompts(),
-        createImageTag: imageHandler.createImageTag
+        createImageTag: imageHandler.createImageTag,
+        getCurrentConversationChain: getCurrentConversationChain
     });
 
     // ====================== 第二阶段：创建有依赖关系的模块 ======================
@@ -268,7 +270,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         deleteMessageContent,
         clearChatHistory: chatHistoryUI.clearChatHistory,
         sendMessage: messageSender.sendMessage,
-        chatHistory  // 添加聊天历史数据对象
+        chatHistory,  // 添加聊天历史数据对象
+        forkConversationButton,
+        createForkConversation: chatHistoryUI.createForkConversation
     });
     
     // 创建设置管理器实例

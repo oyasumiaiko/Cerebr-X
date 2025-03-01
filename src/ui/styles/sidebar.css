@@ -2965,4 +2965,61 @@ body.hide-references .reference-number.superscript {
     font-size: 12px;
 }
 
+/* 通知样式 */
+.notification {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: var(--cerebr-primary-color, #4a8cff);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 4px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  font-size: 14px;
+  animation: notificationFadeIn 0.3s ease;
+}
+
+@keyframes notificationFadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 20px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.notification.fade-out {
+  animation: notificationFadeOut 0.5s ease forwards;
+}
+
+@keyframes notificationFadeOut {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, 20px);
+  }
+}
+
+/* 创建分支对话按钮样式 */
+.context-menu-item#fork-conversation {
+  display: flex;
+}
+
+.context-menu-item#fork-conversation.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+:root.dark-theme .notification {
+  background-color: var(--cerebr-primary-color, #3a78e8);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
+}
+
 
