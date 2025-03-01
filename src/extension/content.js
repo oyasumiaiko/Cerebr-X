@@ -993,23 +993,20 @@ async function extractPageContent(includeDOM) {
     if (pdfContentCache.has(pdfUrl)) {
       console.log('从缓存中获取PDF内容');
       const cachedContent = pdfContentCache.get(pdfUrl);
-      return {
-        title: document.title,
-        url: pdfUrl,
-        content: cachedContent
-      };
+      return cachedContent;
     }
 
     console.log('缓存中没有找到PDF内容，开始提取');
-    const pdfText = await extractTextFromPDF(pdfUrl);
-    if (pdfText) {
-      // 将内容存入缓存
+    const pdfResult = await extractTextFromPDF(pdfUrl);
+    if (pdfResult) {
       console.log('将PDF内容存入缓存');
-      pdfContentCache.set(pdfUrl, pdfText);
+      pdfContentCache.set(pdfUrl, pdfResult);
       return {
         title: document.title,
         url: pdfUrl,
-        content: pdfText
+        content: pdfResult.fullText,
+        chapters: pdfResult.chapters,
+        isPDF: true
       };
     }
   }
@@ -1205,13 +1202,16 @@ async function extractTextFromPDF(url) {
     const completeData = await downloadPDFData(url);
     console.log('PDF下载完成');
 
-    // 解析PDF文件
+    // 解析PDF文本
     sendPlaceholderUpdate('正在解析PDF文件...');
     const fullText = await parsePDFData(completeData);
 
+    // 解析PDF章节
+    const chapters = await extractChaptersFromPDFData(completeData);
+
     console.log('PDF文本提取完成，总文本长度:', fullText.length);
     sendPlaceholderUpdate('PDF处理完成', 2000);
-    return fullText;
+    return { fullText, chapters };
   } catch (error) {
     console.error('PDF处理过程中出错:', error);
     console.error('错误堆栈:', error.stack);
@@ -1227,6 +1227,29 @@ async function extractTextFromPDF(url) {
     }
     return null;
   }
+}
+
+// 新增：从PDF数据解析章节内容的辅助函数
+async function extractChaptersFromPDFData(completeData) {
+  console.log('开始解析PDF章节内容');
+  const fullPageTexts = await parsePDFToPageTexts(completeData);
+  console.log('成功提取每页文本, 页数:', fullPageTexts.length);
+  
+  // 克隆数据用于获取目录(书签)，不影响后续使用
+  const freshDataForOutline = new Uint8Array(completeData);
+  const loadingTask = pdfjsLib.getDocument({ data: freshDataForOutline });
+  const pdf = await loadingTask.promise;
+  
+  // 获取目录书签
+  let outline = await pdf.getOutline();
+  if (!outline) {
+    console.log('未检测到书签，使用默认章节');
+    outline = [{ title: '全文', items: [] }];
+  }
+  const processedOutline = await processPdfOutlineEx(pdf, outline);
+  const chapters = splitPdfTextByChapters(fullPageTexts, processedOutline);
+  console.log('切分后的章节数据:', chapters);
+  return chapters;
 }
 
 // ====================== 网页截图功能 ======================
