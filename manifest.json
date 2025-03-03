@@ -42,7 +42,7 @@
       "description": "使用 [query] 提示词的快速总结"
     },
     "toggle_temp_mode": {
-      "description": "切换临时模式"
+      "description": "切换网页对话模式"
     },
     "capture_screenshot": {
       "description": "截取当前页面截图添加到消息中"

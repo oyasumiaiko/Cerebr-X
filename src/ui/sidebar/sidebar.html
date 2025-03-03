@@ -29,15 +29,23 @@
         <div class="empty-state-actions">
             <div id="empty-state-history" class="empty-state-action">
                 <i class="far fa-box-archive"></i>
-                <span>聊天记录</span>
+                <span>查看聊天记录</span>
             </div>
             <div id="empty-state-summary" class="empty-state-action">
                 <i class="far fa-file-alt"></i>
-                <span>总结页面</span>
+                <span>总结当前页面</span>
             </div>
             <div id="empty-state-temp-mode" class="empty-state-action">
                 <i class="far fa-comments"></i>
                 <span>纯对话模式</span>
+            </div>
+            <div id="empty-state-screenshot" class="empty-state-action">
+                <i class="far fa-camera"></i>
+                <span>解释屏幕内容</span>
+            </div>
+            <div id="empty-state-extract" class="empty-state-action">
+                <i class="far fa-filter-list"></i>
+                <span>提取关键信息</span>
             </div>
             <div id="empty-state-load-url" class="empty-state-action">
                 <i class="far fa-history"></i>
@@ -312,6 +320,14 @@
             <div class="prompt-group">
                 <label>图片默认提示词</label>
                 <textarea id="image-prompt" placeholder="输入图片解释时使用的提示词..."></textarea>
+            </div>
+            <div class="prompt-group">
+                <label>截图解释提示词</label>
+                <textarea id="screenshot-prompt" placeholder="输入截图解释时使用的提示词..."></textarea>
+            </div>
+            <div class="prompt-group">
+                <label>提取关键信息提示词</label>
+                <textarea id="extract-prompt" placeholder="输入提取关键信息时使用的提示词..."></textarea>
             </div>
             
             <!-- 消息折叠设置 -->

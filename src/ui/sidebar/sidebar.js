@@ -66,6 +66,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const emptyStateSummary = document.getElementById('empty-state-summary');
     const emptyStateTempMode = document.getElementById('empty-state-temp-mode');
     const emptyStateLoadUrl = document.getElementById('empty-state-load-url');
+    const emptyStateScreenshot = document.getElementById('empty-state-screenshot');
+    const emptyStateExtract = document.getElementById('empty-state-extract');
 
     // 应用程序状态
     let isFullscreen = false; // 全屏模式
@@ -399,6 +401,39 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else {
                 showNotification('未找到本页面的历史对话');
             }
+        });
+    }
+
+    // 添加截图解释按钮事件监听器
+    if (emptyStateScreenshot) {
+        emptyStateScreenshot.addEventListener('click', () => {
+            // 获取提示词设置
+            const prompts = promptSettingsManager.getPrompts();
+            
+            // 发送截图请求
+            requestScreenshot();
+            
+            // 等待截图出现后再发送消息
+            waitForScreenshot().then(() => {
+                // 设置输入框内容为截图解释的提示词
+                messageInput.textContent = prompts.screenshot.prompt;
+                messageSender.sendMessage();
+            });
+        });
+    }
+
+    // 添加提取关键信息按钮事件监听器
+    if (emptyStateExtract) {
+        emptyStateExtract.addEventListener('click', async () => {
+            // 获取提示词设置
+            const prompts = promptSettingsManager.getPrompts();
+
+            // 设置输入框内容为提取关键信息的提示词
+            messageInput.textContent = prompts.extract.prompt;
+            // 聚焦到输入框
+            //messageInput.focus();
+            // 发送消息
+            messageSender.sendMessage();
         });
     }
 

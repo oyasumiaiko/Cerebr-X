@@ -4,6 +4,51 @@ const DEFAULT_PROMPTS = {
         prompt: `数学公式请使用LaTeX表示，行间公式请使用\\[...\\]表示，行内公式请使用\\(...\\)表示，禁止使用$美元符号包裹数学公式。始终使用**中文**回答用户问题。`,
         model: 'follow_current'
     },
+    screenshot: {
+        prompt: `请分析这个截图的内容，包括：
+
+1. 内容类型：
+   - 这是什么类型的图片（图表、界面、流程图等）
+   - 图片的主要用途和场景
+
+2. 核心信息：
+   - 图片传达的主要信息和观点
+   - 重要的数据、指标或关键点
+   - 图片中的特殊标记或重点强调部分
+
+3. 上下文解释：
+   - 这些信息在当前场景下的含义
+   - 可能的应用场景或实际价值
+
+请用清晰的结构和通俗的语言解释，确保内容准确、全面且易于理解。`,
+        model: 'follow_current'
+    },
+    extract: {
+        prompt: `请从页面内容中提取并整理以下关键信息：
+
+1. 实体信息：
+   - 人物：姓名、职位、角色
+   - 组织：公司、机构、团体
+   - 地点：地址、区域、场所
+
+2. 数值信息：
+   - 数字指标：具体数值、百分比、比率
+   - 时间节点：日期、时间段、期限
+   - 金额：价格、成本、预算
+
+3. 技术参数：
+   - 规格：尺寸、重量、容量
+   - 性能：速度、效率、功耗
+   - 标准：等级、评级、指标
+
+4. 关键概念：
+   - 专业术语及其定义
+   - 重要观点和结论
+   - 核心价值主张
+
+请以结构化的方式呈现这些信息，并标注信息的出处或位置。如果某类信息不存在，可以略过对应部分。`,
+        model: 'follow_current'
+    },
     image: {
         prompt: `如果是图片，请解释图片内容，包括:
 - 图片类型（照片、图表、截图等）
@@ -111,6 +156,8 @@ class PromptSettings {
         this.summaryPrompt = document.getElementById('summary-prompt');
         this.queryPrompt = document.getElementById('query-prompt');
         this.imagePrompt = document.getElementById('image-prompt');
+        this.screenshotPrompt = document.getElementById('screenshot-prompt');
+        this.extractPrompt = document.getElementById('extract-prompt');
         // 添加消息折叠相关元素
         this.foldPatternPrompt = document.getElementById('fold-pattern-prompt');
         this.foldSummaryPrompt = document.getElementById('fold-summary-prompt');
