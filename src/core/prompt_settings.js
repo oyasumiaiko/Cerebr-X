@@ -446,9 +446,13 @@ class PromptSettings {
                 }
 
                 // 更新模型选择
-                const modelSelect = document.querySelector(`#${type}-model`);
-                if (modelSelect) {
-                    modelSelect.value = settings.model || 'follow_current';
+                if (this.modelSelects[type]) {
+                    // 使用requestAnimationFrame确保DOM已更新
+                    requestAnimationFrame(() => {
+                        if (this.modelSelects[type].querySelector(`option[value="${settings.model || 'follow_current'}"]`)) {
+                            this.modelSelects[type].value = settings.model || 'follow_current';
+                        }
+                    });
                 }
             });
 
