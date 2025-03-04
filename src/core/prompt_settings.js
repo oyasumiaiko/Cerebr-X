@@ -379,56 +379,83 @@ class PromptSettings {
         this.savePromptsButton.addEventListener('click', () => this.savePromptSettings(true));
     }
 
-    /**
-     * 加载提示词设置
-     */
-    async loadPromptSettings() {
+    // 迁移旧格式的提示词设置到新格式
+    async migrateOldPromptSettings() {
         try {
-            const result = await chrome.storage.sync.get(['prompts']);
-            
-            if (result.prompts) {
-                // 先加载提示词文本，因为它不依赖模型选项
-                Object.keys(DEFAULT_PROMPTS).forEach(type => {
-                    const promptData = result.prompts[type] || DEFAULT_PROMPTS[type];
-                    if (this[`${type}Prompt`]) {
-                        const promptValue = (typeof promptData.prompt !== 'undefined') ? 
-                            promptData.prompt : 
-                            (typeof promptData === 'string' ? promptData : DEFAULT_PROMPTS[type].prompt);
-                        this[`${type}Prompt`].value = promptValue;
-                    }
-                });
-                
-                // 当确保DOM已渲染后，设置模型选择
-                // 使用requestAnimationFrame确保在下一帧渲染后执行
-                requestAnimationFrame(() => {
-                    Object.keys(DEFAULT_PROMPTS).forEach(type => {
-                        if (this.modelSelects[type]) {
-                            const promptData = result.prompts[type] || DEFAULT_PROMPTS[type];
-                            const modelValue = promptData.model || DEFAULT_PROMPTS[type].model;
-                            if (this.modelSelects[type].querySelector(`option[value="${modelValue}"]`)) {
-                                this.modelSelects[type].value = modelValue;
-                            }
-                        }
-                    });
-                });
-            } else {
-                this.resetPrompts();
+            // 检查是否存在旧格式的数据
+            const oldData = await new Promise(resolve => {
+                chrome.storage.sync.get(['prompts'], result => resolve(result.prompts));
+            });
+
+            if (!oldData) {
+                return; // 没有旧数据需要迁移
             }
 
-            // 初始化URL规则列表
-            if (this.urlRulesPrompt) {
-                try {
-                    // 尝试解析现有的规则，如果解析失败则使用默认空数组
-                    JSON.parse(this.urlRulesPrompt.value);
-                } catch (e) {
-                    this.urlRulesPrompt.value = '[]';
-                }
-                // 渲染规则列表
-                this.renderUrlRules();
-            }
+            console.log('开始迁移旧格式提示词设置...');
+
+            // 将旧数据按类型分别存储
+            const migrationPromises = Object.entries(oldData).map(([type, settings]) => {
+                return new Promise(resolve => {
+                    chrome.storage.sync.set({
+                        [`prompt_${type}`]: settings
+                    }, resolve);
+                });
+            });
+
+            // 等待所有迁移操作完成
+            await Promise.all(migrationPromises);
+
+            // 删除旧格式数据
+            await new Promise(resolve => {
+                chrome.storage.sync.remove(['prompts'], resolve);
+            });
+
+            console.log('提示词设置迁移完成');
         } catch (error) {
-            console.error('加载提示词设置失败:', error);
-            this.resetPrompts();
+            console.error('迁移提示词设置时出错:', error);
+        }
+    }
+
+    // 加载提示词设置
+    async loadPromptSettings() {
+        try {
+            // 首先执行迁移
+            await this.migrateOldPromptSettings();
+
+            // 获取所有提示词类型的设置
+            const types = Object.keys(DEFAULT_PROMPTS);
+            const promises = types.map(type => {
+                return new Promise(resolve => {
+                    chrome.storage.sync.get([`prompt_${type}`], result => {
+                        resolve([type, result[`prompt_${type}`]]);
+                    });
+                });
+            });
+
+            const results = await Promise.all(promises);
+
+            // 更新UI
+            results.forEach(([type, settings]) => {
+                if (!settings) {
+                    settings = DEFAULT_PROMPTS[type];
+                }
+
+                const promptElement = this[`${type}Prompt`];
+                if (promptElement) {
+                    promptElement.value = settings.prompt;
+                }
+
+                // 更新模型选择
+                const modelSelect = document.querySelector(`#${type}-model`);
+                if (modelSelect) {
+                    modelSelect.value = settings.model || 'follow_current';
+                }
+            });
+
+            // 重新渲染URL规则列表
+            this.renderUrlRules();
+        } catch (error) {
+            console.error('加载提示词设置时出错:', error);
         }
     }
 
@@ -436,7 +463,14 @@ class PromptSettings {
     async autoSavePromptSettings() {
         try {
             const prompts = this.collectCurrentPromptSettings();
-            await chrome.storage.sync.set({ prompts });
+            
+            // 分别存储每个提示词类型
+            const savePromises = Object.entries(prompts).map(([type, value]) => {
+                return chrome.storage.sync.set({ [`prompt_${type}`]: value });
+            });
+            
+            // 等待所有存储操作完成
+            await Promise.all(savePromises);
             
             // 触发提示词设置更新事件
             document.dispatchEvent(new CustomEvent('promptSettingsUpdated'));
@@ -462,7 +496,14 @@ class PromptSettings {
     async savePromptSettings(shouldClosePanel = true) {
         try {
             const prompts = this.collectCurrentPromptSettings();
-            await chrome.storage.sync.set({ prompts });
+            
+            // 分别存储每个提示词类型
+            const savePromises = Object.entries(prompts).map(([type, value]) => {
+                return chrome.storage.sync.set({ [`prompt_${type}`]: value });
+            });
+            
+            // 等待所有存储操作完成
+            await Promise.all(savePromises);
             
             // 触发提示词设置更新事件
             document.dispatchEvent(new CustomEvent('promptSettingsUpdated'));

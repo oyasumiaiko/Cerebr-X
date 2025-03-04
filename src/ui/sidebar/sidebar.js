@@ -390,7 +390,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 获取所有对话元数据
             const histories = await getAllConversationMetadata();
             // 按时间倒序排序
-            const sortedHistories = histories.sort((a, b) => b.startTime - a.startTime);
+            const sortedHistories = histories.sort((a, b) => b.endTime - a.endTime);
             // 找到最近的相同URL的对话
             const matchingConversation = sortedHistories.find(conv => conv.url === currentUrl);
             console.log('找到的匹配对话:', matchingConversation);
