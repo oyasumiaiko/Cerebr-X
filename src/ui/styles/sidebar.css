@@ -171,8 +171,8 @@ body {
 }
 
 .message:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    /* transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); */
 }
 
 .user-message {
@@ -1035,7 +1035,7 @@ input:checked + .slider:before {
     }
 
     .message:hover {
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        /* box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); */
     }
 }
 
