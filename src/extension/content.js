@@ -893,7 +893,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // PDF 内容缓存
 const pdfContentCache = new Map();
-const pdfDataCache = new Map();
 
 async function waitForContent() {
   return new Promise((resolve) => {
@@ -1118,13 +1117,6 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_PATH;
 
 async function downloadPDFData(url) {
   console.log('开始下载PDF:', url);
-  // 添加缓存检查逻辑
-  if (pdfDataCache.has(url)) {
-    console.log('从缓存中获取PDF数据:', url);
-    const cached = pdfDataCache.get(url);
-    return new Uint8Array(cached.buffer.slice(0));
-  }
-
   // 获取PDF文件的初始信息
   const initResponse = await chrome.runtime.sendMessage({
     action: 'downloadPDF',
@@ -1167,11 +1159,7 @@ async function downloadPDFData(url) {
     offset += chunk.length;
   }
 
-  // 将下载的PDF数据存入缓存的副本，并返回新的副本
-  const cachedCopy = new Uint8Array(completeData.buffer.slice(0));
-  pdfDataCache.set(url, cachedCopy);
-
-  return new Uint8Array(cachedCopy.buffer.slice(0));
+  return completeData;
 }
 
 async function parsePDFData(completeData) {
@@ -1202,12 +1190,16 @@ async function extractTextFromPDF(url) {
     const completeData = await downloadPDFData(url);
     console.log('PDF下载完成');
 
+    // 克隆 PDF 数据，避免后续调用因 ArrayBuffer 被转移而失败
+    const dataForText = new Uint8Array(completeData.buffer.slice(0));
+    const dataForChapters = new Uint8Array(completeData.buffer.slice(0));
+
     // 解析PDF文本
     sendPlaceholderUpdate('正在解析PDF文件...');
-    const fullText = await parsePDFData(completeData);
+    const fullText = await parsePDFData(dataForText);
 
     // 解析PDF章节
-    const chapters = await extractChaptersFromPDFData(completeData);
+    const chapters = await extractChaptersFromPDFData(dataForChapters);
 
     console.log('PDF文本提取完成，总文本长度:', fullText.length);
     sendPlaceholderUpdate('PDF处理完成', 2000);
