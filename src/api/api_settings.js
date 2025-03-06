@@ -478,26 +478,24 @@ export function createApiManager(options) {
   /**
    * 获取模型配置
    * @param {string} [promptType] - 提示词类型 
-   * @param {Object} prompts - 提示词设置
+   * @param {Object} promptsConfig - 提示词设置
    * @returns {Object} 选中的API配置
    */
-  function getModelConfig(promptType, prompts) {
+  function getModelConfig(promptType, promptsConfig) {
     // 检查特定提示词类型是否指定了特定模型
-    let targetConfig = null;
-    if (promptType && promptType !== 'none' && prompts?.[promptType]?.model) {
-      const preferredModel = prompts[promptType].model;
-      // 如果不是跟随当前设置，则查找对应的模型配置
-      if (preferredModel !== 'follow_current') {
-        targetConfig = apiConfigs.find(c => c.modelName === preferredModel);
-        // 如果找到了目标配置，直接返回
-        if (targetConfig) {
-          return targetConfig;
+    if (promptType) {
+      if (promptsConfig[promptType]) {
+        if (promptsConfig[promptType].model) {
+          const preferredModel = promptsConfig[promptType].model;
+          // 如果不是跟随当前设置，则查找对应的模型配置
+          const config = apiConfigs.find(c => c.modelName === preferredModel);
+          if (config) {
+            // 如果找到了目标配置，直接返回
+            return config;
+          }
         }
-        // 如果没找到目标配置，记录警告
-        console.warn(`找不到偏好模型 ${preferredModel} 的配置，将使用当前选中的配置`);
       }
     }
-
     // 如果没有特定模型配置或设置为跟随当前，使用当前选中的配置
     return apiConfigs[selectedConfigIndex];
   }

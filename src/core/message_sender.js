@@ -134,7 +134,6 @@ export function createMessageSender(options) {
    * @param {Object} [options] - 可选参数对象，用于重新生成消息时传递上下文
    * @param {Array<string>} [options.injectedSystemMessages] - 重新生成时保留的系统消息
    * @param {string} [options.specificPromptType] - 指定使用的提示词类型
-   * @param {Object} [options.specificApiConfig] - 指定使用的API配置
    * @param {string} [options.originalMessageText] - 原始消息文本，用于恢复输入框内容
    * @param {boolean} [options.regenerateMode] - 是否为重新生成模式
    * @param {string} [options.messageId] - 重新生成模式下的消息ID
@@ -148,7 +147,6 @@ export function createMessageSender(options) {
     const {
       injectedSystemMessages: existingInjectedSystemMessages = [],
       specificPromptType = null,
-      specificApiConfig = null,
       originalMessageText = null,
       regenerateMode = false,
       messageId = null
@@ -164,18 +162,14 @@ export function createMessageSender(options) {
     if (isEmptyMessage) return;
 
     // 获取当前提示词设置
-    const prompts = getPrompts();
+    const promptsConfig = getPrompts();
     
     // 如果只有图片没有文本，使用图片专用提示词
     const shouldUseImagePrompt = imageTags.length > 0 && messageText.trim() === '';
     if (shouldUseImagePrompt) {
-      messageText = prompts.image.prompt;
+      messageText = promptsConfig.image.prompt;
     }
-    const getPromptTypeFromContent = messageProcessor.getPromptTypeFromContent(messageText, prompts);
-
-    // 获取提示词类型 - 如果指定了类型则使用指定的类型
-    const currentPromptType = specificPromptType || getPromptTypeFromContent;
-
+    const currentPromptType = specificPromptType || messageProcessor.getPromptTypeFromContent(messageText, promptsConfig);
     // 提前创建 loadingMessage 配合finally使用
     let loadingMessage;
 
@@ -250,7 +244,7 @@ export function createMessageSender(options) {
 
       // 构建消息数组
       const messages = await buildMessages(
-        prompts,
+        promptsConfig,
         injectedSystemMessages,
         pageContent,
         imageContainsScreenshot,
@@ -261,8 +255,7 @@ export function createMessageSender(options) {
 
       // 获取API配置
       // 优先使用指定的配置，其次使用提示词类型对应的模型配置，最后使用当前选中的配置
-      const config = specificApiConfig || 
-                    apiManager.getModelConfig(currentPromptType, prompts);
+      const config = apiManager.getModelConfig(currentPromptType, promptsConfig);
 
       // 添加字数统计元素
       if (!regenerateMode) {

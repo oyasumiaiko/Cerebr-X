@@ -434,25 +434,25 @@ class PromptSettings {
 
             const results = await Promise.all(promises);
 
-            // 更新UI
+            // 保存并更新UI
+            this.savedPrompts = {};
             results.forEach(([type, settings]) => {
                 if (!settings) {
                     settings = DEFAULT_PROMPTS[type];
                 }
+                // 保存到内部变量
+                this.savedPrompts[type] = settings;
 
                 const promptElement = this[`${type}Prompt`];
                 if (promptElement) {
                     promptElement.value = settings.prompt;
                 }
 
-                // 更新模型选择
+                // 更新模型选择（仅用于UI展示）
                 if (this.modelSelects[type]) {
-                    // 使用requestAnimationFrame确保DOM已更新
-                    requestAnimationFrame(() => {
-                        if (this.modelSelects[type].querySelector(`option[value="${settings.model || 'follow_current'}"]`)) {
-                            this.modelSelects[type].value = settings.model || 'follow_current';
-                        }
-                    });
+                    if (this.modelSelects[type].querySelector(`option[value="${settings.model || 'follow_current'}"]`)) {
+                        this.modelSelects[type].value = settings.model || 'follow_current';
+                    }
                 }
             });
 
@@ -601,7 +601,7 @@ class PromptSettings {
 
             prompts[type] = {
                 prompt: promptValue,
-                model: this.modelSelects[type]?.value || DEFAULT_PROMPTS[type].model
+                model: this.savedPrompts?.[type]?.model
             };
         });
         return prompts;

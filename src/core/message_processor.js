@@ -310,7 +310,7 @@ export function createMessageProcessor(options) {
             </span>
         `;
 
-        if (showReference) {
+        if (document.getElementById('show-reference-switch').checked) {
             // 替换文本并添加引用标记
             markedText = markedText.replace(regex, `$&${placeholder}`);
             htmlElements.push({
