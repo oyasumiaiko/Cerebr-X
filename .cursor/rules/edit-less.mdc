@@ -1,7 +1,7 @@
 ---
 description: # 只做必要修改
 globs: *.*
-alwaysApply: false
+alwaysApply: true
 ---
 求你少改一点 只完成用户必要的需求就行了，不要增加复杂性，保持各个文件的内聚，不要增加耦合，函数尽量写成纯函数，谢谢！
 

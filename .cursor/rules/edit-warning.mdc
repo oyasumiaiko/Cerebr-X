@@ -1,5 +1,5 @@
 ---
-description: # 修bug时候注意
+description: 修bug时候注意
 globs: *.*
 alwaysApply: true
 ---
