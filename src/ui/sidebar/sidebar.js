@@ -379,7 +379,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (emptyStateLoadUrl) {
         emptyStateLoadUrl.addEventListener('click', async () => {
-            // 从pageInfo获取当前页面URL
+            // 从 pageInfo 获取当前页面 URL
             const currentUrl = window.cerebr.pageInfo?.url;
             
             if (!currentUrl) {
@@ -391,8 +391,81 @@ document.addEventListener('DOMContentLoaded', async () => {
             const histories = await getAllConversationMetadata();
             // 按时间倒序排序
             const sortedHistories = histories.sort((a, b) => b.endTime - a.endTime);
-            // 找到最近的相同URL的对话
-            const matchingConversation = sortedHistories.find(conv => conv.url === currentUrl);
+            
+            /**
+             * 根据当前 URL 生成候选的匹配 URL 列表：
+             * 1. 原始 URL（包含查询参数）
+             * 2. 去除查询参数后的 URL
+             * 3. 依次去除路径中的最后一个 segment
+             * 4. 当无更多有效路径时，加入仅使用域名的候选
+             *
+             * @param {string} urlString - 当前页面 URL 字符串
+             * @returns {string[]} 候选 URL 数组，顺序按匹配优先级排列
+             */
+            function generateCandidateUrls(urlString) {
+                const candidates = [];
+                try {
+                    const urlObj = new URL(urlString);
+                    // 候选1：原始 URL
+                    candidates.push(urlString);
+                    // 候选2：去除查询参数后的 URL
+                    const baseUrl = urlObj.origin + urlObj.pathname;
+                    if (baseUrl !== urlString) {
+                        candidates.push(baseUrl);
+                    }
+                    // 候选3：依次去除路径中的最后一个 segment
+                    const segments = urlObj.pathname.split('/').filter(Boolean);
+                    for (let i = segments.length - 1; i > 0; i--) {
+                        const candidate = urlObj.origin + "/" + segments.slice(0, i).join('/');
+                        if (!candidates.includes(candidate)) {
+                            candidates.push(candidate);
+                        }
+                    }
+                    // 最后加入仅使用域名的候选
+                    if (!candidates.includes(urlObj.origin)) {
+                        candidates.push(urlObj.origin);
+                    }
+                } catch (error) {
+                    console.error("generateCandidateUrls error: ", error);
+                }
+                return candidates;
+            }
+            
+            const currentHasParams = currentUrl.includes('?');
+            let matchingConversation = null;
+            if (currentHasParams) {
+                // 当前 URL 含参数，先严格查找完全一致的带参数对话
+                matchingConversation = sortedHistories.find(conv => conv.url === currentUrl);
+                if (!matchingConversation) {
+                    // 未找到完全一致的对话，再归一化比较（忽略参数）
+                    const normalizedCurrent = new URL(currentUrl).origin + new URL(currentUrl).pathname;
+                    matchingConversation = sortedHistories.find(conv => {
+                        try {
+                            const convUrlObj = new URL(conv.url);
+                            return (convUrlObj.origin + convUrlObj.pathname) === normalizedCurrent;
+                        } catch (error) {
+                            return false;
+                        }
+                    });
+                }
+            } else {
+                // 当前 URL 不含参数，使用候选 URL 逐步匹配
+                const candidateUrls = generateCandidateUrls(currentUrl);
+                console.log("候选 URL：", candidateUrls);
+                for (const candidate of candidateUrls) {
+                    matchingConversation = sortedHistories.find(conv => {
+                        try {
+                            const convUrlObj = new URL(conv.url);
+                            const normalizedConv = convUrlObj.origin + convUrlObj.pathname;
+                            return conv.url === candidate || normalizedConv === candidate;
+                        } catch (error) {
+                            return false;
+                        }
+                    });
+                    if (matchingConversation) break;
+                }
+            }
+            
             console.log('找到的匹配对话:', matchingConversation);
             
             if (matchingConversation) {
