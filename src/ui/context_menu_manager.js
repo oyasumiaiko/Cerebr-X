@@ -241,10 +241,14 @@ export function createContextMenuManager(options) {
   function setupEventListeners() {
     // 监听消息（用户或 AI）右键点击
     chatContainer.addEventListener('contextmenu', (e) => {
-      // 如果按住了Ctrl、Shift或Alt键，则显示默认菜单
-      if (e.ctrlKey || e.shiftKey || e.altKey) {
+      // 检查是否有文本被选中
+      const selectedText = window.getSelection().toString();
+      
+      // 如果有选中文本或按住了Ctrl、Shift或Alt键，则显示默认菜单
+      if (selectedText || e.ctrlKey || e.shiftKey || e.altKey) {
         return;
       }
+      
       // 允许用户和 AI 消息都触发右键菜单
       const messageElement = e.target.closest('.message');
       if (messageElement) {

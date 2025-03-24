@@ -585,6 +585,18 @@ class PromptSettings {
     }
 
     /**
+     * 替换占位符为实际值
+     * @param {string} text - 包含占位符的文本，如 {{datetime}}, {{date}}, {{time}}
+     * @returns {string} 替换后的文本
+     */
+    replacePlaceholders(text) {
+        const now = new Date();
+        return text.replace(/{{\s*datetime\s*}}/g, now.toLocaleString())
+                   .replace(/{{\s*date\s*}}/g, now.toLocaleDateString())
+                   .replace(/{{\s*time\s*}}/g, now.toLocaleTimeString());
+    }
+    
+    /**
      * 获取当前提示词，自动处理URL规则匹配
      * @returns {Object} 提示词设置对象
      */
@@ -614,7 +626,10 @@ class PromptSettings {
                     }
                 }
             }
-
+            
+            // 替换占位符（例如 {{datetime}}, {{date}}, {{time}}）
+            promptValue = this.replacePlaceholders(promptValue);
+            
             prompts[type] = {
                 prompt: promptValue,
                 model: this.savedPrompts?.[type]?.model || DEFAULT_PROMPTS[type].model
