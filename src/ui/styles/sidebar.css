@@ -2216,10 +2216,10 @@ body.hide-references .reference-number.superscript {
 /* Added: Glow effect when auto scrolling is enabled */
 @keyframes breathing {
     0%, 100% {
-        opacity: 0.5;
+        opacity: 0.2;
     }
     50% {
-        opacity: 0.8;
+        opacity: 0.5;
     }
 }
 
@@ -2230,7 +2230,7 @@ body.hide-references .reference-number.superscript {
     bottom: 52px;  /* 发光效果稍微向下延伸 */
     width: 100%;
     height: 50px;
-    background: linear-gradient(to top, rgba(0, 123, 255, 0.3) 0%, rgba(0, 123, 255, 0.15) 50%, rgba(0, 123, 255, 0) 100%);
+    background: linear-gradient(to top, var(--cerebr-icon-color) 0%, transparent 100%);
     pointer-events: none;
     transition: opacity 1s ease-out;
     animation: breathing 3s ease-in-out infinite;

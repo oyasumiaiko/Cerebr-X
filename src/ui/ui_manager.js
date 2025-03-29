@@ -228,10 +228,10 @@ export function createUIManager(options) {
       }
     }, { passive: true });
 
-    // 添加点击事件监听
-    chatContainer.addEventListener('click', () => {
-      // 聊天区域点击时让输入框失去焦点
-      messageInput.blur();
+    // 修改点击事件监听
+    chatContainer.addEventListener('click', (e) => {
+      // 点击时停止自动滚动
+      setShouldAutoScroll(false);
     });
 
     // 阻止聊天区域的图片默认行为

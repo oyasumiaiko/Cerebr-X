@@ -109,31 +109,38 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (settingsManager?.getSetting('autoScroll') === false) {
             return;
         }
+        
+        if (!messageSender.getShouldAutoScroll()) {
+            return;
+        }
 
-        if (messageSender.getShouldAutoScroll()) {
+        requestAnimationFrame(() => {
+            chatContainer.scrollTo({
+                top: chatContainer.scrollHeight,
+                behavior: 'auto'
+            });
+
             // 检查是否启用"滚动到顶部时停止"选项
             if (settingsManager?.getSetting('stopAtTop') === true) {
                 // 查找最新的AI消息元素
-                const aiMessages = chatContainer.querySelectorAll('.message.ai');
+                const aiMessages = chatContainer.querySelectorAll('.message.ai-message');
                 if (aiMessages.length > 0) {
                     const latestAiMessage = aiMessages[aiMessages.length - 1];
                     const rect = latestAiMessage.getBoundingClientRect();
+                    const containerRect = chatContainer.getBoundingClientRect();
+                    
                     // 如果消息顶部已经到达或超过容器顶部，则不再滚动
-                    if (rect.top <= chatContainer.getBoundingClientRect().top) {
-                        return;
+                    if (rect.top <= containerRect.top) {
+                        // 将消息顶部与窗口顶部对齐
+                        chatContainer.scrollTop = latestAiMessage.offsetTop;
+                        messageSender.setShouldAutoScroll(false);
                     }
                 }
             }
-            
-            requestAnimationFrame(() => {
-                chatContainer.scrollTo({
-                    top: chatContainer.scrollHeight,
-                    behavior: 'auto' // 取消平滑滚动，立即滚动到底部
-                });
-            });
-        }
+        });
     }
     
+    /**
     /**
      * 关闭互斥面板函数
      * 由于存在循环依赖，我们先定义函数，后续再绑定实现
