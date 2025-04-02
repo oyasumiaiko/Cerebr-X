@@ -115,28 +115,31 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         requestAnimationFrame(() => {
-            chatContainer.scrollTo({
-                top: chatContainer.scrollHeight,
-                behavior: 'auto'
-            });
+            const stopAtTop = settingsManager?.getSetting('stopAtTop') === true;
 
-            // 检查是否启用"滚动到顶部时停止"选项
-            if (settingsManager?.getSetting('stopAtTop') === true) {
-                // 查找最新的AI消息元素
-                const aiMessages = chatContainer.querySelectorAll('.message.ai-message');
-                if (aiMessages.length > 0) {
-                    const latestAiMessage = aiMessages[aiMessages.length - 1];
-                    const rect = latestAiMessage.getBoundingClientRect();
-                    const containerRect = chatContainer.getBoundingClientRect();
-                    
-                    // 如果消息顶部已经到达或超过容器顶部，则不再滚动
-                    if (rect.top <= containerRect.top) {
-                        // 将消息顶部与窗口顶部对齐
-                        chatContainer.scrollTop = latestAiMessage.offsetTop;
-                        messageSender.setShouldAutoScroll(false);
-                    }
+            let top = chatContainer.scrollHeight;
+            const aiMessages = chatContainer.querySelectorAll('.message.ai-message');
+            if (aiMessages.length > 0) {
+                const latestAiMessage = aiMessages[aiMessages.length - 1];
+                const rect = latestAiMessage.getBoundingClientRect();
+                const containerRect = chatContainer.getBoundingClientRect();
+                if (stopAtTop) {
+                    top = latestAiMessage.offsetTop - 8;
+                    messageSender.setShouldAutoScroll(false);
+                }
+                else {
+                    // 获取计算后的样式，忽略元素的margin-bottom
+                    const computedStyle = window.getComputedStyle(latestAiMessage);
+                    const marginBottom = parseInt(computedStyle.marginBottom, 10);
+                    top = latestAiMessage.offsetTop + rect.height - marginBottom;
                 }
             }
+
+            chatContainer.scrollTo({
+                top: top,
+                behavior: 'smooth'
+            });
+
         });
     }
     

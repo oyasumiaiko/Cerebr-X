@@ -2234,10 +2234,14 @@ body.hide-references .reference-number.superscript {
     pointer-events: none; 
     background: transparent; 
 
-    box-shadow: 0 0 4vh color-mix(in srgb, var(--cerebr-icon-color, #007AFF) 30%, transparent); 
+    box-shadow: 0 0 4vh color-mix(in srgb, var(--cerebr-icon-color, #007AFF) 50%, transparent); 
     animation: breathing 4s ease-in-out infinite;
     opacity: 0;
     transition: opacity 0.5s ease;
+}
+
+.message:nth-last-child(1) {
+    margin-bottom: calc(100vh - 48px - 30px - 2em);
 }
 
 #input-container.auto-scroll-glow::after {
