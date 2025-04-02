@@ -106,13 +106,17 @@ export function createMessageSender(options) {
     }
   }
 
+  function GetInputContainer() {
+    return document.getElementById('input-container');
+  }
+
   /**
    * 进入临时模式，不获取网页内容
    * @public
    */
   function enterTemporaryMode() {
     isTemporaryMode = true;
-    messageInput.classList.add('temporary-mode');
+    GetInputContainer().classList.add('temporary-mode');
     document.body.classList.add('temporary-mode');
     messageInput.setAttribute('placeholder', '纯对话模式 - 不获取网页内容');
   }
@@ -123,7 +127,7 @@ export function createMessageSender(options) {
    */
   function exitTemporaryMode() {
     isTemporaryMode = false;
-    messageInput.classList.remove('temporary-mode');
+    GetInputContainer().classList.remove('temporary-mode');
     document.body.classList.remove('temporary-mode');
     messageInput.setAttribute('placeholder', '输入消息...');
   }

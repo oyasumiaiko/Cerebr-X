@@ -1176,6 +1176,7 @@ input:checked + .slider:before {
     font-size: calc(var(--cerebr-font-size) - 4px);
     color: var(--cerebr-text-color);
     text-align: right;
+    display: none;
 }
 
 .content-length-footer:not(:empty) {
@@ -1248,9 +1249,9 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 }
 
 /* 临时模式样式 */
-#message-input.temporary-mode {
-    background-color: color-mix(in srgb, var(--cerebr-input-bg) 70%, transparent);
-    transition: background-color 0.3s ease;
+#input-container.temporary-mode {
+    /* box-shadow: 0 0 20px 0 color-mix(in srgb, var(--cerebr-icon-color) 20%, transparent); */
+    transition:  0.3s ease;
 }
 
 #message-input.temporary-mode:empty::before {
@@ -1268,16 +1269,22 @@ body::after {
     bottom: 0;
     background: rgba(255, 255, 255, 0);
     pointer-events: none;
-    transition: background-color 0.3s ease;
-    z-index: 9999;
+    transition: box-shadow 0.3s ease;
+    z-index: -1;
 }
 
 body.temporary-mode::after {
-    background: rgba(255, 255, 255, 0.2);
+    /* background: rgba(255, 255, 255, 0.2); */
+    /* box-shadow: 0 0 50px 0 rgba(255, 255, 255, 0.1) inset; */
+    /* background: linear-gradient(to bottom, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.0)); */
+    box-shadow: 0 0 3vh color-mix(in srgb, var(--cerebr-icon-color) 10%, transparent) inset;
+    transition: box-shadow 0.3s ease;
 }
 
 :root.dark-theme body.temporary-mode::after {
-    background: rgba(255, 255, 255, 0.05);
+    /* background: rgba(255, 255, 255, 0.05); */
+    /* box-shadow: 0 0 50px 0 rgba(255, 255, 255, 0.025) inset; */
+    /* background: linear-gradient(to bottom, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.0)); */
 }
 
 
