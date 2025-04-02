@@ -1248,12 +1248,6 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     transform: scale(0.9);
 }
 
-/* 临时模式样式 */
-#input-container.temporary-mode {
-    /* box-shadow: 0 0 20px 0 color-mix(in srgb, var(--cerebr-icon-color) 20%, transparent); */
-    transition:  0.3s ease;
-}
-
 #message-input.temporary-mode:empty::before {
     content: attr(placeholder);
     opacity: 0.5;
@@ -1270,15 +1264,15 @@ body::after {
     background: rgba(255, 255, 255, 0);
     pointer-events: none;
     transition: box-shadow 0.3s ease;
-    z-index: -1;
+    /* z-index: -1; */
 }
 
 body.temporary-mode::after {
     /* background: rgba(255, 255, 255, 0.2); */
     /* box-shadow: 0 0 50px 0 rgba(255, 255, 255, 0.1) inset; */
     /* background: linear-gradient(to bottom, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.0)); */
-    box-shadow: 0 0 3vh color-mix(in srgb, var(--cerebr-icon-color) 10%, transparent) inset;
-    transition: box-shadow 0.3s ease;
+    /* box-shadow: 0 0 2vh -0.5vh color-mix(in srgb, var(--cerebr-icon-color) 100%, transparent) inset; */
+    /* transition: box-shadow 0.3s ease; */
 }
 
 :root.dark-theme body.temporary-mode::after {
@@ -2226,7 +2220,7 @@ body.hide-references .reference-number.superscript {
     filter: opacity(100%);
     }
     50% {
-    filter: opacity(40%);
+    filter: opacity(60%);
     }
 }
 #input-container::after {

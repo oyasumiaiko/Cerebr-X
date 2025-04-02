@@ -118,7 +118,7 @@ export function createMessageSender(options) {
     isTemporaryMode = true;
     GetInputContainer().classList.add('temporary-mode');
     document.body.classList.add('temporary-mode');
-    messageInput.setAttribute('placeholder', '纯对话模式 - 不获取网页内容');
+    messageInput.setAttribute('placeholder', '');
   }
 
   /**
