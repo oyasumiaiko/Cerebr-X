@@ -2223,24 +2223,32 @@ body.hide-references .reference-number.superscript {
 /* Added: Glow effect when auto scrolling is enabled */
 @keyframes breathing {
     0%, 100% {
-        opacity: 0.2;
+    filter: opacity(100%);
     }
     50% {
-        opacity: 0.5;
+    filter: opacity(40%);
     }
 }
-
-#chat-container.auto-scroll-glow::after {
-    content: "";
-    position: fixed;
+#input-container::after {
+    content: ''; /* 伪元素必须有 content 属性 */
+    position: absolute;
+    /* 让伪元素完全覆盖主元素 */
+    top: 0;
     left: 0;
-    bottom: 52px;  /* 发光效果稍微向下延伸 */
-    width: 100%;
-    height: 50px;
-    background: linear-gradient(to top, var(--cerebr-icon-color) 0%, transparent 100%);
-    pointer-events: none;
-    transition: opacity 1s ease-out;
-    animation: breathing 3s ease-in-out infinite;
+    right: 0;
+    bottom: 0;
+    pointer-events: none; 
+    background: transparent; 
+
+    box-shadow: 0 0 4vh color-mix(in srgb, var(--cerebr-icon-color, #007AFF) 30%, transparent); 
+    animation: breathing 4s ease-in-out infinite;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+}
+
+#input-container.auto-scroll-glow::after {
+    opacity: 1;
+    transition: opacity 0.5s ease;
 }
 
 .api-card .custom-params {

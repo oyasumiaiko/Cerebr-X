@@ -193,7 +193,7 @@ export function createMessageSender(options) {
       const signal = currentController.signal;
 
       // 当开始生成时，给聊天容器添加 glow 效果
-      chatContainer.classList.add('auto-scroll-glow');
+      GetInputContainer().classList.add('auto-scroll-glow');
 
       // 如果已有注入的系统消息，则使用它；否则从消息文本中提取
       const injectedSystemMessages = existingInjectedSystemMessages.length > 0 ? 
@@ -330,7 +330,7 @@ export function createMessageSender(options) {
       isProcessingMessage = false;
       shouldAutoScroll = false;
       // 当生成结束时，移除 glow 效果
-      chatContainer.classList.remove('auto-scroll-glow');
+      GetInputContainer().classList.remove('auto-scroll-glow');
       // 当生成结束时，移除 loading 效果
       const lastMessage = chatContainer.querySelector('.ai-message:last-child');
       if (lastMessage) {
