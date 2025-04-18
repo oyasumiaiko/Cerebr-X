@@ -364,7 +364,7 @@ export function createChatHistoryUI(options) {
         const scrollTop = latestAiMessage.offsetTop + rect.height - marginBottom;
         chatContainer.scrollTo({
           top: scrollTop,
-          behavior: 'smooth'
+          behavior: 'instant'
         });
       }
     });
