@@ -352,6 +352,22 @@ export function createChatHistoryUI(options) {
     if (window.cerebr && window.cerebr.messageSender) {
       window.cerebr.messageSender.setCurrentConversationId(currentConversationId);
     }
+
+    // 滚动到底部
+    requestAnimationFrame(() => {
+      const aiMessages = chatContainer.querySelectorAll('.message.ai-message');
+      if (aiMessages.length > 0) {
+        const latestAiMessage = aiMessages[aiMessages.length - 1];
+        const rect = latestAiMessage.getBoundingClientRect();
+        const computedStyle = window.getComputedStyle(latestAiMessage);
+        const marginBottom = parseInt(computedStyle.marginBottom, 10);
+        const scrollTop = latestAiMessage.offsetTop + rect.height - marginBottom;
+        chatContainer.scrollTo({
+          top: scrollTop,
+          behavior: 'smooth'
+        });
+      }
+    });
   }
 
   /**
