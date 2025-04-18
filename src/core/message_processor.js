@@ -613,31 +613,8 @@ export function createMessageProcessor(options) {
    */
   function foldMessageContent(text) {
     // 尝试从 Chrome 存储中获取折叠设置
-    let regexPattern = /^([\s\S]*?)(?=\n# )/; // 默认正则
+    let regexPattern = /^([\s\S]*?)<\/search>/; // 默认正则
     let summary = '搜索过程'; // 默认摘要文本
-    
-    // 如果存在全局设置，则使用自定义设置
-    if (window.cerebr?.settings?.prompts) {
-      try {
-        // 从设置中获取正则表达式
-        if (window.cerebr.settings.prompts.foldPattern) {
-          const patternStr = window.cerebr.settings.prompts.foldPattern.prompt;
-          if (patternStr) {
-            regexPattern = new RegExp(patternStr);
-          }
-        }
-        
-        // 从设置中获取摘要文本
-        if (window.cerebr.settings.prompts.foldSummary) {
-          const summaryText = window.cerebr.settings.prompts.foldSummary.prompt;
-          if (summaryText) {
-            summary = summaryText;
-          }
-        }
-      } catch (error) {
-        console.error('解析折叠设置时出错:', error);
-      }
-    }
     
     // 应用正则表达式
     const match = text.match(regexPattern);

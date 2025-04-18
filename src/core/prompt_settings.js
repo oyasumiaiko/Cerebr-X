@@ -127,15 +127,6 @@ const DEFAULT_PROMPTS = {
 请用清晰的结构和通俗的语言进行解释，确保内容准确、全面且易于理解。`,
         model: 'follow_current'
     },
-    // 添加消息折叠相关设置
-    foldPattern: {
-        prompt: `^([\\s\\S]*?)(?=\\n# )`,
-        model: 'follow_current'
-    },
-    foldSummary: {
-        prompt: `搜索过程`,
-        model: 'follow_current'
-    },
     urlRules: {
         prompt: '[]',  // 存储为JSON字符串，格式为[{pattern: string, type: 'summary'|'system', prompt: string}]
         model: 'follow_current'
@@ -158,9 +149,6 @@ class PromptSettings {
         this.imagePrompt = document.getElementById('image-prompt');
         this.screenshotPrompt = document.getElementById('screenshot-prompt');
         this.extractPrompt = document.getElementById('extract-prompt');
-        // 添加消息折叠相关元素
-        this.foldPatternPrompt = document.getElementById('fold-pattern-prompt');
-        this.foldSummaryPrompt = document.getElementById('fold-summary-prompt');
         this.urlRulesPrompt = document.getElementById('url-rules-prompt');
 
         // 模型选择下拉框
@@ -185,7 +173,7 @@ class PromptSettings {
 
     // 初始化模型选择下拉框
     initModelSelects() {
-        const promptTypes = ['selection', 'query', 'pdf', 'summary', 'image', 'foldPattern', 'foldSummary', 'urlRules']; 
+        const promptTypes = ['selection', 'query', 'pdf', 'summary', 'image', 'urlRules']; 
 
         // 获取所有可用的模型
         const getAvailableModels = () => {
@@ -360,8 +348,6 @@ class PromptSettings {
             'selection': '联网模型划词提示词',
             'pdf': 'PDF快速总结提示词',
             'image': '图片默认提示词',
-            'foldPattern': '消息折叠正则表达式',
-            'foldSummary': '折叠消息摘要文本',
             'urlRules': 'URL规则'
         };
         return nameMap[promptType] || promptType;
