@@ -260,9 +260,11 @@ export function createMessageSender(options) {
         messageId
       );
 
+      const messagesCount = messages.length;
+
       // 获取API配置
       // 优先使用指定的配置，其次使用提示词类型对应的模型配置，最后使用当前选中的配置
-      const config = apiManager.getModelConfig(currentPromptType, promptsConfig);
+      const config = apiManager.getModelConfig(currentPromptType, promptsConfig, messagesCount);
 
       // 添加字数统计元素
       if (!regenerateMode) {

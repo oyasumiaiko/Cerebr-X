@@ -627,7 +627,7 @@ export function createMessageProcessor(options) {
     
     // 将折叠部分包裹在 <blockquote> 中，以实现 Markdown 引用效果
     const quotedFoldedPart = `<blockquote>${foldedPart}</blockquote>`;
-    return `<details class="folded-message"><summary>${summary}</summary><div>\n${quotedFoldedPart}</div></details>\n${remainingPart}`;
+    return `<details class="folded-message"><summary>${summary}</summary><div>\n${quotedFoldedPart}</div></details>\n\n${remainingPart}`;
   }
 
   /**

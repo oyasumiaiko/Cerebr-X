@@ -627,21 +627,48 @@ export function createApiManager(options) {
    * 获取模型配置
    * @param {string} [promptType] - 提示词类型
    * @param {Object} promptsConfig - 提示词设置
+   * @param {number} [messagesCount] - 当前对话的消息数量 (可选)
    * @returns {Object} 选中的API配置
    */
-  function getModelConfig(promptType, promptsConfig) {
-    // 检查特定提示词类型是否指定了特定模型
+  function getModelConfig(promptType, promptsConfig, messagesCount) {
+    const SHORT_CONVO_DISPLAY_NAME = "[S]"; // 用于短对话的配置标识
+    const MEDIUM_CONVO_DISPLAY_NAME = "[M]"; // 用于中等长度对话的配置标识
+
+    // 2. 检查特定提示词类型是否指定了特定模型 (原有逻辑)
     if (promptType && promptsConfig && promptsConfig[promptType]?.model) {
       const preferredModel = promptsConfig[promptType].model;
       // 查找对应的模型配置 (优先按 modelName 和 baseUrl 匹配)
       const config = apiConfigs.find(c => c.modelName === preferredModel && c.baseUrl); // 确保 baseUrl 存在
       if (config) {
-          return config; // 返回找到的特定配置
+        console.log(`根据 promptType "${promptType}" 使用配置: ${config.displayName || config.modelName}`);
+        return config; // 返回找到的特定配置
       }
       // 如果仅按 modelName 找不到，可以考虑其他逻辑或回退
+      console.log(`未找到 promptType "${promptType}" 指定的模型配置 "${preferredModel}"，将使用默认选中配置。`);
     }
-    // 如果没有特定模型配置或找不到，使用当前选中的配置
-    return apiConfigs[selectedConfigIndex] || apiConfigs[0]; // 保证总有返回值
+    
+    // 1. 检查对话长度并尝试查找特定配置
+    if (messagesCount !== undefined) {
+      if (messagesCount < 10) {
+        const shortConvoConfig = apiConfigs.find(c => c.displayName?.includes(SHORT_CONVO_DISPLAY_NAME));
+        if (shortConvoConfig) {
+          console.log(`使用短对话配置: ${shortConvoConfig.displayName}`);
+          return shortConvoConfig;
+        }
+        console.log(`未找到displayName包含"${SHORT_CONVO_DISPLAY_NAME}" 的配置，将继续默认逻辑。`);
+      } else if (messagesCount < 300) {
+        const mediumConvoConfig = apiConfigs.find(c => c.displayName?.includes(MEDIUM_CONVO_DISPLAY_NAME));
+        if (mediumConvoConfig) {
+          console.log(`使用中等长度对话配置: ${mediumConvoConfig.displayName}`);
+          return mediumConvoConfig;
+        }
+        console.log(`未找到displayName包含"${MEDIUM_CONVO_DISPLAY_NAME}" 的配置，将继续默认逻辑。`);
+      }
+    }
+    // 3. 如果没有特定模型配置或找不到，使用当前选中的配置 (原有逻辑)
+    const selectedConfig = apiConfigs[selectedConfigIndex] || apiConfigs[0]; // 保证总有返回值
+    console.log(`使用当前选中配置: ${selectedConfig?.displayName || selectedConfig?.modelName}`);
+    return selectedConfig;
   }
 
   /**
