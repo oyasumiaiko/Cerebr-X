@@ -338,7 +338,6 @@ export function createMessageProcessor(options) {
         webSearchQueries
     };
   }
-
   /**
    * 渲染来源列表
    * @param {HTMLElement} messageElement - 消息元素
@@ -349,7 +348,21 @@ export function createMessageProcessor(options) {
     // 创建并添加引用来源列表
     const sourcesList = document.createElement('div');
     sourcesList.className = 'sources-list';
-    sourcesList.innerHTML = '<h4>参考来源：</h4>';
+
+    // 创建可折叠的标题
+    const titleContainer = document.createElement('div');
+    titleContainer.className = 'sources-title-container';
+    titleContainer.innerHTML = `
+      <h4 class="sources-title">
+        <span class="expand-icon">▶</span> 
+        参考来源 (${processedResult.sources.length})
+      </h4>
+    `;
+
+    const sourcesContent = document.createElement('div');
+    sourcesContent.className = 'sources-content';
+    sourcesContent.style.display = 'none'; // 默认隐藏
+
     const ul = document.createElement('ul');
 
     // 计算每个来源的平均置信度
@@ -446,7 +459,19 @@ export function createMessageProcessor(options) {
       ul.appendChild(li);
     });
 
-    sourcesList.appendChild(ul);
+    // 添加点击事件处理展开/收起
+    titleContainer.addEventListener('click', () => {
+      const expandIcon = titleContainer.querySelector('.expand-icon');
+      const isExpanded = sourcesContent.style.display !== 'none';
+      
+      expandIcon.textContent = isExpanded ? '▶' : '▼';
+      sourcesContent.style.display = isExpanded ? 'none' : 'block';
+    });
+
+    sourcesList.appendChild(titleContainer);
+    sourcesList.appendChild(sourcesContent);
+    sourcesContent.appendChild(ul);
+
     messageElement.appendChild(sourcesList);
 
     // 添加Web搜索查询部分(如果存在)
