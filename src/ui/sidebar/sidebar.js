@@ -223,6 +223,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 创建聊天历史UI实例
     const chatHistoryUI = createChatHistoryUI({
+        chatInputElement: messageInput,
         chatContainer: chatContainer,
         appendMessage: messageProcessor.appendMessage,
         chatHistory: chatHistory,

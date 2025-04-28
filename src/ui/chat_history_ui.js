@@ -17,6 +17,7 @@ import {
  * 创建聊天历史UI管理器
  * @param {Object} options - 配置选项
  * @param {HTMLElement} options.chatContainer - 聊天容器元素
+ * @param {HTMLElement} options.chatInputElement - 主聊天输入框元素
  * @param {Function} options.appendMessage - 添加消息的函数
  * @param {Object} options.chatHistory - 聊天历史管理器实例
  * @param {Function} options.clearHistory - 清空聊天历史的函数
@@ -28,6 +29,7 @@ import {
 export function createChatHistoryUI(options) {
   const {
     chatContainer,
+    chatInputElement,
     appendMessage,
     chatHistory,
     clearHistory,
@@ -462,6 +464,8 @@ export function createChatHistoryUI(options) {
       panel.addEventListener('transitionend', function handler(e) {
         if (e.propertyName === 'opacity' && !panel.classList.contains('visible')) {
           panel.style.display = 'none';
+          // 尝试将焦点设置回主输入框
+          chatInputElement?.focus();
           panel.removeEventListener('transitionend', handler);
         }
       });
@@ -855,13 +859,9 @@ export function createChatHistoryUI(options) {
         listContainer.appendChild(emptyMsg);
     } else if (sourceHistories.length > 0) {
         // --- 修改: 调用新的增量渲染函数 --- 
-        renderListIncrementally(pinnedHistories, unpinnedHistories, filterText, listContainer, pinnedIds);
+        renderListIncrementally(pinnedHistories, unpinnedHistories, filterText, listContainer, pinnedIds, newScrollPos);
     } 
     // else: 筛选后无结果的消息已在前面处理 (例如数量筛选或文本筛选无结果)
-
-    // --- 修改: 滚动位置恢复移到 renderListIncrementally 内部或之后处理 ---
-    // 恢复滚动位置
-    // listContainer.scrollTop = newScrollPos;
   }
   
   /**
@@ -871,9 +871,11 @@ export function createChatHistoryUI(options) {
    * @param {string} filterText - 过滤文本 (仅用于文本高亮)
    * @param {HTMLElement} listContainer - 列表容器元素
    * @param {string[]} pinnedIds - 当前置顶的ID列表
+   * @param {number} [scrollTopToRestore=0] - 需要恢复的滚动位置
    */
-  async function renderListIncrementally(pinnedHistories, allTimeSortedHistories, filterText, listContainer, pinnedIds) {
+  async function renderListIncrementally(pinnedHistories, allTimeSortedHistories, filterText, listContainer, pinnedIds, scrollTopToRestore = 0) {
     listContainer.innerHTML = ''; // 清空容器
+    const panel = listContainer.closest('#chat-history-panel'); // 获取父面板
     const BATCH_SIZE = 100; // 每次渲染的批次大小
     let renderedCount = 0;
     let currentGroupLabel = null;
@@ -934,7 +936,7 @@ export function createChatHistoryUI(options) {
     }
     
     // 处理完全没有记录的情况（包括筛选后没有）
-    if (renderedCount === 0) {
+    if (renderedCount === 0 && panel) { // 确保 panel 存在
        const filterInputValue = panel.querySelector('input[type="text"]')?.value || '';
        const countFilterMatch = filterInputValue.trim().match(/^(>|>=|<|<=|=|==)\s*(\d+)$/);
        const isTextFilter = filterInputValue && !countFilterMatch;
@@ -952,9 +954,8 @@ export function createChatHistoryUI(options) {
        listContainer.appendChild(emptyMsg);
     }
     
-    // 确保滚动位置在渲染完成后恢复（如果适用）
-    // 注意: 此处的 newScrollPos 需要从 loadConversationHistories 传递过来或重新计算
-    // listContainer.scrollTop = newScrollPos; 
+    // 确保滚动位置在渲染完成后恢复
+    listContainer.scrollTop = scrollTopToRestore; 
   }
 
   /**
@@ -1183,6 +1184,8 @@ export function createChatHistoryUI(options) {
    */
   async function showChatHistoryPanel() {
     let panel = document.getElementById('chat-history-panel');
+    let filterInput; // 在外部声明 filterInput 以便在函数末尾访问
+
     if (!panel) {
       panel = document.createElement('div');
       panel.id = 'chat-history-panel';
@@ -1254,15 +1257,17 @@ export function createChatHistoryUI(options) {
       // 域名筛选输入框
       const filterContainer = document.createElement('div');
       filterContainer.className = 'filter-container';
-      const filterInput = document.createElement('input');
+      filterInput = document.createElement('input');
       filterInput.type = 'text';
-      filterInput.placeholder = '筛选文本 或 >10, <5, =20...';
-      let debounceTimer;
-      filterInput.addEventListener('input', () => {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
+      filterInput.placeholder = '筛选文本 或 >10, <5, =20... (按 Enter 搜索)';
+      
+      // --- 修改开始：监听 keydown 事件 ---
+      filterInput.addEventListener('keydown', (e) => {
+        // 检查是否按下了 Enter 键
+        if (e.key === 'Enter') {
+          e.preventDefault(); // 阻止默认的回车行为（如表单提交）
           loadConversationHistories(panel, filterInput.value);
-        }, 300);
+        }
       });
       filterContainer.appendChild(filterInput);
       
@@ -1273,7 +1278,10 @@ export function createChatHistoryUI(options) {
       clearButton.style.marginLeft = '5px';
       clearButton.addEventListener('click', () => {
         filterInput.value = '';
-        loadConversationHistories(panel, '');
+        // 清除后也立即加载结果
+        loadConversationHistories(panel, ''); 
+        // 清除后将焦点设置回输入框
+        filterInput.focus(); 
       });
       filterContainer.appendChild(clearButton);
       
@@ -1307,12 +1315,13 @@ export function createChatHistoryUI(options) {
           const targetContent = tabContents.querySelector(`.history-tab-content[data-tab="${tabName}"]`);
           targetContent.classList.add('active');
           
-          // -- 修改开始: 仅在切换到 'stats' 标签页时加载/更新统计信息 --
-          if (tabName === 'stats') {
-            // 检查是否已渲染
+          if (tabName === 'history') {
+             // 切换到历史记录时，聚焦到筛选框
+             requestAnimationFrame(() => filterInput?.focus());
+          } else if (tabName === 'stats') {
+            // 仅在切换到 'stats' 标签页时加载/更新统计信息
             const existingStatsPanel = targetContent.querySelector('.db-stats-panel');
             if (!existingStatsPanel) {
-              // 首次加载
               const loadingIndicator = document.createElement('div');
               loadingIndicator.textContent = '正在加载统计数据...';
               targetContent.appendChild(loadingIndicator);
@@ -1327,7 +1336,6 @@ export function createChatHistoryUI(options) {
                 targetContent.textContent = '加载统计数据失败';
               });
             } else {
-              // 如果已存在，则刷新数据 (可选，但保持与刷新按钮行为一致)
               getDbStatsWithCache(true).then(updatedStats => {
                 const newStatsPanel = renderStatsPanel(updatedStats);
                 existingStatsPanel.replaceWith(newStatsPanel);
@@ -1336,36 +1344,32 @@ export function createChatHistoryUI(options) {
               });
             }
           }
-          // -- 修改结束 --
         }
       });
       
       document.body.appendChild(panel);
     } else {
-      // -- 修改开始: 面板已存在时，也不再主动更新统计数据 --
-      // // 如果面板已存在，更新统计数据
-      // const statsContent = panel.querySelector('.history-tab-content[data-tab="stats"]');
-      // if (statsContent) {
-      //   const statsData = await getDbStatsWithCache();
-      //   const statsPanel = renderStatsPanel(statsData);
-        
-      //   const oldStatsPanel = statsContent.querySelector('.db-stats-panel');
-      //   if (oldStatsPanel) {
-      //     oldStatsPanel.replaceWith(statsPanel);
-      //   } else {
-      //     statsContent.appendChild(statsPanel);
-      //   }
-      // }
-      // -- 修改结束 --
+      // 如果面板已存在，获取 filterInput 引用
+      filterInput = panel.querySelector('.filter-container input[type="text"]');
     }
     
-    // 使用已有的筛选值，而不是默认空字符串
-    const filterInput = panel.querySelector('.filter-container input[type="text"]');
+    // 使用已有的筛选值加载历史记录
     const currentFilter = filterInput ? filterInput.value : '';
     loadConversationHistories(panel, currentFilter);
     panel.style.display = 'flex';
     void panel.offsetWidth;  
     panel.classList.add('visible');
+    
+    // --- 修改开始：打开面板后聚焦到 filterInput ---
+    // 确保在 'history' 标签页激活时聚焦
+    const activeTab = panel.querySelector('.history-tab.active');
+    if (activeTab && activeTab.dataset.tab === 'history') {
+      requestAnimationFrame(() => {
+        filterInput?.focus();
+        filterInput?.select(); // 可选：选中输入框内容方便修改
+      });
+    }
+    // --- 修改结束 ---
   }
 
   /**
@@ -1478,16 +1482,18 @@ export function createChatHistoryUI(options) {
   // 添加URL处理函数
   function getDisplayUrl(url) {
     try {
+      if (!url) return '未知来源'; // 处理 null 或 undefined URL
       if (url.startsWith('file:///')) {
         // 解码URL并获取文件名
         const decodedUrl = decodeURIComponent(url);
-        return decodedUrl.split('/').pop();     
+        return decodedUrl.split(/[\\/]/).pop() || '本地文件'; // 兼容 Windows 和 Unix 路径     
       }
       // 非file协议，返回域名
       const urlObj = new URL(url);
-      return urlObj.hostname;
+      return urlObj.hostname || url; // 如果 hostname 为空，则返回原始 URL
     } catch (error) {
-      return url || '未知';
+      console.warn('解析 URL 失败:', url, error); // 使用 warn 级别，因为它不一定是严重错误
+      return url || '无效URL'; // 返回原始 URL 或提示
     }
   }
 
@@ -1640,8 +1646,8 @@ export function createChatHistoryUI(options) {
   }
 
   /**
-   * 显示会话列表
-   * @param {Object} conv - 会话对象
+   * 渲染单个会话列表项
+   * @param {Object} conv - 会话对象（可以是元数据或完整对象）
    * @param {string} filterText - 过滤文本 (仅用于文本高亮)
    * @param {HTMLElement} listContainer - 列表容器元素
    * @param {string[]} pinnedIds - 当前置顶的ID列表
@@ -1652,17 +1658,27 @@ export function createChatHistoryUI(options) {
     item.className = 'chat-history-item';
     // 保存会话ID作为属性，便于后续加载
     item.setAttribute('data-id', conv.id);
+    // 添加置顶状态类
+    if (pinnedIds.includes(conv.id)) {
+      item.classList.add('pinned');
+    }
 
     const summaryDiv = document.createElement('div');
     summaryDiv.className = 'summary';
-    let displaySummary = conv.summary || '';
+    let displaySummary = conv.summary || '无摘要'; // 提供默认值
     // 只有在提供了 filterText 并且是文本过滤时才高亮摘要
-    if (filterText && filterText.trim() !== "") {
-      const escapedFilterForSummary = filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(`(${escapedFilterForSummary})`, 'gi');
-      displaySummary = displaySummary.replace(regex, '<mark>$1</mark>');
+    const isTextFilter = filterText && !filterText.trim().match(/^(>|>=|<|<=|=|==)\s*(\d+)$/);
+    if (isTextFilter && displaySummary) {
+      try {
+        const escapedFilterForSummary = filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(${escapedFilterForSummary})`, 'gi');
+        displaySummary = displaySummary.replace(regex, '<mark>$1</mark>');
+      } catch (e) {
+        console.error("高亮摘要时发生错误:", e); 
+        // 保持原始摘要不变
+      }
     }
-    summaryDiv.innerHTML = displaySummary;
+    summaryDiv.innerHTML = displaySummary; // 使用 innerHTML 以便渲染 <mark>
 
     const infoDiv = document.createElement('div');
     infoDiv.className = 'info';
@@ -1686,15 +1702,22 @@ export function createChatHistoryUI(options) {
     item.appendChild(summaryDiv);
     item.appendChild(infoDiv);
 
-    // 只有在提供了 filterText 并且是文本过滤时才显示和高亮 snippet
-    if (filterText && filterText.trim() !== "" && conv.messages && Array.isArray(conv.messages)) {
+    // --- 修改开始：确保仅在文本过滤时才处理 snippet ---
+    if (isTextFilter && conv.messages && Array.isArray(conv.messages)) {
       let snippets = [];
       let totalMatches = 0;
       // 对 filterText 进行转义，避免正则特殊字符问题
       const escapedFilter = filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const lowerFilter = filterText.toLowerCase();
-      // 预先构造用于高亮的正则对象
-      const highlightRegex = new RegExp(escapedFilter, 'gi');
+      
+      // 预先构造用于高亮的正则对象，处理可能的正则错误
+      let highlightRegex;
+      try {
+        highlightRegex = new RegExp(escapedFilter, 'gi');
+      } catch (e) {
+        console.error("创建高亮正则表达式失败:", e);
+        highlightRegex = null; // 正则无效则不进行高亮
+      }
 
       for (const msg of conv.messages) {
         const plainText = extractMessagePlainText(msg);
@@ -1703,6 +1726,7 @@ export function createChatHistoryUI(options) {
           const contentLower = content.toLowerCase();
           // 若当前消息中未包含关键字，则跳过
           if (contentLower.indexOf(lowerFilter) === -1) continue;
+          
           let startIndex = 0;
           while (true) {
             const index = contentLower.indexOf(lowerFilter, startIndex);
@@ -1712,11 +1736,18 @@ export function createChatHistoryUI(options) {
               const snippetStart = Math.max(0, index - 30);
               const snippetEnd = Math.min(content.length, index + filterText.length + 30);
               let snippet = content.substring(snippetStart, snippetEnd);
-              // 高亮 snippet 中所有匹配关键字，复用 highlightRegex
-              snippet = snippet.replace(highlightRegex, '<mark>$&</mark>');
-              snippets.push(snippet);
+              
+              // 高亮 snippet 中所有匹配关键字
+              if (highlightRegex) {
+                 snippet = snippet.replace(highlightRegex, '<mark>$&</mark>');
+              }
+              
+              // 使用 textContent 防止 XSS
+              const snippetSpan = document.createElement('span');
+              snippetSpan.innerHTML = `…${snippet}…`; // 渲染高亮
+              snippets.push(snippetSpan);
             }
-            startIndex = index + 1;
+            startIndex = index + 1; 
           }
         }
       }
@@ -1724,11 +1755,18 @@ export function createChatHistoryUI(options) {
       if (snippets.length > 0) {
         const snippetDiv = document.createElement('div');
         snippetDiv.className = 'highlight-snippet';
-        let displaySnippets = snippets.map(s => '…' + s + '…');
+        snippets.forEach((span, index) => {
+          snippetDiv.appendChild(span);
+          if (index < snippets.length - 1) {
+            snippetDiv.appendChild(document.createElement('br'));
+          }
+        });
         if (totalMatches > snippets.length) {
-          displaySnippets.push(`…… 共 ${totalMatches} 匹配`);
+          const moreMatchesSpan = document.createElement('span');
+          moreMatchesSpan.textContent = `…… 共 ${totalMatches} 匹配`;
+          snippetDiv.appendChild(document.createElement('br'));
+          snippetDiv.appendChild(moreMatchesSpan);
         }
-        snippetDiv.innerHTML = displaySnippets.join('<br>');
         item.appendChild(snippetDiv);
       }
     }
