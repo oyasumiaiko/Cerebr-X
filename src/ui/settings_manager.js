@@ -7,45 +7,69 @@ import { createThemeManager } from './theme_manager.js';
 
 /**
  * 创建设置管理器
- * @param {Object} options - 配置选项
- * @param {HTMLElement} options.themeSwitch - 主题切换开关元素
- * @param {HTMLElement} options.themeSelect - 主题选择下拉框元素
- * @param {HTMLElement} options.sidebarWidth - 侧边栏宽度滑块元素
- * @param {HTMLElement} options.widthValue - 宽度显示值元素
- * @param {HTMLElement} options.fontSize - 字体大小滑块元素
- * @param {HTMLElement} options.fontSizeValue - 字体大小显示值元素
- * @param {HTMLElement} options.scaleFactor - 缩放比例滑块元素 
- * @param {HTMLElement} options.scaleValue - 缩放比例显示值元素
- * @param {HTMLElement} options.autoScrollSwitch - 自动滚动开关元素
- * @param {HTMLElement} options.clearOnSearchSwitch - 划词搜索清空聊天开关元素
- * @param {HTMLElement} options.sendChatHistorySwitch - 发送聊天历史开关元素
- * @param {HTMLElement} options.showReferenceSwitch - 显示引用标记开关元素
- * @param {HTMLElement} options.sidebarPositionSwitch - 侧边栏位置开关元素
- * @param {HTMLElement} options.stopAtTopSwitch - 滚动到顶部时停止开关元素
- * @param {Function} options.setMessageSenderChatHistory - 设置消息发送器的聊天历史开关状态
+ * @param {Object} appContext - 应用程序上下文对象
+ * @param {HTMLElement} appContext.dom.themeSwitch - 主题切换开关元素
+ * @param {HTMLElement} appContext.dom.themeSelect - 主题选择下拉框元素
+ * @param {HTMLElement} appContext.dom.sidebarWidthSlider - 侧边栏宽度滑块元素
+ * @param {HTMLElement} appContext.dom.widthValueDisplay - 宽度显示值元素
+ * @param {HTMLElement} appContext.dom.fontSizeSlider - 字体大小滑块元素
+ * @param {HTMLElement} appContext.dom.fontSizeValueDisplay - 字体大小显示值元素
+ * @param {HTMLElement} appContext.dom.scaleFactorSlider - 缩放比例滑块元素
+ * @param {HTMLElement} appContext.dom.scaleValueDisplay - 缩放比例显示值元素
+ * @param {HTMLElement} appContext.dom.autoScrollSwitch - 自动滚动开关元素
+ * @param {HTMLElement} appContext.dom.clearOnSearchSwitch - 划词搜索清空聊天开关元素
+ * @param {HTMLElement} appContext.dom.sendChatHistorySwitch - 发送聊天历史开关元素
+ * @param {HTMLElement} appContext.dom.showReferenceSwitch - 显示引用标记开关元素
+ * @param {HTMLElement} appContext.dom.sidebarPositionSwitch - 侧边栏位置开关元素
+ * @param {HTMLElement} appContext.dom.stopAtTopSwitch - 滚动到顶部时停止开关元素
+ * @param {HTMLElement} appContext.dom.showThoughtProcessSwitch - 显示思考过程开关元素
+ * @param {HTMLElement} appContext.dom.resetSettingsButton - 重置设置按钮元素
+ * @param {HTMLElement} appContext.dom.settingsPanel - 设置面板元素
+ * @param {HTMLElement} appContext.dom.settingsToggle - 设置面板切换按钮元素
+ * @param {HTMLElement} appContext.dom.settingsBackButton - 设置面板返回按钮元素
+ * @param {Function} appContext.services.messageSender.setSendChatHistory - 设置消息发送器的聊天历史开关状态
+ * @param {Function} appContext.services.uiManager.closeExclusivePanels - 关闭独占面板的函数
  * @returns {Object} 设置管理器实例
  */
-export function createSettingsManager(options) {
+export function createSettingsManager(appContext) {
   // 从options中提取UI元素
   const {
-    themeSwitch,
-    themeSelect,
-    sidebarWidth,
-    widthValue,
-    fontSize,
-    fontSizeValue,
-    scaleFactor,
-    scaleValue,
-    autoScrollSwitch,
-    clearOnSearchSwitch,
-    sendChatHistorySwitch,
-    showReferenceSwitch,
-    sidebarPositionSwitch,
-    stopAtTopSwitch,
-    setMessageSenderChatHistory
-  } = options;
+    dom,
+    services,
+    utils
+  } = appContext;
 
-  // 创建主题管理器
+  // UI elements from appContext.dom
+  const themeSwitch = dom.themeSwitch; // Might be named themeToggle in appContext
+  const themeSelect = dom.themeSelect;
+  const sidebarWidthSlider = dom.sidebarWidthSlider; // Renamed from sidebarWidth for clarity
+  const widthValueDisplay = dom.sidebarWidthValue; // Renamed from widthValue
+  const fontSizeSlider = dom.fontSizeSlider; // Renamed from fontSize
+  const fontSizeValueDisplay = dom.fontSizeValue;
+  const scaleFactorSlider = dom.scaleFactorSlider; // Renamed from scaleFactor
+  const scaleValueDisplay = dom.scaleValue;
+  const autoScrollSwitch = dom.autoScrollSwitch;
+  const clearOnSearchSwitch = dom.clearOnSearchSwitch;
+  const sendChatHistorySwitch = dom.sendChatHistorySwitch;
+  const showReferenceSwitch = dom.showReferenceSwitch;
+  const sidebarPositionSwitch = dom.sidebarPositionSwitch;
+  const stopAtTopSwitch = dom.stopAtTopSwitch;
+  const showThoughtProcessSwitch = dom.showThoughtProcessSwitch; // Added based on typical settings
+  const resetSettingsButton = dom.resetSettingsButton;     // Added based on typical settings
+  const settingsPanel = dom.settingsPanel;
+  const settingsToggle = dom.settingsToggle;
+  const settingsBackButton = dom.settingsBackButton;
+
+  // Services from appContext.services
+  const messageSender = services.messageSender;
+  // const themeManagerService = services.themeManager; // If themeManager is a shared service
+  const uiManager = services.uiManager; // For closeExclusivePanels
+
+  // Utils
+  const showNotification = utils.showNotification;
+  const closeExclusivePanels = utils.closeExclusivePanels;
+
+  // 创建主题管理器 (could be a service in appContext too)
   const themeManager = createThemeManager();
 
   // 默认设置
@@ -53,9 +77,10 @@ export function createSettingsManager(options) {
     theme: 'auto',  // 默认为自动跟随系统
     sidebarWidth: 800,
     fontSize: 14,
-    scaleFactor: 1.0,
+    lineHeight: 1.5, // Added for better text readability control
+    chatWidth: 100, // Percentage of sidebar width
     autoScroll: true,
-    clearOnSearch: true,
+    clearOnSearch: true, // This might be specific to a search feature, not a general setting
     shouldSendChatHistory: true,
     showReference: true,
     sidebarPosition: 'right', // 'left' 或 'right'

@@ -15,31 +15,41 @@ import {
 
 /**
  * 创建聊天历史UI管理器
- * @param {Object} options - 配置选项
- * @param {HTMLElement} options.chatContainer - 聊天容器元素
- * @param {HTMLElement} options.chatInputElement - 主聊天输入框元素
- * @param {Function} options.appendMessage - 添加消息的函数
- * @param {Object} options.chatHistory - 聊天历史管理器实例
- * @param {Function} options.clearHistory - 清空聊天历史的函数
- * @param {Function} options.getPrompts - 获取提示词配置的函数
- * @param {Function} options.createImageTag - 创建图片标签的函数
- * @param {Function} options.getCurrentConversationChain - 获取当前会话链的函数
+ * @param {Object} appContext - 应用程序上下文对象
+ * @param {HTMLElement} appContext.dom.chatContainer - 聊天容器元素
+ * @param {HTMLElement} appContext.dom.messageInput - 主聊天输入框元素
+ * @param {Function} appContext.services.messageProcessor.appendMessage - 添加消息的函数
+ * @param {Object} appContext.services.chatHistoryManager.chatHistory - 聊天历史管理器实例
+ * @param {Function} appContext.services.chatHistoryManager.clearHistory - 清空聊天历史的函数
+ * @param {Function} appContext.services.promptSettingsManager.getPrompts - 获取提示词配置的函数
+ * @param {Function} appContext.services.imageHandler.createImageTag - 创建图片标签的函数
+ * @param {Function} appContext.services.chatHistoryManager.getCurrentConversationChain - 获取当前会话链的函数
  * @returns {Object} 聊天历史UI管理API
  */
-export function createChatHistoryUI(options) {
+export function createChatHistoryUI(appContext) {
   const {
-    chatContainer,
-    chatInputElement,
-    appendMessage,
-    chatHistory,
-    clearHistory,
-    getPrompts,
-    createImageTag,
-    getCurrentConversationChain
-  } = options;
+    dom,
+    services,
+    state,
+    utils
+  } = appContext;
+
+  // Destructure dependencies from appContext
+  const chatContainer = dom.chatContainer;
+  const chatInputElement = dom.messageInput; // Assuming messageInput is the chatInputElement
+  const appendMessage = services.messageProcessor.appendMessage;
+  const chatHistory = services.chatHistoryManager.chatHistory; // The history object itself
+  const clearHistory = services.chatHistoryManager.clearHistory;
+  const getPrompts = services.promptSettingsManager.getPrompts;
+  const createImageTag = services.imageHandler.createImageTag;
+  const getCurrentConversationChain = services.chatHistoryManager.getCurrentConversationChain;
+  const messageSender = services.messageSender;
+  // pageInfo will be accessed from state.pageInfo directly where needed or via the updatePageInfo parameter
+  const showNotification = utils.showNotification;
+  // closeExclusivePanels will be called via uiManager, which has its own access through appContext
 
   let currentConversationId = null;
-  let currentPageInfo = null;
+  // let currentPageInfo = null; // Replaced by appContext.state.pageInfo or parameter to updatePageInfo
   
   // 内存管理设置 - 始终启用
   let activeConversation = null;       // 当前活动的会话对象
@@ -198,9 +208,9 @@ export function createChatHistoryUI(options) {
         console.error("获取会话记录失败:", error);
       }
     } else {
-      // 如果是首次保存，使用当前页面信息
-      urlToSave = currentPageInfo?.url || '';
-      titleToSave = currentPageInfo?.title || '';
+      // 如果是首次保存，使用当前页面信息 from appContext.state.pageInfo
+      urlToSave = state.pageInfo?.url || '';
+      titleToSave = state.pageInfo?.title || '';
       
       console.log(`首次保存会话，使用当前页面信息: URL=${urlToSave}, 标题=${titleToSave}`);
     }
@@ -351,8 +361,8 @@ export function createChatHistoryUI(options) {
     currentConversationId = fullConversation.id;
     
     // 通知消息发送器当前会话ID已更新
-    if (window.cerebr && window.cerebr.messageSender) {
-      window.cerebr.messageSender.setCurrentConversationId(currentConversationId);
+    if (messageSender) {
+      messageSender.setCurrentConversationId(currentConversationId);
     }
 
     // 滚动到底部
@@ -378,8 +388,8 @@ export function createChatHistoryUI(options) {
    */
   async function clearChatHistory() {
     // 终止当前请求（若存在）
-    if (window.cerebr && window.cerebr.messageSender && typeof window.cerebr.messageSender.abortCurrentRequest === 'function') {
-      window.cerebr.messageSender.abortCurrentRequest();
+    if (messageSender && typeof messageSender.abortCurrentRequest === 'function') {
+      messageSender.abortCurrentRequest();
     }
     // 如果有消息，等待保存完成
     if (chatHistory.messages.length > 0) {
@@ -393,8 +403,8 @@ export function createChatHistoryUI(options) {
     activeConversation = null;
     
     // 通知消息发送器当前会话ID已重置
-    if (window.cerebr && window.cerebr.messageSender) {
-      window.cerebr.messageSender.setCurrentConversationId(null);
+    if (messageSender) {
+      messageSender.setCurrentConversationId(null);
     }
   }
 
@@ -484,7 +494,7 @@ export function createChatHistoryUI(options) {
   }
 
   /**
-   * 显示聊天历史项的右键菜单
+   * 显示聊天记录面板的右键菜单
    * @param {MouseEvent} e - 右键事件
    * @param {string} conversationId - 对话记录ID
    */
@@ -1452,10 +1462,12 @@ export function createChatHistoryUI(options) {
 
   /**
    * 更新当前页面信息
-   * @param {Object} pageInfo - 页面信息对象
+   * @param {Object} newPageInfo - 新的页面信息对象
    */
-  function updatePageInfo(pageInfo) {
-    currentPageInfo = pageInfo;
+  function updatePageInfo(newPageInfo) {
+    // currentPageInfo = newPageInfo; // Local variable removed
+    state.pageInfo = newPageInfo; // Update the shared state in appContext
+    console.log('ChatHistoryUI: 页面信息已更新', state.pageInfo);
   }
   
   /**
@@ -1622,8 +1634,8 @@ export function createChatHistoryUI(options) {
       currentConversationId = newConversationId;
       
       // 通知消息发送器更新当前会话ID
-      if (window.cerebr && window.cerebr.messageSender) {
-        window.cerebr.messageSender.setCurrentConversationId(newConversationId);
+      if (messageSender) {
+        messageSender.setCurrentConversationId(newConversationId);
       }
       
       console.log('成功创建分支对话:', newConversationId);

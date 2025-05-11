@@ -7,35 +7,32 @@
 
 /**
  * 创建消息发送器
- * @param {Object} options - 配置选项
- * @param {Object} options.apiManager - API管理器实例
- * @param {Object} options.messageProcessor - 消息处理器实例
- * @param {Object} options.imageHandler - 图片处理器实例
- * @param {Object} options.chatHistoryUI - 聊天历史UI实例
- * @param {Function} options.getCurrentConversationChain - 获取当前会话链的函数
- * @param {HTMLElement} options.chatContainer - 聊天容器元素
- * @param {HTMLElement} options.messageInput - 消息输入框元素
- * @param {HTMLElement} options.imageContainer - 图片容器元素
- * @param {Function} options.scrollToBottom - 滚动到底部的函数
  * @param {Function} options.getPrompts - 获取提示词设置的函数
  * @param {Object} options.uiManager - UI管理器实例
  * @returns {Object} 消息发送器实例
  */
-export function createMessageSender(options) {
+export function createMessageSender(appContext) {
   // 从选项中提取所需依赖
   const {
-    apiManager,
-    messageProcessor,
-    imageHandler,
-    chatHistoryUI,
-    getCurrentConversationChain,
-    chatContainer,
-    messageInput,
-    imageContainer,
-    scrollToBottom,
-    getPrompts,
-    uiManager
-  } = options;
+    dom,
+    services,
+    utils,
+    state
+  } = appContext;
+
+  const apiManager = services.apiManager;
+  const messageProcessor = services.messageProcessor;
+  const imageHandler = services.imageHandler;
+  const chatHistoryUI = services.chatHistoryUI;
+  const chatHistoryManager = services.chatHistoryManager;
+  const getCurrentConversationChain = chatHistoryManager.getCurrentConversationChain;
+  const chatContainer = dom.chatContainer;
+  const messageInput = dom.messageInput;
+  const imageContainer = dom.imageContainer;
+  const scrollToBottom = utils.scrollToBottom;
+  const getPrompts = services.promptSettingsManager.getPrompts;
+  const uiManager = services.uiManager;
+  const showNotification = utils.showNotification;
 
   // 私有状态
   let isProcessingMessage = false;
@@ -98,6 +95,9 @@ export function createMessageSender(options) {
       const response = await chrome.runtime.sendMessage({
         type: 'GET_PAGE_CONTENT_FROM_SIDEBAR'
       });
+      if (response) {
+        state.pageInfo = response;
+      }
       return response;
     } catch (error) {
       console.error('获取网页内容失败:', error);
@@ -235,14 +235,12 @@ export function createMessageSender(options) {
         loadingMessage.textContent = '正在获取网页内容...';
         const pageContentResponse = await getPageContent();
         if (pageContentResponse) {
-          pageContent = pageContentResponse;
-          pageContentLength = pageContent.content ? pageContent.content.length : 0;
+          pageContentLength = state.pageInfo.content ? state.pageInfo.content.length : 0;
         } else {
-          pageContent = null;
           console.error('获取网页内容失败。');
         }
       } else {
-        pageContent = null;  // 临时模式下不使用网页内容
+        state.pageInfo = null;
       }
       
       // 更新加载状态：正在构建消息

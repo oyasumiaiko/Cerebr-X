@@ -5,26 +5,26 @@
 
 /**
  * 创建消息处理器实例
- * @param {Object} options - 配置选项
- * @param {HTMLElement} options.chatContainer - 聊天容器元素
- * @param {Object} options.chatHistory - 聊天历史管理器
- * @param {Function} options.addMessageToTree - 添加消息到聊天树的函数
- * @param {Function} options.scrollToBottom - 滚动到底部的函数
- * @param {Function} options.showImagePreview - 显示图片预览的函数
- * @param {Function} options.processImageTags - 处理图片标签的函数
- * @param {boolean} [options.showReference=true] - 是否显示引用标记
+ * @param {Object} appContext - 应用程序上下文对象
+ * @param {HTMLElement} appContext.dom.chatContainer - 聊天容器元素
+ * @param {Object} appContext.services.chatHistoryManager - 聊天历史管理器
+ * @param {Function} appContext.services.imageHandler.processImageTags - 处理图片标签的函数
+ * @param {boolean} [appContext.settingsManager.getSetting('showReference')=true] - 是否显示引用标记
  * @returns {Object} 消息处理API
  */
-export function createMessageProcessor(options) {
+export function createMessageProcessor(appContext) {
   const {
-    chatContainer,
-    chatHistory,
-    addMessageToTree,
-    scrollToBottom,
-    showImagePreview,
-    processImageTags,
-    showReference = true
-  } = options;
+    dom,
+    services,
+    utils
+  } = appContext;
+
+  const chatContainer = dom.chatContainer;
+  const chatHistoryManager = services.chatHistoryManager;
+  const imageHandler = services.imageHandler;
+  const settingsManager = services.settingsManager;
+  const scrollToBottom = utils.scrollToBottom;
+  const showReference = settingsManager.getSetting('showReference');
   
   // 配置常量
   const MATH_DELIMITERS = {
@@ -72,7 +72,7 @@ export function createMessageProcessor(options) {
         img.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          showImagePreview(img.src);
+          imageHandler.showImagePreview(img.src);
         });
       });
       messageDiv.appendChild(imageContentDiv);
@@ -117,11 +117,11 @@ export function createMessageProcessor(options) {
     
     // 更新聊天历史，将文本和图片信息封装到一个对象中
     if (!skipHistory) {
-      const processedContent = processImageTags(text, imagesHTML);
-      const node = addMessageToTree(
+      const processedContent = imageHandler.processImageTags(text, imagesHTML);
+      const node = chatHistoryManager.addMessageToTree(
         sender === 'user' ? 'user' : 'assistant',
         processedContent,
-        chatHistory.currentNode  // 添加 parentId 参数
+        chatHistoryManager.chatHistory.currentNode
       );
 
       // 为消息div添加节点ID
@@ -203,8 +203,8 @@ export function createMessageProcessor(options) {
 
         // 更新历史记录
         const messageId = lastMessage.getAttribute('data-message-id');
-        if (messageId && chatHistory.messages) {
-          const node = chatHistory.messages.find(msg => msg.id === messageId);
+        if (messageId && chatHistoryManager.chatHistory.messages) {
+          const node = chatHistoryManager.chatHistory.messages.find(msg => msg.id === messageId);
           if (node) {
             node.content = aiResponse;
           }
@@ -226,6 +226,9 @@ export function createMessageProcessor(options) {
    */
   function addGroundingToMessage(text, groundingMetadata) {
     if (!groundingMetadata?.groundingSupports) return text;
+
+    // Dynamically get showReference setting
+    const showReferenceSetting = settingsManager.getSetting('showReference');
 
     let markedText = text;
     const htmlElements = [];
@@ -310,7 +313,7 @@ export function createMessageProcessor(options) {
             </span>
         `;
 
-        if (document.getElementById('show-reference-switch').checked) {
+        if (showReferenceSetting) {
             // 替换文本并添加引用标记
             markedText = markedText.replace(regex, `$&${placeholder}`);
             htmlElements.push({

@@ -5,51 +5,54 @@
 
 /**
  * 创建上下文菜单管理器
- * @param {Object} options - 配置选项
- * @param {HTMLElement} options.contextMenu - 上下文菜单元素
- * @param {HTMLElement} options.copyMessageButton - 复制消息按钮
- * @param {HTMLElement} options.copyCodeButton - 复制代码按钮
- * @param {HTMLElement} options.stopUpdateButton - 停止更新按钮
- * @param {HTMLElement} options.regenerateButton - 重新生成按钮
- * @param {HTMLElement} options.deleteMessageButton - 删除消息按钮
- * @param {HTMLElement} options.clearChatContextButton - 清空聊天按钮
- * @param {HTMLElement} options.chatContainer - 聊天容器元素
- * @param {Function} options.abortCurrentRequest - 中止当前请求函数
- * @param {Function} options.deleteMessageContent - 删除消息内容函数
- * @param {Function} options.clearChatHistory - 清空聊天历史函数
- * @param {Function} options.sendMessage - 发送消息函数
- * @param {Object} options.chatHistory - 聊天历史数据对象
- * @param {HTMLElement} options.forkConversationButton - 创建分支对话按钮
- * @param {Function} options.createForkConversation - 创建分支对话函数
+ * @param {Object} appContext - 应用程序上下文对象
+ * @param {HTMLElement} appContext.dom.contextMenu - 上下文菜单元素
+ * @param {HTMLElement} appContext.dom.copyMessageButton - 复制消息按钮
+ * @param {HTMLElement} appContext.dom.copyCodeButton - 复制代码按钮
+ * @param {HTMLElement} appContext.dom.stopUpdateButton - 停止更新按钮
+ * @param {HTMLElement} appContext.dom.regenerateButton - 重新生成按钮
+ * @param {HTMLElement} appContext.dom.deleteMessageButton - 删除消息按钮
+ * @param {HTMLElement} appContext.dom.clearChatContextButton - 清空聊天按钮
+ * @param {HTMLElement} appContext.dom.chatContainer - 聊天容器元素
+ * @param {Function} appContext.services.messageSender.abortCurrentRequest - 中止当前请求函数
+ * @param {Function} appContext.services.chatHistoryUI.deleteMessageFromUIAndHistory - 删除消息内容函数
+ * @param {Function} appContext.services.chatHistoryUI.clearChatHistory - 清空聊天历史函数
+ * @param {Function} appContext.services.messageSender.sendMessage - 发送消息函数
+ * @param {Object} appContext.services.chatHistoryManager.chatHistory - 聊天历史数据对象
+ * @param {HTMLElement} appContext.dom.forkConversationButton - 创建分支对话按钮
+ * @param {Function} appContext.services.chatHistoryUI.createForkConversation - 创建分支对话函数
  * @returns {Object} 上下文菜单管理器实例
  */
-export function createContextMenuManager(options) {
+export function createContextMenuManager(appContext) {
   // 解构配置选项
   const {
-    contextMenu,
-    copyMessageButton,
-    copyCodeButton,
-    stopUpdateButton,
-    regenerateButton,
-    deleteMessageButton,
-    clearChatContextButton,
-    chatContainer,
-    abortCurrentRequest,
-    deleteMessageContent,
-    clearChatHistory,
-    sendMessage,
-    chatHistory,
-    forkConversationButton,
-    createForkConversation
-  } = options;
+    dom,
+    services,
+    // utils // For showNotification if needed
+  } = appContext;
 
-  // 私有状态
+  // DOM elements from appContext.dom
+  const contextMenu = dom.contextMenu;
+  const copyMessageButton = dom.copyMessageButton;
+  const copyCodeButton = dom.copyCodeButton;
+  const stopUpdateButton = dom.stopUpdateButton;
+  const regenerateButton = dom.regenerateButton;
+  const deleteMessageButton = dom.deleteMessageButton;
+  const clearChatContextButton = dom.clearChatContextButton;
+  const chatContainer = dom.chatContainer;
+  const forkConversationButton = dom.forkConversationButton;
+  const copyAsImageButton = dom.copyAsImageButton; // Assuming it's in dom
+
+  // Services from appContext.services
+  const messageSender = services.messageSender;
+  const chatHistoryUI = services.chatHistoryUI;
+  const chatHistoryManager = services.chatHistoryManager;
+  const chatHistory = chatHistoryManager.chatHistory; // The actual history data object
+
+  // Private state
   let currentMessageElement = null;
   let currentCodeBlock = null;
   
-  // 获取复制为图片按钮
-  const copyAsImageButton = document.getElementById('copy-as-image');
-
   /**
    * 显示上下文菜单
    * @param {MouseEvent} e - 鼠标事件
@@ -71,6 +74,10 @@ export function createContextMenuManager(options) {
     } else {
       stopUpdateButton.style.display = 'none';
     }
+    stopUpdateButton.onclick = () => {
+      if (messageSender) messageSender.abortCurrentRequest();
+      hideContextMenu();
+    };
 
     // 根据是否点击代码块显示或隐藏复制代码按钮
     if (codeBlock) {
@@ -170,13 +177,26 @@ export function createContextMenuManager(options) {
           lastAiMessage = messages[i];
         } else if (messages[i].classList.contains('user-message') && !lastUserMessage) {
           lastUserMessage = messages[i];
+          // 如果用户消息后面没有AI消息，也视为最后一条可操作消息
+          if (!lastAiMessage && i === messages.length -1) {
+            // No AI message after this user message, allow regenerate
+          } else if (lastAiMessage && messages[i+1] !== lastAiMessage) {
+            // User message found, but the AI message after it is not the *last* AI message overall.
+            // This case implies we are not at the absolute end of convo, so reset lastAiMessage to ensure we only delete the one immediately following this user message if any.
+            lastAiMessage = null; 
+          }
           break; // 找到最后一条用户消息后停止
         }
       }
       
-      // 如果有AI消息，先删除它
+      // 如果有AI消息，先删除它 (ensure deleteMessageContent is from chatHistoryUI or similar)
       if (lastAiMessage) {
-        await deleteMessageContent(lastAiMessage);
+        if (chatHistoryUI && typeof chatHistoryUI.deleteMessageFromUIAndHistory === 'function') {
+          await chatHistoryUI.deleteMessageFromUIAndHistory(lastAiMessage);
+        } else {
+          console.warn('deleteMessageFromUIAndHistory function not available on chatHistoryUI');
+          lastAiMessage.remove(); // Fallback to just removing from DOM
+        }
       }
       
       // 如果找到了用户消息，直接使用它重新生成AI回复
@@ -185,6 +205,7 @@ export function createContextMenuManager(options) {
           // 获取消息ID和原始文本
           const messageId = lastUserMessage.getAttribute('data-message-id');
           const originalMessageText = lastUserMessage.getAttribute('data-original-text');
+          const imageHTML = lastUserMessage.querySelector('.image-previews-container')?.innerHTML || ''; // Get existing images if any
           
           if (!messageId || !chatHistory?.messages) {
             console.error('未找到消息ID或聊天历史');
@@ -200,8 +221,9 @@ export function createContextMenuManager(options) {
           }
 
           // 使用regenerateMode标志告诉message_sender这是重新生成操作
-          sendMessage({
+          messageSender.sendMessage({
             originalMessageText,
+            imageHTML, // Pass image HTML if it should be part of regeneration
             regenerateMode: true,
             messageId
           });

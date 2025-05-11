@@ -5,22 +5,24 @@
 
 /**
  * 创建图片处理器实例
- * @param {Object} options - 配置选项
- * @param {HTMLElement} options.previewModal - 图片预览模态框元素
- * @param {HTMLElement} options.previewImage - 预览图片元素
- * @param {HTMLElement} options.closeButton - 关闭按钮元素
- * @param {HTMLElement} options.imageContainer - 图片容器元素
- * @param {HTMLElement} options.messageInput - 消息输入框元素
+ * @param {Object} appContext - 应用上下文对象
+ * @param {HTMLElement} appContext.dom.previewModal - 图片预览模态框元素
+ * @param {HTMLElement} appContext.dom.previewImage - 预览图片元素
+ * @param {HTMLElement} appContext.dom.previewCloseButton - 关闭按钮元素
+ * @param {HTMLElement} appContext.dom.imageContainer - 图片容器元素
+ * @param {HTMLElement} appContext.dom.messageInput - 消息输入框元素
  * @returns {Object} 图片处理API
  */
-export function createImageHandler(options) {
+export function createImageHandler(appContext) {
   const {
-    previewModal,
-    previewImage,
-    closeButton,
-    imageContainer,
-    messageInput
-  } = options;
+    dom
+  } = appContext;
+
+  const previewModal = dom.previewModal;
+  const previewImage = dom.previewImage;
+  const closeButton = dom.previewCloseButton;
+  const imageContainer = dom.imageContainer;
+  const messageInput = dom.messageInput;
 
   /**
    * 显示图片预览
@@ -198,7 +200,9 @@ export function createImageHandler(options) {
   }
 
   // 立即初始化图片预览事件
-  initImagePreviewEvents();
+  if (closeButton && previewModal) {
+    initImagePreviewEvents();
+  }
 
   // 返回公共API
   return {

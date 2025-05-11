@@ -5,39 +5,52 @@
 
 /**
  * 创建UI管理器
- * @param {Object} options - 配置选项
- * @param {HTMLElement} options.messageInput - 消息输入框元素
- * @param {HTMLElement} options.settingsButton - 设置按钮元素
- * @param {HTMLElement} options.settingsMenu - 设置菜单元素
- * @param {HTMLElement} options.chatContainer - 聊天容器元素
- * @param {HTMLElement} options.sendButton - 发送按钮元素
- * @param {HTMLElement} options.inputContainer - 输入容器元素
- * @param {HTMLElement} options.promptSettings - 提示词设置面板元素
- * @param {HTMLElement} options.promptSettingsToggle - 提示词设置开关元素
- * @param {HTMLElement} options.collapseButton - 收起按钮元素
- * @param {Object} options.chatHistoryUI - 聊天历史UI对象
- * @param {Object} options.imageHandler - 图片处理器对象
- * @param {Function} options.setShouldAutoScroll - 设置是否自动滚动的函数
- * @param {Function} options.renderFavoriteApis - 渲染收藏API列表的函数
+ * @param {Object} appContext - 应用程序上下文对象
+ * @param {HTMLElement} appContext.dom.messageInput - 消息输入框元素
+ * @param {HTMLElement} appContext.dom.settingsButton - 设置按钮元素
+ * @param {HTMLElement} appContext.dom.settingsMenu - 设置菜单元素
+ * @param {HTMLElement} appContext.dom.chatContainer - 聊天容器元素
+ * @param {HTMLElement} appContext.dom.sendButton - 发送按钮元素
+ * @param {HTMLElement} appContext.dom.inputContainer - 输入容器元素
+ * @param {HTMLElement} appContext.dom.promptSettings - 提示词设置面板元素
+ * @param {HTMLElement} appContext.dom.promptSettingsToggle - 提示词设置开关元素
+ * @param {HTMLElement} appContext.dom.collapseButton - 收起按钮元素
+ * @param {Object} appContext.services.chatHistoryUI - 聊天历史UI对象
+ * @param {Object} appContext.services.imageHandler - 图片处理器对象
+ * @param {Function} appContext.services.messageSender.setShouldAutoScroll - 设置是否自动滚动的函数
+ * @param {Function} appContext.services.apiManager.renderFavoriteApis - 渲染收藏API列表的函数
  * @returns {Object} UI管理器实例
  */
-export function createUIManager(options) {
+export function createUIManager(appContext) {
   // 解构配置选项
   const {
-    messageInput,
-    settingsButton,
-    settingsMenu,
-    chatContainer,
-    sendButton,
-    inputContainer,
-    promptSettings,
-    promptSettingsToggle,
-    collapseButton,
-    chatHistoryUI,
-    imageHandler,
-    setShouldAutoScroll,
-    renderFavoriteApis
-  } = options;
+    dom,
+    services,
+    // utils // For showNotification, scrollToBottom if needed directly
+  } = appContext;
+
+  // DOM elements from appContext.dom
+  const messageInput = dom.messageInput;
+  // settingsButton and settingsMenu are for the main settings panel, managed by settingsManager
+  // const settingsButton = dom.settingsToggle; // Use settingsToggle for consistency
+  // const settingsMenu = dom.settingsPanel;    // Use settingsPanel
+  const chatContainer = dom.chatContainer;
+  const sendButton = dom.sendButton;
+  const inputContainer = dom.inputContainer;
+  const promptSettingsPanel = dom.promptSettingsPanel; // Renamed from promptSettings
+  const promptSettingsToggle = dom.promptSettingsToggle;
+  const collapseButton = dom.collapseButton;
+  const imageContainer = dom.imageContainer; // Added for updateSendButtonState
+  // other DOM elements like sidebar, topBar, imagePreviewModal etc. can be accessed via dom if needed
+
+  // Services from appContext.services
+  const chatHistoryUI = services.chatHistoryUI; // For closing its panel
+  const imageHandler = services.imageHandler;
+  const messageSender = services.messageSender; // For setShouldAutoScroll
+  const apiManager = services.apiManager; // For renderFavoriteApis
+  const settingsManager = services.settingsManager; // For toggleSettingsPanel
+  const promptSettingsManager = services.promptSettingsManager; // For togglePromptSettingsPanel
+  const mainApiSettingsManager = services.apiManager; // For toggling API settings panel
 
   /**
    * 自动调整文本框高度
@@ -65,8 +78,9 @@ export function createUIManager(options) {
    * 更新发送按钮状态
    */
   function updateSendButtonState() {
-    const hasContent = messageInput.textContent.trim() || inputContainer.querySelector('.image-tag');
-    sendButton.disabled = !hasContent;
+    const hasText = messageInput.textContent.trim();
+    const hasImage = dom.imageContainer?.querySelector('.image-tag');
+    sendButton.disabled = !hasText && !hasImage;
   }
 
   /**
@@ -76,19 +90,19 @@ export function createUIManager(options) {
   function toggleSettingsMenu(show) {
     if (show === undefined) {
       // 如果没有传参数，就切换当前状态
-      settingsMenu.classList.toggle('visible');
+      dom.settingsPanel.classList.toggle('visible');
     } else {
       // 否则设置为指定状态
       if (show) {
-        settingsMenu.classList.add('visible');
+        dom.settingsPanel.classList.add('visible');
       } else {
-        settingsMenu.classList.remove('visible');
+        dom.settingsPanel.classList.remove('visible');
       }
     }
 
     // 每次打开菜单时重新渲染收藏的API列表
-    if (settingsMenu.classList.contains('visible') && renderFavoriteApis) {
-      renderFavoriteApis();
+    if (dom.settingsPanel.classList.contains('visible') && apiManager && typeof apiManager.renderFavoriteApis === 'function') {
+      apiManager.renderFavoriteApis();
     }
   }
 
@@ -97,11 +111,37 @@ export function createUIManager(options) {
    */
   function closeExclusivePanels() {
     // 定义需要互斥的面板ID列表
-    const panels = ['api-settings', 'prompt-settings'];
-    chatHistoryUI.closeChatHistoryPanel();
-    panels.forEach(pid => {
-      const panel = document.getElementById(pid);
-      if (panel && panel.classList.contains('visible')) {
+    const panelsToCloseDirectly = ['prompt-settings', 'api-settings', 'settings-panel']; // IDs
+    
+    // Close panels managed by their respective services if they have a close method
+    if (chatHistoryUI && typeof chatHistoryUI.closeChatHistoryPanel === 'function') {
+      chatHistoryUI.closeChatHistoryPanel();
+    }
+    if (promptSettingsManager && typeof promptSettingsManager.closePanel === 'function') {
+      promptSettingsManager.closePanel();
+    } else if (dom.promptSettingsPanel) {
+      dom.promptSettingsPanel.classList.remove('visible');
+    }
+
+    if (apiManager && typeof apiManager.closePanel === 'function') {
+      apiManager.closePanel();
+    } else if (dom.apiSettingsPanel) {
+      dom.apiSettingsPanel.classList.remove('visible');
+    }
+
+    if (settingsManager && typeof settingsManager.closePanel === 'function') {
+      settingsManager.closePanel();
+    } else if (dom.settingsPanel) {
+      dom.settingsPanel.classList.remove('visible');
+    }
+    
+    // Fallback for any other panels by ID if not covered by services
+    panelsToCloseDirectly.forEach(pid => {
+      const panel = document.getElementById(pid); // Keep this for panels not managed by a service with closePanel
+      if (panel && panel.classList.contains('visible') && 
+          !((pid === 'prompt-settings' && promptSettingsManager?.closePanel) || 
+            (pid === 'api-settings' && apiManager?.closePanel) ||
+            (pid === 'settings-panel' && settingsManager?.closePanel)) ) {
         panel.classList.remove('visible');
       }
     });
@@ -153,88 +193,111 @@ export function createUIManager(options) {
    * 设置设置菜单事件监听器
    */
   function setupSettingsMenuEventListeners() {
-    // 修改点击事件监听器
+    // Main settings panel toggle is handled by its own manager (settingsManager)
+    // This UIManager can handle general document-level interactions for closing panels.
+
+    if (dom.settingsToggle && settingsManager && typeof settingsManager.togglePanel === 'function') {
+        dom.settingsToggle.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent document click listener from immediately closing it
+            settingsManager.togglePanel(); 
+        });
+    }
+
     document.addEventListener('click', (e) => {
-      // 如果点击的不是设置按钮本身和设置菜单，就关闭菜单
-      if (!settingsButton.contains(e.target) && !settingsMenu.contains(e.target)) {
-        toggleSettingsMenu(false);
+      // Check if click is outside all managed panels and their toggles
+      const clickedInsidePanelOrToggle = 
+        dom.settingsPanel?.contains(e.target) || dom.settingsToggle?.contains(e.target) ||
+        dom.apiSettingsPanel?.contains(e.target) || dom.apiSettingsToggle?.contains(e.target) ||
+        dom.promptSettingsPanel?.contains(e.target) || dom.promptSettingsToggle?.contains(e.target) ||
+        dom.chatHistoryPanel?.contains(e.target) || dom.chatHistoryToggle?.contains(e.target);
+
+      if (!clickedInsidePanelOrToggle) {
+        closeExclusivePanels(); // Close all if click is outside any relevant UI
       }
     });
 
-    // 确保设置按钮的点击事件在文档点击事件之前处理
-    settingsButton.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleSettingsMenu();
-    });
-
-    // 添加输入框的事件监听器
-    messageInput.addEventListener('focus', () => {
-      toggleSettingsMenu(false);
-    });
-
-    // 设置按钮悬停事件
-    settingsButton.addEventListener('mouseenter', () => {
-      toggleSettingsMenu(true);
-    });
-
-    // 设置按钮和菜单的鼠标离开事件
-    const handleMouseLeave = (e) => {
-      const toElement = e.relatedTarget;
-      if (!settingsButton.contains(toElement) && !settingsMenu.contains(toElement)) {
-        toggleSettingsMenu(false);
-      }
-    };
-
-    settingsButton.addEventListener('mouseleave', handleMouseLeave);
-    settingsMenu.addEventListener('mouseleave', handleMouseLeave);
+    if (messageInput) {
+        messageInput.addEventListener('focus', () => {
+            closeExclusivePanels(); // Close panels when user focuses on input
+        });
+    }
   }
 
   /**
    * 设置面板切换事件监听器
    */
   function setupPanelEventListeners() {
-    // 显示/隐藏提示词设置面板
-    promptSettingsToggle.addEventListener('click', () => {
-      const wasVisible = promptSettings.classList.contains('visible');
-      closeExclusivePanels();
+    // Prompt Settings Panel Toggle
+    if (promptSettingsToggle && promptSettingsManager && typeof promptSettingsManager.togglePanel === 'function') {
+      promptSettingsToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        promptSettingsManager.togglePanel();
+      });
+    } else if (promptSettingsToggle && dom.promptSettingsPanel) { 
+        promptSettingsToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const wasVisible = dom.promptSettingsPanel.classList.contains('visible');
+            closeExclusivePanels();
+            if (!wasVisible) {
+                dom.promptSettingsPanel.classList.toggle('visible');
+            }
+        });
+    }
 
-      if (!wasVisible) {
-        promptSettings.classList.toggle('visible');
-      }
-    });
+    // API Settings Panel Toggle
+    if (dom.apiSettingsToggle && apiManager && typeof apiManager.togglePanel === 'function') {
+        dom.apiSettingsToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            apiManager.togglePanel();
+        });
+    } 
 
-    // 添加收起按钮点击事件
-    collapseButton.addEventListener('click', () => {
-      window.parent.postMessage({
-        type: 'CLOSE_SIDEBAR'
-      }, '*');
-    });
+    // Chat History Panel Toggle
+    if (dom.chatHistoryToggle && chatHistoryUI && typeof chatHistoryUI.toggleChatHistoryPanel === 'function') {
+        dom.chatHistoryToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            chatHistoryUI.toggleChatHistoryPanel();
+        });
+    }
+
+    // Collapse Sidebar Button
+    if (collapseButton) {
+        collapseButton.addEventListener('click', () => {
+            window.parent.postMessage({
+                type: 'CLOSE_SIDEBAR'
+            }, '*');
+        });
+    }
   }
 
   /**
    * 添加聊天容器事件监听器
    */
   function setupChatContainerEventListeners() {
-    // 修改滚轮事件监听
-    chatContainer.addEventListener('wheel', (e) => {
-      if (e.deltaY < 0) { // 向上滚动
-        setShouldAutoScroll(false);
-      } else if (e.deltaY > 0) { // 向下滚动时检查底部距离
-        const threshold = 100; // 距离底部小于100px认为接近底部
-        const distanceFromBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
-        if (distanceFromBottom < threshold) {
-          setShouldAutoScroll(true);
-        }
-      }
-    }, { passive: true });
+    // Scroll event for auto-scroll logic
+    if (chatContainer && messageSender && typeof messageSender.setShouldAutoScroll === 'function') {
+        chatContainer.addEventListener('wheel', (e) => {
+          if (e.deltaY < 0) { // Scrolling up
+            messageSender.setShouldAutoScroll(false);
+          } else if (e.deltaY > 0) { // Scrolling down
+            const threshold = 100; // Px from bottom to re-enable auto-scroll
+            const distanceFromBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
+            if (distanceFromBottom < threshold) {
+              messageSender.setShouldAutoScroll(true);
+            }
+          }
+        }, { passive: true });
 
-    // 修改点击事件监听
-    chatContainer.addEventListener('click', (e) => {
-      // 点击时停止自动滚动
-      setShouldAutoScroll(false);
-    });
+        // Click event to disable auto-scroll
+        chatContainer.addEventListener('click', (e) => {
+          // Only disable auto-scroll if the click is not on an interactive element within a message
+          if (!e.target.closest('a, button, input, [onclick]')) {
+             messageSender.setShouldAutoScroll(false);
+          }
+        });
+    }
 
-    // 阻止聊天区域的图片默认行为
+    // Prevent default image click behavior in chat
     chatContainer.addEventListener('click', (e) => {
       if (e.target.tagName === 'IMG') {
         e.preventDefault();

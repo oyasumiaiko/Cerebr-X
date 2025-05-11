@@ -134,22 +134,25 @@ const DEFAULT_PROMPTS = {
 };
 
 class PromptSettings {
-    constructor() {
+    constructor(appContext) {
+        this.appContext = appContext;
+        const { dom } = appContext;
+
         // DOM 元素
-        this.promptSettingsToggle = document.getElementById('prompt-settings-toggle');
-        this.promptSettings = document.getElementById('prompt-settings');
+        this.promptSettingsToggle = dom.promptSettingsToggle;
+        this.promptSettings = dom.promptSettingsPanel;
         this.promptBackButton = this.promptSettings.querySelector('.back-button');
-        this.resetPromptsButton = document.getElementById('reset-prompts');
-        this.savePromptsButton = document.getElementById('save-prompts');
-        this.selectionPrompt = document.getElementById('selection-prompt');
-        this.systemPrompt = document.getElementById('system-prompt');
-        this.pdfPrompt = document.getElementById('pdf-prompt');
-        this.summaryPrompt = document.getElementById('summary-prompt');
-        this.queryPrompt = document.getElementById('query-prompt');
-        this.imagePrompt = document.getElementById('image-prompt');
-        this.screenshotPrompt = document.getElementById('screenshot-prompt');
-        this.extractPrompt = document.getElementById('extract-prompt');
-        this.urlRulesPrompt = document.getElementById('url-rules-prompt');
+        this.resetPromptsButton = dom.resetPromptsButton;
+        this.savePromptsButton = dom.savePromptsButton;
+        this.selectionPrompt = dom.selectionPrompt;
+        this.systemPrompt = dom.systemPrompt;
+        this.pdfPrompt = dom.pdfPrompt;
+        this.summaryPrompt = dom.summaryPrompt;
+        this.queryPrompt = dom.queryPrompt;
+        this.imagePrompt = dom.imagePrompt;
+        this.screenshotPrompt = dom.screenshotPrompt;
+        this.extractPrompt = dom.extractPrompt;
+        this.urlRulesPrompt = dom.urlRulesPrompt;
 
         // 模型选择下拉框
         this.modelSelects = {};
@@ -177,10 +180,13 @@ class PromptSettings {
 
         // 获取所有可用的模型
         const getAvailableModels = () => {
-            // 从 window.apiConfigs 获取所有唯一的模型名称
             const models = new Set();
-            if (window.apiConfigs) {
-                window.apiConfigs.forEach(config => {
+            // Try to get models from apiManager via appContext if available and updated
+            const apiManager = this.appContext.services.apiManager;
+            const apiConfigs = apiManager ? apiManager.getAllConfigs() : window.apiConfigs; 
+
+            if (apiConfigs) {
+                apiConfigs.forEach(config => {
                     if (config.modelName) {
                         models.add(config.modelName);
                     }
@@ -478,7 +484,7 @@ class PromptSettings {
             
             this.savedPrompts = prompts;
             // 触发提示词设置更新事件
-            document.dispatchEvent(new CustomEvent('promptSettingsUpdated'));
+            this.appContext.dom.promptSettingsPanel.dispatchEvent(new CustomEvent('promptSettingsUpdated', { bubbles: true, composed: true }));
             
             // 显示轻微的保存提示但不关闭面板
             const saveButton = this.savePromptsButton;
@@ -512,7 +518,7 @@ class PromptSettings {
             
             this.savedPrompts = prompts;
             // 触发提示词设置更新事件
-            document.dispatchEvent(new CustomEvent('promptSettingsUpdated'));
+            this.appContext.dom.promptSettingsPanel.dispatchEvent(new CustomEvent('promptSettingsUpdated', { bubbles: true, composed: true }));
             
             // 只有在需要关闭面板时才关闭
             if (shouldClosePanel) {
@@ -567,7 +573,7 @@ class PromptSettings {
         });
         
         // 触发提示词设置更新事件
-        document.dispatchEvent(new CustomEvent('promptSettingsUpdated'));
+        this.appContext.dom.promptSettingsPanel.dispatchEvent(new CustomEvent('promptSettingsUpdated', { bubbles: true, composed: true }));
     }
 
     /**
@@ -614,8 +620,8 @@ class PromptSettings {
 
             let promptValue = textarea.value;
             
-            // 从window.cerebr.pageInfo获取当前页面信息
-            const pageInfo = window.cerebr?.pageInfo;
+            // 从appContext.state.pageInfo获取当前页面信息
+            const pageInfo = this.appContext.state.pageInfo;
             if (pageInfo?.url) {
                 if (type === 'system') {
                     const urlRule = this.getMatchingUrlRule(pageInfo.url, 'system');

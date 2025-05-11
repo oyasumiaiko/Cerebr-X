@@ -11,7 +11,7 @@
  * @param {Function} options.closeExclusivePanels - 关闭其他面板的函数
  * @returns {Object} API 管理器实例
  */
-export function createApiManager(options) {
+export function createApiManager(appContext) {
   // 私有状态
   let apiConfigs = [];
   let selectedConfigIndex = 0;
@@ -19,10 +19,14 @@ export function createApiManager(options) {
   const apiKeyUsageIndex = {};
 
   const {
-    apiSettings,
-    apiCards,
-    closeExclusivePanels
-  } = options;
+    dom,
+    // services, // services.uiManager can be used for closeExclusivePanels
+    utils // utils.closeExclusivePanels (which might call uiManager internally)
+  } = appContext;
+
+  const apiSettingsPanel = dom.apiSettingsPanel; // Use renamed dom property
+  const apiCardsContainer = dom.apiCardsContainer;
+  const closeExclusivePanels = utils.closeExclusivePanels; // Or services.uiManager.closeExclusivePanels if preferred & ready
 
   /**
    * 加载 API 配置
@@ -85,7 +89,7 @@ export function createApiManager(options) {
     // 暴露 apiConfigs 到 window 对象 (向后兼容)
     window.apiConfigs = apiConfigs;
     // 触发配置更新事件
-    window.dispatchEvent(new Event('apiConfigsUpdated'));
+    (apiSettingsPanel || document).dispatchEvent(new Event('apiConfigsUpdated', { bubbles: true, composed: true }));
 
     // 确保一定会渲染卡片和收藏列表
     renderAPICards();
@@ -109,7 +113,7 @@ export function createApiManager(options) {
       });
       // 更新 window.apiConfigs 并触发事件 (向后兼容)
       window.apiConfigs = apiConfigs; // 保持内存中的对象包含索引
-      window.dispatchEvent(new Event('apiConfigsUpdated'));
+      (apiSettingsPanel || document).dispatchEvent(new Event('apiConfigsUpdated', { bubbles: true, composed: true }));
     } catch (error) {
       console.error('保存 API 配置失败:', error);
     }
@@ -140,15 +144,15 @@ export function createApiManager(options) {
     const templateClone = templateCard.cloneNode(true);
 
     // 清空现有卡片
-    apiCards.innerHTML = '';
+    apiCardsContainer.innerHTML = '';
 
     // 先重新添加模板（保持隐藏状态）
-    apiCards.appendChild(templateClone);
+    apiCardsContainer.appendChild(templateClone);
 
     // 渲染实际的卡
     apiConfigs.forEach((config, index) => {
       const card = createAPICard(config, index, templateClone);
-      apiCards.appendChild(card);
+      apiCardsContainer.appendChild(card);
     });
   }
 
@@ -245,7 +249,7 @@ export function createApiManager(options) {
       selectedConfigIndex = index;
       saveAPIConfigs();
       // 关闭设置菜单
-      apiSettings.classList.remove('visible');
+      apiSettingsPanel.classList.remove('visible');
        // 更新收藏列表状态
       renderFavoriteApis();
     });
@@ -512,7 +516,7 @@ export function createApiManager(options) {
           renderFavoriteApis();
         }
          // 关闭设置菜单
-        apiSettings.classList.remove('visible');
+        apiSettingsPanel.classList.remove('visible');
       });
 
       favoriteApisList.appendChild(item);
@@ -602,14 +606,19 @@ export function createApiManager(options) {
    * @param {HTMLElement} apiSettingsToggle - API设置切换按钮
    * @param {HTMLElement} backButton - 返回按钮
    */
-  function setupUIEventHandlers(apiSettingsToggle, backButton) {
+  function setupUIEventHandlers(appContextForSetup) {
+    const currentAppContext = appContextForSetup || appContext;
+    const toggleButton = currentAppContext.dom.apiSettingsToggle;
+    const panel = currentAppContext.dom.apiSettingsPanel;
+    const backButtonElement = currentAppContext.dom.apiSettingsBackButton;
+
     // 显示/隐藏 API 设置
-    apiSettingsToggle.addEventListener('click', () => {
-      const wasVisible = apiSettings.classList.contains('visible');
-      closeExclusivePanels();
+    toggleButton.addEventListener('click', () => {
+      const wasVisible = panel.classList.contains('visible');
+      (currentAppContext.utils.closeExclusivePanels || currentAppContext.services.uiManager.closeExclusivePanels)();
 
       if (!wasVisible) {
-        apiSettings.classList.toggle('visible');
+        panel.classList.toggle('visible');
         loadAPIConfigs().then(() => {
             renderAPICards(); // 确保加载最新配置后渲染
             renderFavoriteApis();
@@ -618,8 +627,8 @@ export function createApiManager(options) {
     });
 
     // 返回聊天界面
-    backButton.addEventListener('click', () => {
-      apiSettings.classList.remove('visible');
+    backButtonElement.addEventListener('click', () => {
+      panel.classList.remove('visible');
     });
   }
 
