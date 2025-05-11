@@ -44,23 +44,34 @@ export async function getAllConversationMetadata() {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('conversations', 'readonly');
     const store = transaction.objectStore('conversations');
-    const request = store.getAll();
-    request.onsuccess = () => {
-      // 返回元数据，过滤掉消息内容
-      const conversations = request.result.map(conv => {
-        // 只保留消息ID列表，不包含完整消息内容
+    const conversations = []; // 用于累积结果的数组
+    const request = store.openCursor(); // 使用游标代替 getAll()
+
+    request.onsuccess = (event) => {
+      const cursor = event.target.result;
+      if (cursor) {
+        // 获取当前记录
+        const conv = cursor.value;
+        
+        // 执行与之前相同的转换逻辑
         const messageIds = conv.messages ? conv.messages.map(msg => msg.id) : [];
-        return {
-          ...conv,
-          // 只保留消息ID的数组，不包含完整内容
-          messageIds,
-          // 删除完整的消息数组以减少内存使用
-          messages: undefined
-        };
-      });
-      resolve(conversations);
+        conversations.push({
+          ...conv, // 保留原始对话对象的所有属性
+          messageIds, // 添加处理过的 messageIds
+          messages: undefined // 显式移除原始的 messages 数组
+        });
+        
+        cursor.continue(); // 继续到下一条记录
+      } else {
+        // 没有更多记录了，游标遍历完成
+        resolve(conversations);
+      }
     };
-    request.onerror = () => reject(request.error);
+
+    request.onerror = (event) => {
+      // 处理游标请求期间的错误
+      reject(event.target.error);
+    };
   });
 }
 

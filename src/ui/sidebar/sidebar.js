@@ -492,12 +492,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 break;
             case 'FOCUS_INPUT':
                 appContext.dom.messageInput.focus();
-            const range = document.createRange();
-                range.selectNodeContents(appContext.dom.messageInput);
-            range.collapse(false);
-            const selection = window.getSelection();
-            selection.removeAllRanges();
-            selection.addRange(range);
+                setTimeout(() => {
+                    const range = document.createRange();
+                    range.selectNodeContents(appContext.dom.messageInput);
+                    range.collapse(false);
+                    const selection = window.getSelection();
+                    if (selection) {
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                    }
+                }, 0);
                 break;
             case 'URL_CHANGED':
                 appContext.state.pageInfo = data;
