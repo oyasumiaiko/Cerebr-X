@@ -52,6 +52,8 @@ export function createUIManager(appContext) {
   const promptSettingsManager = services.promptSettingsManager; // For togglePromptSettingsPanel
   const mainApiSettingsManager = services.apiManager; // For toggling API settings panel
 
+  let settingsMenuTimeout = null; // Timeout for hover-based closing
+
   /**
    * 自动调整文本框高度
    * @param {HTMLElement} textarea - 文本输入元素
@@ -193,28 +195,64 @@ export function createUIManager(appContext) {
    * 设置设置菜单事件监听器
    */
   function setupSettingsMenuEventListeners() {
-    // Main settings panel toggle is handled by its own manager (settingsManager)
-    // This UIManager can handle general document-level interactions for closing panels.
-
-    if (dom.settingsToggle && settingsManager && typeof settingsManager.togglePanel === 'function') {
-        dom.settingsToggle.addEventListener('click', (e) => {
-            e.stopPropagation(); // Prevent document click listener from immediately closing it
-            settingsManager.togglePanel(); 
+    // Remove or comment out the click listener if hover is the primary interaction
+    /*
+    if (dom.settingsButton && dom.settingsMenu) {
+        dom.settingsButton.addEventListener('click', (e) => {
+            e.stopPropagation(); 
+            const isVisible = dom.settingsMenu.classList.contains('visible');
+            if (isVisible) {
+                closeExclusivePanels(); 
+            } else {
+                closeExclusivePanels();
+                dom.settingsMenu.classList.add('visible');
+                if (apiManager && typeof apiManager.renderFavoriteApis === 'function') {
+                    apiManager.renderFavoriteApis();
+                }
+            }
         });
     }
+    */
 
-    document.addEventListener('click', (e) => {
-      // Check if click is outside all managed panels and their toggles
-      const clickedInsidePanelOrToggle = 
-        dom.settingsPanel?.contains(e.target) || dom.settingsToggle?.contains(e.target) ||
-        dom.apiSettingsPanel?.contains(e.target) || dom.apiSettingsToggle?.contains(e.target) ||
-        dom.promptSettingsPanel?.contains(e.target) || dom.promptSettingsToggle?.contains(e.target) ||
-        dom.chatHistoryPanel?.contains(e.target) || dom.chatHistoryToggle?.contains(e.target);
+    // Hover behavior for settings menu
+    if (dom.settingsButton && dom.settingsMenu) {
+        const openSettingsMenu = () => {
+            clearTimeout(settingsMenuTimeout);
+            // Ensure other exclusive panels are closed before opening this one
+            // Call a more targeted close if closeExclusivePanels is too broad for just hover
+            // For now, assuming closeExclusivePanels handles this fine.
+            const otherPanelsOpen = 
+                (document.getElementById('chat-history-panel') && document.getElementById('chat-history-panel').classList.contains('visible')) ||
+                (dom.apiSettingsPanel && dom.apiSettingsPanel.classList.contains('visible')) ||
+                (dom.promptSettingsPanel && dom.promptSettingsPanel.classList.contains('visible'));
 
-      if (!clickedInsidePanelOrToggle) {
-        closeExclusivePanels(); // Close all if click is outside any relevant UI
-      }
-    });
+            if (otherPanelsOpen) {
+                 closeExclusivePanels(); // Close others if they are open
+            }
+
+            dom.settingsMenu.classList.add('visible');
+            if (apiManager && typeof apiManager.renderFavoriteApis === 'function') {
+                apiManager.renderFavoriteApis();
+            }
+        };
+
+        const scheduleCloseSettingsMenu = () => {
+            clearTimeout(settingsMenuTimeout);
+            settingsMenuTimeout = setTimeout(() => {
+                dom.settingsMenu.classList.remove('visible');
+            }, 300); // 300ms delay before closing
+        };
+
+        dom.settingsButton.addEventListener('mouseenter', openSettingsMenu);
+        dom.settingsButton.addEventListener('mouseleave', scheduleCloseSettingsMenu);
+
+        dom.settingsMenu.addEventListener('mouseenter', () => {
+            clearTimeout(settingsMenuTimeout); // Mouse entered menu, cancel scheduled close
+        });
+        dom.settingsMenu.addEventListener('mouseleave', scheduleCloseSettingsMenu);
+    }
+
+    // The global document click listener is in sidebar.js for closing by clicking outside.
 
     if (messageInput) {
         messageInput.addEventListener('focus', () => {

@@ -52,7 +52,7 @@ export function createContextMenuManager(appContext) {
   // Private state
   let currentMessageElement = null;
   let currentCodeBlock = null;
-  
+
   /**
    * 显示上下文菜单
    * @param {MouseEvent} e - 鼠标事件

@@ -111,22 +111,22 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (settingsManager?.getSetting('autoScroll') === false) return;
             if (!messageSender?.getShouldAutoScroll()) return;
 
-            requestAnimationFrame(() => {
-                const stopAtTop = settingsManager?.getSetting('stopAtTop') === true;
-                let top = chatContainer.scrollHeight;
-                const aiMessages = chatContainer.querySelectorAll('.message.ai-message');
-                if (aiMessages.length > 0) {
-                    const latestAiMessage = aiMessages[aiMessages.length - 1];
-                    const rect = latestAiMessage.getBoundingClientRect();
-                    if (stopAtTop) {
-                        top = latestAiMessage.offsetTop - 8;
-                        messageSender.setShouldAutoScroll(false);
+        requestAnimationFrame(() => {
+            const stopAtTop = settingsManager?.getSetting('stopAtTop') === true;
+            let top = chatContainer.scrollHeight;
+            const aiMessages = chatContainer.querySelectorAll('.message.ai-message');
+            if (aiMessages.length > 0) {
+                const latestAiMessage = aiMessages[aiMessages.length - 1];
+                const rect = latestAiMessage.getBoundingClientRect();
+                if (stopAtTop) {
+                    top = latestAiMessage.offsetTop - 8;
+                    messageSender.setShouldAutoScroll(false);
                     } else {
-                        const computedStyle = window.getComputedStyle(latestAiMessage);
-                        const marginBottom = parseInt(computedStyle.marginBottom, 10);
-                        top = latestAiMessage.offsetTop + rect.height - marginBottom;
-                    }
+                    const computedStyle = window.getComputedStyle(latestAiMessage);
+                    const marginBottom = parseInt(computedStyle.marginBottom, 10);
+                    top = latestAiMessage.offsetTop + rect.height - marginBottom;
                 }
+            }
                 chatContainer.scrollTo({ top, behavior: 'smooth' });
             });
         };
@@ -136,26 +136,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
 
         appContext.utils.deleteMessageContent = async (messageElement) => {
-            if (!messageElement) return;
-            const messageId = messageElement.getAttribute('data-message-id');
-            messageElement.remove();
+        if (!messageElement) return;
+        const messageId = messageElement.getAttribute('data-message-id');
+        messageElement.remove();
 
             const chatHistoryManager = appContext.services.chatHistoryManager;
             const contextMenuManager = appContext.services.contextMenuManager;
             const chatHistoryUI = appContext.services.chatHistoryUI;
 
-            if (!messageId) {
-                console.error("未找到消息ID");
+        if (!messageId) {
+            console.error("未找到消息ID");
                 contextMenuManager?.hideContextMenu();
-                return;
-            }
+            return;
+        }
 
             const success = chatHistoryManager.deleteMessage(messageId);
-            if (!success) {
-                console.error("删除消息失败: 未找到对应的消息节点");
-            } else {
-                await chatHistoryUI.saveCurrentConversation(true);
-            }
+        if (!success) {
+            console.error("删除消息失败: 未找到对应的消息节点");
+        } else {
+            await chatHistoryUI.saveCurrentConversation(true);
+        }
             contextMenuManager?.hideContextMenu();
         };
         
@@ -305,7 +305,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 } catch (error) { console.error("generateCandidateUrls error: ", error); }
                 return candidates;
             }
-
+            
             let matchingConversation = null;
             if (currentUrl.includes('?')) {
                 matchingConversation = sortedHistories.find(conv => conv.url === currentUrl);
@@ -322,7 +322,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const candidateUrls = generateCandidateUrls(currentUrl);
                 for (const candidate of candidateUrls) {
                     matchingConversation = sortedHistories.find(conv => {
-                         try {
+                        try {
                             const convUrlObj = new URL(conv.url);
                             const normalizedConv = convUrlObj.origin + convUrlObj.pathname;
                             return conv.url === candidate || normalizedConv === candidate;
@@ -431,12 +431,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     document.addEventListener('click', (e) => {
-        if (appContext.services.chatHistoryUI.isChatHistoryPanelOpen()) {
-            if (appContext.dom.chatContainer.contains(e.target)) {
-                setTimeout(() => {
-                    appContext.services.uiManager.closeExclusivePanels();
-                }, 0);
+        const target = e.target;
+
+        // List of panel elements, their toggles, and other known opener buttons
+        const panelsAndToggles = [
+            { 
+                panel: document.getElementById('chat-history-panel'), 
+                toggle: appContext.dom.chatHistoryMenuItem, 
+                openers: [appContext.dom.emptyStateHistory] // Add emptyStateHistory as an opener
+            },
+            { panel: appContext.dom.settingsMenu, toggle: appContext.dom.settingsButton, openers: [] },
+            { panel: appContext.dom.apiSettingsPanel, toggle: appContext.dom.apiSettingsToggle, openers: [] },
+            { panel: appContext.dom.promptSettingsPanel, toggle: appContext.dom.promptSettingsToggle, openers: [] },
+            { panel: appContext.dom.contextMenu, toggle: null, openers: [] } 
+        ];
+
+        let clickInsideManagedElement = false;
+        for (const pt of panelsAndToggles) {
+            if (pt.panel && (pt.panel.classList.contains('visible') || pt.panel.style.display !== 'none') && pt.panel.contains(target)) {
+                clickInsideManagedElement = true;
+                break;
             }
+            if (pt.toggle && pt.toggle.contains(target)) {
+                clickInsideManagedElement = true;
+                break;
+            }
+            // Check additional opener buttons
+            if (pt.openers && pt.openers.some(opener => opener && opener.contains(target))) {
+                clickInsideManagedElement = true;
+                break;
+            }
+        }
+
+        if (!clickInsideManagedElement) {
+            appContext.services.uiManager.closeExclusivePanels();
         }
     });
 
@@ -464,12 +492,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 break;
             case 'FOCUS_INPUT':
                 appContext.dom.messageInput.focus();
-                const range = document.createRange();
+            const range = document.createRange();
                 range.selectNodeContents(appContext.dom.messageInput);
-                range.collapse(false);
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(range);
+            range.collapse(false);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
                 break;
             case 'URL_CHANGED':
                 appContext.state.pageInfo = data;
