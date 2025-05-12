@@ -520,7 +520,8 @@ export function createChatHistoryUI(appContext) {
     const pinToggleOption = document.createElement('div');
     pinToggleOption.textContent = isPinned ? '取消置顶' : '置顶';
     pinToggleOption.classList.add('chat-history-context-menu-option');
-    pinToggleOption.addEventListener('click', async () => {
+    pinToggleOption.addEventListener('click', async (e) => {
+      e.stopPropagation(); // <--- 添加阻止冒泡
       if (isPinned) {
         await unpinConversation(conversationId);
       } else {
@@ -536,7 +537,8 @@ export function createChatHistoryUI(appContext) {
     const renameOption = document.createElement('div');
     renameOption.textContent = '重命名对话';
     renameOption.classList.add('chat-history-context-menu-option');
-    renameOption.addEventListener('click', async () => {
+    renameOption.addEventListener('click', async (e) => {
+      e.stopPropagation(); // <--- 添加阻止冒泡
       menu.remove(); // 先关闭菜单
       try {
         const conversation = await getConversationFromCacheOrLoad(conversationId);
@@ -579,7 +581,8 @@ export function createChatHistoryUI(appContext) {
     copyOption.textContent = '以 JSON 格式复制';
     copyOption.classList.add('chat-history-context-menu-option');
 
-    copyOption.addEventListener('click', async () => {
+    copyOption.addEventListener('click', async (e) => {
+      e.stopPropagation(); // <--- 添加阻止冒泡
       try {
         // 获取完整会话内容
         const conversation = await getConversationFromCacheOrLoad(conversationId);
@@ -637,7 +640,8 @@ export function createChatHistoryUI(appContext) {
     deleteOption.textContent = '删除聊天记录';
     deleteOption.classList.add('chat-history-context-menu-option');
 
-    deleteOption.addEventListener('click', async () => {
+    deleteOption.addEventListener('click', async (e) => {
+      e.stopPropagation(); // <--- 添加阻止冒泡
       await deleteConversation(conversationId);
       menu.remove();
 

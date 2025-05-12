@@ -355,10 +355,7 @@ export function createUIManager(appContext) {
 
         // Click event to disable auto-scroll
         chatContainer.addEventListener('click', (e) => {
-          // Only disable auto-scroll if the click is not on an interactive element within a message
-          if (!e.target.closest('a, button, input, [onclick]')) {
-             messageSender.setShouldAutoScroll(false);
-          }
+          messageSender.setShouldAutoScroll(false);
         });
     }
 

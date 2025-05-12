@@ -28,7 +28,7 @@ export function createContextMenuManager(appContext) {
   const {
     dom,
     services,
-    // utils // For showNotification if needed
+    utils // 新增: 解构 utils
   } = appContext;
 
   // DOM elements from appContext.dom
@@ -250,7 +250,7 @@ export function createContextMenuManager(appContext) {
       }
       
       // 调用外部提供的创建分支函数
-      createForkConversation(messageId);
+      chatHistoryUI.createForkConversation(messageId);
       hideContextMenu();
     }
   }
@@ -393,7 +393,11 @@ export function createContextMenuManager(appContext) {
       hideContextMenu();
     });
     deleteMessageButton.addEventListener('click', () => {
-      deleteMessageContent(currentMessageElement);
+      if (currentMessageElement && utils && typeof utils.deleteMessageContent === 'function') {
+        utils.deleteMessageContent(currentMessageElement);
+      } else {
+        console.error('删除消息功能不可用或消息元素未找到。');
+      }
     });
     regenerateButton.addEventListener('click', regenerateMessage);
     clearChatContextButton.addEventListener('click', async () => {
