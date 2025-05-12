@@ -47,14 +47,14 @@ class CerebrSidebar {
     
     // 设置新的定位和变换
     if (position === 'left') {
-      style.left = `calc(20px * var(--scale-ratio, 1))`;
+      style.left = `calc(10px * var(--scale-ratio, 1))`;
       // 更新进入和退出动画的变换
-      this.sidebar.style.setProperty('--transform-hidden', `translateX(calc(-100% - calc(20px * var(--scale-ratio, 1))))`);
+      this.sidebar.style.setProperty('--transform-hidden', `translateX(calc(-100% - calc(10px * var(--scale-ratio, 1))))`);
       this.sidebar.style.setProperty('--box-shadow-visible', `2px 0 15px rgba(0,0,0,0.1)`);
     } else {
-      style.right = `calc(20px * var(--scale-ratio, 1))`;
+      style.right = `calc(10px * var(--scale-ratio, 1))`;
       // 更新进入和退出动画的变换
-      this.sidebar.style.setProperty('--transform-hidden', `translateX(calc(100% + calc(20px * var(--scale-ratio, 1))))`);
+      this.sidebar.style.setProperty('--transform-hidden', `translateX(calc(100% + calc(10px * var(--scale-ratio, 1))))`);
       this.sidebar.style.setProperty('--box-shadow-visible', `-2px 0 15px rgba(0,0,0,0.1)`);
     }
     
@@ -170,9 +170,9 @@ class CerebrSidebar {
           --box-shadow-visible: -2px 0 15px rgba(0,0,0,0.1);
           
           position: fixed;
-          top: calc(20px * var(--scale-ratio, 1));
+          top: calc(10px * var(--scale-ratio, 1));
           width: calc(${this.sidebarWidth}px * var(--scale-ratio, 1) / ${this.scaleFactor});
-          height: calc(100vh - calc(40px * var(--scale-ratio, 1)));
+          height: calc(100vh - calc(20px * var(--scale-ratio, 1)));
           color: var(--cerebr-text-color, #000000);
           z-index: 2147483647;
           border-radius: calc(12px * var(--scale-ratio, 1));
