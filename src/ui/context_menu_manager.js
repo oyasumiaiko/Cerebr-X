@@ -189,12 +189,12 @@ export function createContextMenuManager(appContext) {
         }
       }
       
-      // 如果有AI消息，先删除它 (ensure deleteMessageContent is from chatHistoryUI or similar)
+      // 如果有AI消息，先删除它
       if (lastAiMessage) {
-        if (chatHistoryUI && typeof chatHistoryUI.deleteMessageFromUIAndHistory === 'function') {
-          await chatHistoryUI.deleteMessageFromUIAndHistory(lastAiMessage);
+        if (utils && typeof utils.deleteMessageContent === 'function') {
+          await utils.deleteMessageContent(lastAiMessage);
         } else {
-          console.warn('deleteMessageFromUIAndHistory function not available on chatHistoryUI');
+          console.warn('deleteMessageFromUIAndHistory function not available on utils');
           lastAiMessage.remove(); // Fallback to just removing from DOM
         }
       }
