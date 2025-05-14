@@ -115,7 +115,7 @@ export function createUIManager(appContext) {
    */
   function closeExclusivePanels() {
     // 定义需要互斥的面板ID列表
-    const panelsToCloseDirectly = ['prompt-settings', 'api-settings', 'settings-menu']; // IDs, changed 'settings-panel' to 'settings-menu'
+    const panelsToCloseDirectly = ['prompt-settings', 'api-settings']; // REMOVED 'settings-menu'
     
     // Close panels managed by their respective services if they have a close method
     if (chatHistoryUI && typeof chatHistoryUI.closeChatHistoryPanel === 'function') {
@@ -133,11 +133,12 @@ export function createUIManager(appContext) {
       appContext.dom.apiSettingsPanel.classList.remove('visible');
     }
 
-    if (settingsManager && typeof settingsManager.closePanel === 'function') {
-      settingsManager.closePanel();
-    } else if (appContext.dom.settingsMenu) { // Changed from dom.settingsPanel to appContext.dom.settingsMenu
-      appContext.dom.settingsMenu.classList.remove('visible');
-    }
+    // REMOVE block for settingsManager and settingsMenu from here
+    // if (settingsManager && typeof settingsManager.closePanel === 'function') {
+    //   settingsManager.closePanel();
+    // } else if (appContext.dom.settingsMenu) { 
+    //   appContext.dom.settingsMenu.classList.remove('visible');
+    // }
     
     // Fallback for any other panels by ID if not covered by services
     panelsToCloseDirectly.forEach(pid => {
@@ -146,31 +147,22 @@ export function createUIManager(appContext) {
         // Check if a dedicated service method already handled it
         let handledByService = false;
         if (pid === 'prompt-settings' && promptSettingsManager?.closePanel) {
-          // Already handled or would be handled by promptSettingsManager.closePanel()
-          // If promptSettingsManager.closePanel doesn't exist, it's handled by the direct classList.remove above.
           handledByService = true; 
         } else if (pid === 'api-settings' && apiManager?.closePanel) {
           handledByService = true;
-        } else if (pid === 'settings-menu' && settingsManager?.closePanel) { // Changed from 'settings-panel'
-          handledByService = true;
-        }
+        } 
+        // REMOVE: else if (pid === 'settings-menu' && settingsManager?.closePanel) { 
+        //   handledByService = true; 
+        // }
 
         if (!handledByService) {
-            // This explicit removal is only needed if no service method took care of it OR if the service method does not exist.
-            // The direct classList.remove calls for promptSettingsPanel, apiSettingsPanel, and settingsMenu earlier cover cases where service methods might not exist.
-            // This loop is more of a true fallback for panels *not* directly referenced via appContext.dom above and not having a service method.
-            // However, given the current structure, if a panel is in panelsToCloseDirectly AND has an appContext.dom reference used above,
-            // this secondary check here for it might be redundant if the service method for it doesn't exist.
-            // To simplify, let's assume the earlier direct appContext.dom.xxx.classList.remove() calls are the primary fallback if service methods don't exist.
-            // This loop then truly becomes for panels *only* identified by ID string not explicitly managed by a service with a closePanel method AND not covered by the direct appContext.dom calls.
-            // For 'prompt-settings', 'api-settings', 'settings-menu', they are covered. So this loop might only be for *other* panels if any were added to panelsToCloseDirectly.
-            // If panelsToCloseDirectly ONLY contains these three, and their service method and direct DOM access fallbacks are handled above, this loop might not do much more for them.
-            // Let's refine the condition to ensure it doesn't try to re-close if already handled by a service method.
-            if (!((pid === 'prompt-settings' && promptSettingsManager?.closePanel) || 
-                  (pid === 'api-settings' && apiManager?.closePanel) ||
-                  (pid === 'settings-menu' && settingsManager?.closePanel))) {
+           // Corrected logic: only check for panels that are still in panelsToCloseDirectly
+           // and are not handled by their specific service's closePanel method.
+           if (panelsToCloseDirectly.includes(pid) && 
+               !((pid === 'prompt-settings' && promptSettingsManager?.closePanel) || 
+                 (pid === 'api-settings' && apiManager?.closePanel))) {
                panel.classList.remove('visible');
-            }
+           }
         }
       }
     });
@@ -276,7 +268,14 @@ export function createUIManager(appContext) {
         dom.settingsMenu.addEventListener('mouseenter', () => {
             clearTimeout(settingsMenuTimeout); // Mouse entered menu, cancel scheduled close
         });
-        dom.settingsMenu.addEventListener('mouseleave', scheduleCloseSettingsMenu);
+        dom.settingsMenu.addEventListener('mouseleave', () => {
+            scheduleCloseSettingsMenu();
+        });
+
+        // Keep this: 阻止菜单内部点击事件冒泡，防止触发外部的关闭逻辑
+        dom.settingsMenu.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
     }
 
     // The global document click listener is in sidebar.js for closing by clicking outside.
