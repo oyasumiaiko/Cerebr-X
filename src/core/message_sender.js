@@ -65,10 +65,14 @@ export function createMessageSender(appContext) {
    * @private
    */
   function clearInputs() {
-    messageInput.innerHTML = '';
-    imageContainer.innerHTML = '';
-    // 重置输入框高度
-    uiManager.resetInputHeight();
+    try {
+      messageInput.innerHTML = '';
+      imageContainer.innerHTML = '';
+      // 重置输入框高度
+      uiManager.resetInputHeight();
+    } catch (error) {
+      console.error('清空消息输入框和图片容器失败:', error);
+    }
   }
 
   /**

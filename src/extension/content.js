@@ -983,7 +983,6 @@ async function extractPageContent() {
        document.querySelector('iframe[src*=".pdf"]'))) {
     console.log('检测到PDF文件，尝试提取PDF内容');
     
-    // 确定PDF URL
     let pdfUrl = window.location.href;
     
     // 如果是iframe中的PDF，尝试提取实际的PDF URL
@@ -1002,25 +1001,38 @@ async function extractPageContent() {
     if (pdfContentCache.has(pdfUrl)) {
       console.log('从缓存中获取PDF内容');
       const cachedContent = pdfContentCache.get(pdfUrl);
-      return cachedContent;
+      // 验证缓存内容是否有效
+      if (cachedContent && typeof cachedContent.url === 'string' && typeof cachedContent.title === 'string' && typeof cachedContent.content === 'string') {
+        return cachedContent;
+      } else {
+        console.warn('缓存的PDF内容无效，移除缓存并重新提取', cachedContent);
+        pdfContentCache.delete(pdfUrl); // 移除无效条目
+        // 继续执行提取逻辑
+      }
     }
 
-    console.log('缓存中没有找到PDF内容，开始提取');
-    const pdfResult = await extractTextFromPDF(pdfUrl);
-    if (pdfResult) {
+    console.log('缓存中没有找到PDF内容或缓存无效，开始提取');
+    const pdfResult = await extractTextFromPDF(pdfUrl); // pdfResult 是 { fullText, chapters } 或 null
+    if (pdfResult && typeof pdfResult.fullText === 'string') {
       console.log('将PDF内容存入缓存');
-      pdfContentCache.set(pdfUrl, pdfResult);
-      return {
-        title: document.title,
+      const resultToCache = {
+        title: document.title || pdfUrl, // 为标题提供备用值
         url: pdfUrl,
-        content: pdfResult.fullText,
-        chapters: pdfResult.chapters,
+        content: pdfResult.fullText, // 已知为字符串
+        chapters: pdfResult.chapters || [], // 为章节提供备用值
         isPDF: true
       };
+      pdfContentCache.set(pdfUrl, resultToCache);
+      return resultToCache;
+    } else {
+      console.error(`extractTextFromPDF 对 ${pdfUrl} 返回 null 或无效结果。`);
+      // 明确返回 null 以指示提取失败
+      return null; 
     }
   }
 
   // 等待内容加载和网络请求完成
+  console.log('非PDF，执行HTML页面内容提取逻辑');
   await waitForContent();
 
   // 创建一个文档片段来处理内容
@@ -1055,39 +1067,24 @@ async function extractPageContent() {
   );
 
   // 预分配合理大小的数组以避免扩容
-  const estimatedTextNodes = Math.min(tempContainer.getElementsByTagName('*').length * 2, 10000);
-  texts.length = estimatedTextNodes;
+  // const estimatedTextNodes = Math.min(tempContainer.getElementsByTagName('*').length * 2, 10000);
+  // texts.length = estimatedTextNodes; // 这行会导致后续 texts.join 为 undefined, 因为数组中充满了 empty slots
   
-  let i = 0;
-  while (treeWalker.nextNode()) {
-    texts[i++] = treeWalker.currentNode.textContent.trim();
+  let currentTextNode;
+  while (currentTextNode = treeWalker.nextNode()) {
+    texts.push(currentTextNode.textContent.trim());
   }
-  texts.length = i; // 截断到实际长度
+  // texts.length = i; // 截断到实际长度 // i 未定义
 
   // 改进文本处理逻辑
   let mainContent = texts
-    // .filter(text => text.length > 0)  // 过滤掉空字符串
     .join(' ')
-    // .replace(/[\u200B-\u200D\uFEFF]/g, '')  // 移除零宽字符
-    // .replace(/\s*​\s*/g, ' ')  // 处理特殊的空格字符
     .replace(/\s+/g, ' ')  // 将多个空白字符替换为单个空格
-    // .trim();
+    .trim();
 
-  // // 检查提取的内容是否足够
-  // if (mainContent.length < 40) {
-  //   console.log('提取的内容太少，返回 null');
-  //   return null;
-  // }
-
-  console.log('=== 处理后的 mainContent ===');
-  console.log(mainContent);
-  console.log('=== mainContent 长度 ===', mainContent.length);
-
-  // console.log('页面内容提取完成，内容:', mainContent);
-  // console.log('页面内容提取完成，内容长度:', mainContent.length);
 
   const result = {
-    title: document.title,
+    title: document.title || window.location.href, // 为标题提供备用值
     url: window.location.href,
     content: mainContent,
     selectedText: currentSelection
