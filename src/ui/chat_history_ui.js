@@ -65,6 +65,14 @@ export function createChatHistoryUI(appContext) {
   let lastStatsUpdateTime = 0;
   const STATS_CACHE_DURATION = 5 * 60 * 1000; // 5分钟更新一次统计数据
 
+  // --- Infinite Scroll/Batch Rendering State ---
+  const BATCH_SIZE = 100; // 每批加载的项目数
+  let currentDisplayItems = []; // 当前筛选和排序后的所有项目
+  let currentlyRenderedCount = 0; // 已渲染的项目数量
+  let isLoadingMoreItems = false; // 防止并发加载的标志
+  let currentGroupLabelForBatchRender = null; // 用于跨批次跟踪组标签（针对未置顶项目）
+  let currentPinnedItemsCountInDisplay = 0; // 当前显示列表中置顶项的数量，用于辅助分组逻辑
+
   // --- 置顶功能相关 ---
   const PINNED_STORAGE_KEY = 'pinnedConversationIds';
 
@@ -716,12 +724,13 @@ export function createChatHistoryUI(appContext) {
     panel.dataset.currentFilter = filterText;
     const listContainer = panel.querySelector('#chat-history-list');
     if (!listContainer) return;
-    const oldFilter = panel.dataset.prevFilter || "";
-    const currentScroll = listContainer.scrollTop || 0;
-    const newScrollPos = computeScrollTop(oldFilter, filterText, currentScroll);
-    panel.dataset.prevFilter = filterText;
-    listContainer.innerHTML = '';
-    
+    // const oldFilter = panel.dataset.prevFilter || ""; // Not directly used with scroll-to-top approach
+    // const currentScroll = listContainer.scrollTop || 0; // Not directly used
+    // panel.dataset.prevFilter = filterText; // Not directly used
+
+    listContainer.innerHTML = ''; // 清空列表以进行新的加载/筛选
+    listContainer.scrollTop = 0; // 新的筛选/加载总是滚动到顶部
+
     // 解析筛选条件
     const countFilterMatch = filterText.trim().match(/^(>|>=|<|<=|=|==)\s*(\d+)$/);
     let isCountFilter = false;
@@ -734,81 +743,48 @@ export function createChatHistoryUI(appContext) {
       countThreshold = parseInt(countFilterMatch[2], 10);
     }
     
-    // 获取置顶 ID 列表
     const pinnedIds = await getPinnedIds();
-    // 获取所有对话元数据
     const allHistoriesMeta = await getAllConversationMetadata();
-    // 如果在获取过程中过滤条件已变化，则放弃本次结果
-    if (panel.dataset.currentFilter !== filterText) return;
+    if (panel.dataset.currentFilter !== filterText) return; // 筛选条件在异步获取数据时已改变
 
-    let historiesToShow = [];
-    let sourceHistories = allHistoriesMeta; // 默认使用所有元数据
+    let sourceHistories = []; 
+    let effectiveFilterTextForHighlight = filterText; // 用于高亮的实际文本
 
     if (isCountFilter) {
-      // 按数量筛选 - 先筛选再排序
       sourceHistories = allHistoriesMeta.filter(history => 
         compareCount(history.messageCount, countOperator, countThreshold)
       );
-      
-      if (sourceHistories.length === 0) {
-        const emptyMsg = document.createElement('div');
-        emptyMsg.textContent = `没有消息数量 ${countOperator} ${countThreshold} 的聊天记录`;
-        listContainer.appendChild(emptyMsg);
-        listContainer.scrollTop = newScrollPos;
-        return;
-      }
-      // 不需要文本高亮，清空 filterText
-      filterText = ''; 
-
+      effectiveFilterTextForHighlight = ''; // 数量筛选时不高亮文本
     } else if (filterText) {
-      // 按文本筛选 - 需要加载完整内容，这个过程在下面处理
-      // 注意：文本筛选会改变 sourceHistories 的内容和结构
       const lowerFilter = filterText.toLowerCase();
-      const filteredHistories = [];
-      
-      // 显示加载指示器
+      const filteredResults = [];
       const loadingIndicator = document.createElement('div');
       loadingIndicator.textContent = '正在搜索...';
       loadingIndicator.className = 'search-loading-indicator';
       listContainer.appendChild(loadingIndicator);
       
-      // 异步搜索每个会话
       for (const historyMeta of allHistoriesMeta) {
-        // 先检查元数据是否匹配
+        if (panel.dataset.currentFilter !== filterText) { loadingIndicator.remove(); return; }
         const url = (historyMeta.url || '').toLowerCase();
         const summary = (historyMeta.summary || '').toLowerCase();
         
         if (url.includes(lowerFilter) || summary.includes(lowerFilter)) {
-          filteredHistories.push(historyMeta);
+          filteredResults.push(historyMeta);
           continue;
         }
         
-        // 如果元数据不匹配，则加载完整内容并搜索
         try {
-          // 检查过滤条件是否仍然一致，若不一致则终止
-          if (panel.dataset.currentFilter !== filterText) return;
           const fullConversation = await getConversationById(historyMeta.id);
-          // 检查过滤条件是否仍然一致，若不一致则终止
-          if (panel.dataset.currentFilter !== filterText) return;
+          if (panel.dataset.currentFilter !== filterText) { loadingIndicator.remove(); return; }
           if (fullConversation) {
             const messagesContent = fullConversation.messages && fullConversation.messages.length
-              ? fullConversation.messages.map(msg => {
-                  if (typeof msg.content === 'string') return msg.content || '';
-                  if (Array.isArray(msg.content)) {
-                    return msg.content.map(part => part.type === 'text' ? part.text : '').join(' ');
-                  }
-                  return '';
-                }).join(' ')
+              ? fullConversation.messages.map(msg => extractMessagePlainText(msg) || '').join(' ')
               : '';
-              
             const lowerMessages = messagesContent.toLowerCase();
             if (lowerMessages.includes(lowerFilter)) {
-              // 使用完整会话数据替换元数据，以便后续高亮显示snippet
-              filteredHistories.push(fullConversation); 
-              // 如果加载了完整内容，也更新缓存
+              filteredResults.push(fullConversation); 
               updateConversationInCache(fullConversation); 
             } else {
-              // 释放内存
               if (fullConversation.id !== activeConversation?.id) {
                 loadedConversations.delete(fullConversation.id);
                 conversationUsageTimestamp.delete(fullConversation.id);
@@ -819,159 +795,259 @@ export function createChatHistoryUI(appContext) {
           console.error(`搜索会话 ${historyMeta.id} 失败:`, error);
         }
       }
-      
-      // 移除加载指示器
       loadingIndicator.remove();
-      
-      // 检查过滤条件是否仍然一致
       if (panel.dataset.currentFilter !== filterText) return;
-      
-      // 显示过滤结果
-      if (filteredHistories.length === 0) {
-        const emptyMsg = document.createElement('div');
-        emptyMsg.textContent = '没有匹配的聊天记录';
-        listContainer.appendChild(emptyMsg);
-        // Restore scroll position based on filter change
-        listContainer.scrollTop = newScrollPos;
-        return;
-      }
-      
-      // 文本过滤后的结果作为源数据
-      sourceHistories = filteredHistories; 
+      sourceHistories = filteredResults; 
+    } else {
+      sourceHistories = allHistoriesMeta; // 无筛选，显示所有
     }
-    // --- 统一处理排序和显示 ---
     
-    // 分离置顶和未置顶
-    const pinnedHistories = [];
-    const unpinnedHistories = [];
-    // 创建一个映射以便快速查找置顶顺序
+    const pinnedItems = [];
+    const unpinnedItems = [];
     const pinnedIndexMap = new Map(pinnedIds.map((id, index) => [id, index]));
 
-    // 从 sourceHistories 中分离置顶和未置顶项
     sourceHistories.forEach(hist => {
       if (pinnedIds.includes(hist.id)) {
-        pinnedHistories.push(hist);
+        pinnedItems.push(hist);
       } else {
-        unpinnedHistories.push(hist);
+        unpinnedItems.push(hist);
       }
     });
 
-    // 分别排序
-    const sortByTime = (a, b) => b.endTime - a.endTime;
-    // 置顶列表按 pinnedIds 中的顺序排序
-    pinnedHistories.sort((a, b) => {
-      return (pinnedIndexMap.get(a.id) ?? Infinity) - (pinnedIndexMap.get(b.id) ?? Infinity);
-    });
+    pinnedItems.sort((a, b) => (pinnedIndexMap.get(a.id) ?? Infinity) - (pinnedIndexMap.get(b.id) ?? Infinity));
+    unpinnedItems.sort((a, b) => b.endTime - a.endTime);
 
-    // 对未置顶记录按时间排序
-    unpinnedHistories.sort(sortByTime);
+    currentDisplayItems = [...pinnedItems, ...unpinnedItems];
+    currentPinnedItemsCountInDisplay = pinnedItems.length; // 存储当前筛选结果中的置顶项数量
 
-    // --- 更新显示逻辑 --- 
-    listContainer.innerHTML = ''; // 清空容器准备重新渲染
+    currentlyRenderedCount = 0;
+    currentGroupLabelForBatchRender = null;
+    isLoadingMoreItems = false;
 
-    if (sourceHistories.length === 0 && !isCountFilter && !filterText.trim()) {
-        const emptyMsg = document.createElement('div');
+    if (currentDisplayItems.length === 0) {
+      const emptyMsg = document.createElement('div');
+      if (isCountFilter) {
+        emptyMsg.textContent = `没有消息数量 ${countOperator} ${countThreshold} 的聊天记录`;
+      } else if (filterText) {
+        emptyMsg.textContent = '没有匹配的聊天记录';
+      } else {
         emptyMsg.textContent = '暂无聊天记录';
-        listContainer.appendChild(emptyMsg);
-    } else if (sourceHistories.length > 0) {
-        // --- 修改: 调用新的增量渲染函数 --- 
-        renderListIncrementally(pinnedHistories, unpinnedHistories, filterText, listContainer, pinnedIds, newScrollPos);
-    } 
-    // else: 筛选后无结果的消息已在前面处理 (例如数量筛选或文本筛选无结果)
-  }
-  
-  /**
-   * 逐步渲染会话列表项，避免阻塞UI
-   * @param {Array<Object>} pinnedHistories - 按置顶顺序排序的置顶对话数组
-   * @param {Array<Object>} allTimeSortedHistories - 按时间排序的所有符合条件的对话数组
-   * @param {string} filterText - 过滤文本 (仅用于文本高亮)
-   * @param {HTMLElement} listContainer - 列表容器元素
-   * @param {string[]} pinnedIds - 当前置顶的ID列表
-   * @param {number} [scrollTopToRestore=0] - 需要恢复的滚动位置
-   */
-  async function renderListIncrementally(pinnedHistories, allTimeSortedHistories, filterText, listContainer, pinnedIds, scrollTopToRestore = 0) {
-    listContainer.innerHTML = ''; // 清空容器
-    const panel = listContainer.closest('#chat-history-panel'); // 获取父面板
-    const BATCH_SIZE = 100; // 每次渲染的批次大小
-    let renderedCount = 0;
-    let currentGroupLabel = null;
-    
-    // 优先渲染置顶区域
-    if (pinnedHistories.length > 0) {
+      }
+      listContainer.appendChild(emptyMsg);
+      return;
+    }
+
+    if (pinnedItems.length > 0) {
       const pinnedHeader = document.createElement('div');
       pinnedHeader.className = 'chat-history-group-header pinned-header';
       pinnedHeader.textContent = '已置顶';
       listContainer.appendChild(pinnedHeader);
-      
-      for (let i = 0; i < pinnedHistories.length; i++) {
-        renderConversationItem(pinnedHistories[i], filterText, listContainer, pinnedIds, true);
-        renderedCount++;
-        if (renderedCount % BATCH_SIZE === 0) {
-          await new Promise(requestAnimationFrame); // 等待下一帧
-        }
-      }
     }
     
-    // 渲染普通列表区域 (按日期分组)
-    const groups = {};
-    const groupLatestTime = {};
-    allTimeSortedHistories.forEach(conv => {
-      const convDate = new Date(conv.startTime);
-      const groupLabel = getGroupLabel(convDate);
-      if (!groups[groupLabel]) {
-        groups[groupLabel] = [];
-        groupLatestTime[groupLabel] = convDate.getTime();
-      } else {
-        groupLatestTime[groupLabel] = Math.max(groupLatestTime[groupLabel], convDate.getTime());
+    // 首次加载批次
+    await renderMoreItems(listContainer, pinnedIds, effectiveFilterTextForHighlight, panel.dataset.currentFilter);
+
+    // 移除旧的滚动监听器（如果存在）
+    if (listContainer._scrollListener) {
+      listContainer.removeEventListener('scroll', listContainer._scrollListener);
+    }
+    // 添加新的滚动监听器
+    listContainer._scrollListener = async () => {
+      if (panel.dataset.currentFilter !== filterText) { // 检查筛选条件是否已更改
+        return;
       }
-      groups[groupLabel].push(conv);
+      if (listContainer.scrollTop + listContainer.clientHeight >= listContainer.scrollHeight - 200 && !isLoadingMoreItems) {
+        await renderMoreItems(listContainer, pinnedIds, effectiveFilterTextForHighlight, panel.dataset.currentFilter);
+      }
+    };
+    listContainer.addEventListener('scroll', listContainer._scrollListener);
+  }
+  
+  /**
+   * 逐步渲染会话列表项到指定容器。此函数被 renderMoreItems 调用。
+   * @param {Object} conv - 会话对象（可以是元数据或完整对象）
+   * @param {string} filterText - 过滤文本 (仅用于文本高亮)
+   * @param {boolean} isPinned - 该项是否是置顶项
+   * @returns {HTMLElement} 创建的会话项元素
+   */
+  function createConversationItemElement(conv, filterText, isPinned) {
+    const item = document.createElement('div');
+    item.className = 'chat-history-item';
+    item.setAttribute('data-id', conv.id);
+    if (isPinned) {
+      item.classList.add('pinned');
+    }
+
+    const summaryDiv = document.createElement('div');
+    summaryDiv.className = 'summary';
+    let displaySummary = conv.summary || '无摘要';
+    const isTextFilterActive = filterText && !filterText.trim().match(/^(>|>=|<|<=|=|==)\s*(\d+)$/);
+    if (isTextFilterActive && displaySummary) {
+      try {
+        const escapedFilterForSummary = filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(${escapedFilterForSummary})`, 'gi');
+        displaySummary = displaySummary.replace(regex, '<mark>$1</mark>');
+      } catch (e) {
+        console.error("高亮摘要时发生错误:", e);
+      }
+    }
+    summaryDiv.innerHTML = displaySummary;
+
+    const infoDiv = document.createElement('div');
+    infoDiv.className = 'info';
+    const convDate = new Date(conv.startTime);
+    const endTime = new Date(conv.endTime);
+    const relativeTime = formatRelativeTime(convDate);
+    const relativeEndTime = formatRelativeTime(endTime);
+    const domain = getDisplayUrl(conv.url);
+    let title = conv.title;
+    const chatTimeSpan = relativeTime === relativeEndTime ? relativeTime : `${relativeTime} - ${relativeEndTime}`;
+    const displayInfos = `${chatTimeSpan} · 消息数: ${conv.messageCount} · ${domain}`;
+    infoDiv.textContent = displayInfos;
+    const details = `开始: ${convDate.toLocaleString()} (${relativeTime})\n最新: ${endTime.toLocaleString()} (${relativeEndTime})\n${title}\n${conv.url}`.split('\n').filter(Boolean).join('\n');
+    item.title = details;
+
+    item.appendChild(summaryDiv);
+    item.appendChild(infoDiv);
+
+    if (isTextFilterActive && conv.messages && Array.isArray(conv.messages)) {
+      let snippets = [];
+      let totalMatches = 0;
+      const escapedFilter = filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const lowerFilter = filterText.toLowerCase();
+      let highlightRegex;
+      try {
+        highlightRegex = new RegExp(escapedFilter, 'gi');
+      } catch (e) {
+        console.error("创建高亮正则表达式失败:", e);
+        highlightRegex = null;
+      }
+
+      for (const msg of conv.messages) {
+        const plainText = extractMessagePlainText(msg);
+        if (plainText) {
+          const content = plainText;
+          const contentLower = content.toLowerCase();
+          if (contentLower.indexOf(lowerFilter) === -1) continue;
+          
+          let startIndex = 0;
+          while (true) {
+            const index = contentLower.indexOf(lowerFilter, startIndex);
+            if (index === -1) break;
+            totalMatches++;
+            if (snippets.length < 5) {
+              const snippetStart = Math.max(0, index - 30);
+              const snippetEnd = Math.min(content.length, index + filterText.length + 30);
+              let snippet = content.substring(snippetStart, snippetEnd);
+              if (highlightRegex) {
+                 snippet = snippet.replace(highlightRegex, '<mark>$&</mark>');
+              }
+              const snippetSpan = document.createElement('span');
+              snippetSpan.innerHTML = `…${snippet}…`;
+              snippets.push(snippetSpan);
+            }
+            startIndex = index + 1; 
+          }
+        }
+      }
+      
+      if (snippets.length > 0) {
+        const snippetDiv = document.createElement('div');
+        snippetDiv.className = 'highlight-snippet';
+        snippets.forEach((span, index) => {
+          snippetDiv.appendChild(span);
+          if (index < snippets.length - 1) {
+            snippetDiv.appendChild(document.createElement('br'));
+          }
+        });
+        if (totalMatches > snippets.length) {
+          const moreMatchesSpan = document.createElement('span');
+          moreMatchesSpan.textContent = `…… 共 ${totalMatches} 匹配`;
+          snippetDiv.appendChild(document.createElement('br'));
+          snippetDiv.appendChild(moreMatchesSpan);
+        }
+        item.appendChild(snippetDiv);
+      }
+    }
+
+    item.addEventListener('click', async () => {
+      const conversation = await getConversationFromCacheOrLoad(conv.id);
+      if (conversation) {
+        loadConversationIntoChat(conversation);
+      }
     });
     
-    const sortedGroupLabels = Object.keys(groups).sort((a, b) => groupLatestTime[b] - groupLatestTime[a]);
-    
-    for (const groupLabel of sortedGroupLabels) {
-      // 检查是否需要添加分组标题
-      if (currentGroupLabel !== groupLabel) {
-        const groupHeader = document.createElement('div');
-        groupHeader.className = 'chat-history-group-header';
-        groupHeader.textContent = groupLabel;
-        listContainer.appendChild(groupHeader);
-        currentGroupLabel = groupLabel;
-        // 渲染标题后也稍微等待一下
-        await new Promise(requestAnimationFrame);
-      }
-      
-      const groupItems = groups[groupLabel];
-      for (let i = 0; i < groupItems.length; i++) {
-        renderConversationItem(groupItems[i], filterText, listContainer, pinnedIds, false);
-        renderedCount++;
-        if (renderedCount % BATCH_SIZE === 0) {
-          await new Promise(requestAnimationFrame); // 等待下一帧
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showChatHistoryItemContextMenu(e, conv.id);
+    });
+
+    return item;
+  }
+
+  /**
+   * 渲染下一批聊天记录项。
+   * @param {HTMLElement} listContainer - 列表容器元素
+   * @param {string[]} pinnedIds - 当前置顶的ID列表
+   * @param {string} originalFilterTextForHighlight - 用于文本高亮的原始过滤文本
+   * @param {string} currentPanelFilter - 调用此函数时面板当前的过滤条件，用于一致性检查
+   */
+  async function renderMoreItems(listContainer, pinnedIds, originalFilterTextForHighlight, currentPanelFilter) {
+    if (isLoadingMoreItems || currentlyRenderedCount >= currentDisplayItems.length) {
+      return;
+    }
+    isLoadingMoreItems = true;
+
+    const panel = listContainer.closest('#chat-history-panel');
+    if (panel && panel.dataset.currentFilter !== currentPanelFilter) {
+      console.log("Render cycle aborted, panel filter changed from", currentPanelFilter, "to", panel.dataset.currentFilter);
+      isLoadingMoreItems = false;
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    let itemsRenderedInThisCall = 0;
+
+    for (let i = 0; (currentlyRenderedCount + i) < currentDisplayItems.length && i < BATCH_SIZE; i++) {
+      const convIndex = currentlyRenderedCount + i;
+      const conv = currentDisplayItems[convIndex];
+      const isConvPinned = pinnedIds.includes(conv.id);
+
+      if (!isConvPinned) {
+        const convDate = new Date(conv.startTime);
+        const groupLabel = getGroupLabel(convDate);
+        
+        // 检查是否是当前渲染列表中的第一个未置顶项，或者是新的日期分组
+        // currentPinnedItemsCountInDisplay 是在 loadConversationHistories 中计算的，表示当前过滤条件下置顶项的总数
+        const isFirstUnpinnedAfterPinnedBlock = (convIndex === currentPinnedItemsCountInDisplay);
+
+        if (isFirstUnpinnedAfterPinnedBlock || currentGroupLabelForBatchRender !== groupLabel) {
+          const groupHeader = document.createElement('div');
+          groupHeader.className = 'chat-history-group-header';
+          groupHeader.textContent = groupLabel;
+          fragment.appendChild(groupHeader);
+          currentGroupLabelForBatchRender = groupLabel;
         }
       }
+      
+      const itemElement = createConversationItemElement(conv, originalFilterTextForHighlight, isConvPinned);
+      fragment.appendChild(itemElement);
+      itemsRenderedInThisCall++;
     }
-    
-    // 处理完全没有记录的情况（包括筛选后没有）
-    if (renderedCount === 0 && panel) { // 确保 panel 存在
-       const filterInputValue = panel.querySelector('input[type="text"]')?.value || '';
-       const countFilterMatch = filterInputValue.trim().match(/^(>|>=|<|<=|=|==)\s*(\d+)$/);
-       const isTextFilter = filterInputValue && !countFilterMatch;
-       const emptyMsg = document.createElement('div');
 
-       if (isTextFilter) {
-         emptyMsg.textContent = '没有匹配的聊天记录';
-       } else if (countFilterMatch) {
-         const operator = countFilterMatch[1];
-         const threshold = countFilterMatch[2];
-         emptyMsg.textContent = `没有消息数量 ${operator} ${threshold} 的聊天记录`;
-       } else {
-         emptyMsg.textContent = '暂无聊天记录';
-       }
-       listContainer.appendChild(emptyMsg);
+    listContainer.appendChild(fragment);
+    currentlyRenderedCount += itemsRenderedInThisCall;
+    isLoadingMoreItems = false;
+
+    if (currentlyRenderedCount < currentDisplayItems.length && itemsRenderedInThisCall > 0) {
+      requestAnimationFrame(() => {
+        if (listContainer.scrollHeight <= listContainer.clientHeight) {
+          if (panel && panel.dataset.currentFilter === currentPanelFilter) {
+            renderMoreItems(listContainer, pinnedIds, originalFilterTextForHighlight, currentPanelFilter);
+          }
+        }
+      });
     }
-    
-    // 确保滚动位置在渲染完成后恢复
-    listContainer.scrollTop = scrollTopToRestore; 
   }
 
   /**
@@ -1504,7 +1580,7 @@ export function createChatHistoryUI(appContext) {
       if (url.startsWith('file:///')) {
         // 解码URL并获取文件名
         const decodedUrl = decodeURIComponent(url);
-        return decodedUrl.split(/[\\/]/).pop() || '本地文件'; // 兼容 Windows 和 Unix 路径     
+        return decodedUrl.split(/[\/]/).pop() || '本地文件'; // 兼容 Windows 和 Unix 路径     
       }
       // 非file协议，返回域名
       const urlObj = new URL(url);
@@ -1660,152 +1736,6 @@ export function createChatHistoryUI(appContext) {
     } catch (error) {
       console.error('创建分支对话失败:', error);
     }
-  }
-
-  /**
-   * 渲染单个会话列表项
-   * @param {Object} conv - 会话对象（可以是元数据或完整对象）
-   * @param {string} filterText - 过滤文本 (仅用于文本高亮)
-   * @param {HTMLElement} listContainer - 列表容器元素
-   * @param {string[]} pinnedIds - 当前置顶的ID列表
-   * @param {boolean} isDirectlyPinned - 该项是否是置顶项（用于跳过分组渲染逻辑）
-   */
-  function renderConversationItem(conv, filterText, listContainer, pinnedIds, isDirectlyPinned) {
-    const item = document.createElement('div');
-    item.className = 'chat-history-item';
-    // 保存会话ID作为属性，便于后续加载
-    item.setAttribute('data-id', conv.id);
-    // 添加置顶状态类
-    if (pinnedIds.includes(conv.id)) {
-      item.classList.add('pinned');
-    }
-
-    const summaryDiv = document.createElement('div');
-    summaryDiv.className = 'summary';
-    let displaySummary = conv.summary || '无摘要'; // 提供默认值
-    // 只有在提供了 filterText 并且是文本过滤时才高亮摘要
-    const isTextFilter = filterText && !filterText.trim().match(/^(>|>=|<|<=|=|==)\s*(\d+)$/);
-    if (isTextFilter && displaySummary) {
-      try {
-        const escapedFilterForSummary = filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(`(${escapedFilterForSummary})`, 'gi');
-        displaySummary = displaySummary.replace(regex, '<mark>$1</mark>');
-      } catch (e) {
-        console.error("高亮摘要时发生错误:", e); 
-        // 保持原始摘要不变
-      }
-    }
-    summaryDiv.innerHTML = displaySummary; // 使用 innerHTML 以便渲染 <mark>
-
-    const infoDiv = document.createElement('div');
-    infoDiv.className = 'info';
-    const convDate = new Date(conv.startTime);
-    const endTime = new Date(conv.endTime);
-    const relativeTime = formatRelativeTime(convDate);
-    const relativeEndTime = formatRelativeTime(endTime);
-
-    // 使用新的URL处理函数
-    const domain = getDisplayUrl(conv.url);
-    let title = conv.title;
-
-    const chatTimeSpan = relativeTime === relativeEndTime ? relativeTime : `${relativeTime} - ${relativeEndTime}`;
-    const displayInfos = `${chatTimeSpan} · 消息数: ${conv.messageCount} · ${domain}`
-
-    infoDiv.textContent = displayInfos;
-    // 鼠标悬停显示具体的日期时间和完整URL
-    const details = `开始: ${convDate.toLocaleString()} (${relativeTime})\n最新: ${endTime.toLocaleString()} (${relativeEndTime})\n${title}\n${conv.url}`.split('\n').filter(Boolean).join('\n');
-    item.title = details;
-
-    item.appendChild(summaryDiv);
-    item.appendChild(infoDiv);
-
-    // --- 修改开始：确保仅在文本过滤时才处理 snippet ---
-    if (isTextFilter && conv.messages && Array.isArray(conv.messages)) {
-      let snippets = [];
-      let totalMatches = 0;
-      // 对 filterText 进行转义，避免正则特殊字符问题
-      const escapedFilter = filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const lowerFilter = filterText.toLowerCase();
-      
-      // 预先构造用于高亮的正则对象，处理可能的正则错误
-      let highlightRegex;
-      try {
-        highlightRegex = new RegExp(escapedFilter, 'gi');
-      } catch (e) {
-        console.error("创建高亮正则表达式失败:", e);
-        highlightRegex = null; // 正则无效则不进行高亮
-      }
-
-      for (const msg of conv.messages) {
-        const plainText = extractMessagePlainText(msg);
-        if (plainText) {
-          const content = plainText;
-          const contentLower = content.toLowerCase();
-          // 若当前消息中未包含关键字，则跳过
-          if (contentLower.indexOf(lowerFilter) === -1) continue;
-          
-          let startIndex = 0;
-          while (true) {
-            const index = contentLower.indexOf(lowerFilter, startIndex);
-            if (index === -1) break;
-            totalMatches++;
-            if (snippets.length < 5) {
-              const snippetStart = Math.max(0, index - 30);
-              const snippetEnd = Math.min(content.length, index + filterText.length + 30);
-              let snippet = content.substring(snippetStart, snippetEnd);
-              
-              // 高亮 snippet 中所有匹配关键字
-              if (highlightRegex) {
-                 snippet = snippet.replace(highlightRegex, '<mark>$&</mark>');
-              }
-              
-              // 使用 textContent 防止 XSS
-              const snippetSpan = document.createElement('span');
-              snippetSpan.innerHTML = `…${snippet}…`; // 渲染高亮
-              snippets.push(snippetSpan);
-            }
-            startIndex = index + 1; 
-          }
-        }
-      }
-      
-      if (snippets.length > 0) {
-        const snippetDiv = document.createElement('div');
-        snippetDiv.className = 'highlight-snippet';
-        snippets.forEach((span, index) => {
-          snippetDiv.appendChild(span);
-          if (index < snippets.length - 1) {
-            snippetDiv.appendChild(document.createElement('br'));
-          }
-        });
-        if (totalMatches > snippets.length) {
-          const moreMatchesSpan = document.createElement('span');
-          moreMatchesSpan.textContent = `…… 共 ${totalMatches} 匹配`;
-          snippetDiv.appendChild(document.createElement('br'));
-          snippetDiv.appendChild(moreMatchesSpan);
-        }
-        item.appendChild(snippetDiv);
-      }
-    }
-
-    // 添加聊天记录项的点击事件
-    item.addEventListener('click', async () => {
-      // 加载对话到聊天窗口
-      const conversation = await getConversationFromCacheOrLoad(conv.id);
-      if (conversation) {
-        loadConversationIntoChat(conversation);
-        // 加载对话后关闭历史面板
-        // closeChatHistoryPanel(); 
-      }
-    });
-    
-    // 添加右键事件，显示删除菜单
-    item.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      showChatHistoryItemContextMenu(e, conv.id);
-    });
-
-    listContainer.appendChild(item);
   }
 
   return {
