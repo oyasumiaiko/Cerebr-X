@@ -758,48 +758,81 @@ export function createChatHistoryUI(appContext) {
     } else if (filterText) {
       const lowerFilter = filterText.toLowerCase();
       const filteredResults = [];
-      const loadingIndicator = document.createElement('div');
-      loadingIndicator.textContent = '正在搜索...';
-      loadingIndicator.className = 'search-loading-indicator';
-      listContainer.appendChild(loadingIndicator);
       
-      for (const historyMeta of allHistoriesMeta) {
-        if (panel.dataset.currentFilter !== filterText) { loadingIndicator.remove(); return; }
+      // 在列表容器顶部插入搜索进度指示器
+      const searchProgressIndicator = document.createElement('div');
+      searchProgressIndicator.textContent = '正在搜索聊天记录... (0%)';
+      searchProgressIndicator.className = 'search-loading-indicator'; // 可以复用或定义新的样式
+      // 尝试将进度条放在筛选框下方，如果结构允许
+      const filterBoxContainer = panel.querySelector('.filter-container');
+      if (filterBoxContainer && filterBoxContainer.parentNode === listContainer.parentNode) {
+          filterBoxContainer.insertAdjacentElement('afterend', searchProgressIndicator);
+      } else {
+          listContainer.insertBefore(searchProgressIndicator, listContainer.firstChild);
+      }
+
+      const BATCH_PROCESS_SIZE = 25; // 每次处理的对话元数据数量
+
+      for (let i = 0; i < allHistoriesMeta.length; i++) {
+        // 检查在异步处理过程中筛选条件是否已更改
+        if (panel.dataset.currentFilter !== filterText) {
+          if (searchProgressIndicator.parentNode) searchProgressIndicator.remove();
+          return; // 终止处理
+        }
+
+        const historyMeta = allHistoriesMeta[i];
         const url = (historyMeta.url || '').toLowerCase();
         const summary = (historyMeta.summary || '').toLowerCase();
         
+        let foundInMeta = false;
         if (url.includes(lowerFilter) || summary.includes(lowerFilter)) {
           filteredResults.push(historyMeta);
-          continue;
+          foundInMeta = true;
         }
         
-        try {
-          const fullConversation = await getConversationById(historyMeta.id);
-          if (panel.dataset.currentFilter !== filterText) { loadingIndicator.remove(); return; }
-          if (fullConversation) {
-            const messagesContent = fullConversation.messages && fullConversation.messages.length
-              ? fullConversation.messages.map(msg => extractMessagePlainText(msg) || '').join(' ')
-              : '';
-            const lowerMessages = messagesContent.toLowerCase();
-            if (lowerMessages.includes(lowerFilter)) {
-              filteredResults.push(fullConversation); 
-              updateConversationInCache(fullConversation); 
-            } else {
-              if (fullConversation.id !== activeConversation?.id) {
-                loadedConversations.delete(fullConversation.id);
-                conversationUsageTimestamp.delete(fullConversation.id);
+        // 仅当元数据中未找到时，才搜索完整内容
+        if (!foundInMeta) { 
+          try {
+            // getConversationById 可能是耗时操作
+            const fullConversation = await getConversationById(historyMeta.id);
+            // 再次检查筛选条件 (await 之后)
+            if (panel.dataset.currentFilter !== filterText) {
+              if (searchProgressIndicator.parentNode) searchProgressIndicator.remove();
+              return; 
+            }
+
+            if (fullConversation) {
+              const messagesContent = fullConversation.messages && fullConversation.messages.length
+                ? fullConversation.messages.map(msg => extractMessagePlainText(msg) || '').join(' ')
+                : '';
+              const lowerMessages = messagesContent.toLowerCase();
+              if (lowerMessages.includes(lowerFilter)) {
+                filteredResults.push(fullConversation); 
+                updateConversationInCache(fullConversation); 
+              } else {
+                // 对于未匹配但已加载完整内容的会话，其内存将由缓存淘汰策略管理
+                // 无需在此处显式删除，以避免破坏缓存逻辑的复杂性
               }
             }
+          } catch (error) {
+            console.error(`搜索会话 ${historyMeta.id} 失败:`, error);
           }
-        } catch (error) {
-          console.error(`搜索会话 ${historyMeta.id} 失败:`, error);
+        }
+
+        // 定期更新进度并交还控制权给事件循环
+        if ((i + 1) % BATCH_PROCESS_SIZE === 0 || i === allHistoriesMeta.length - 1) {
+          const percentComplete = Math.round(((i + 1) / allHistoriesMeta.length) * 100);
+          searchProgressIndicator.textContent = `正在搜索聊天记录... (${percentComplete}%)`;
+          await new Promise(resolve => setTimeout(resolve, 0)); // Yield to event loop
         }
       }
-      loadingIndicator.remove();
-      if (panel.dataset.currentFilter !== filterText) return;
-      sourceHistories = filteredResults; 
+      
+      if (searchProgressIndicator.parentNode) searchProgressIndicator.remove(); // 移除进度指示器
+      sourceHistories = filteredResults;
+      // effectiveFilterTextForHighlight 保持为 filterText
     } else {
-      sourceHistories = allHistoriesMeta; // 无筛选，显示所有
+      sourceHistories = allHistoriesMeta; // 无筛选或计数筛选，使用所有元数据
+      effectiveFilterTextForHighlight = ''; // 无文本筛选则不高亮
     }
     
     const pinnedItems = [];

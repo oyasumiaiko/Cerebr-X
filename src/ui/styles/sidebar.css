@@ -2307,16 +2307,8 @@ body.hide-references .reference-number.superscript {
 /* 搜索加载指示器 */
 .search-loading-indicator {
     text-align: center;
-    padding: 10px;
+    padding: 20px;
     color: var(--cerebr-text-color);
-    font-style: italic;
-    animation: pulse 1.5s infinite ease-in-out;
-}
-
-@keyframes pulse {
-    0% { opacity: 0.5; }
-    50% { opacity: 1; }
-    100% { opacity: 0.5; }
 }
 
 /* 添加更多间距 */
