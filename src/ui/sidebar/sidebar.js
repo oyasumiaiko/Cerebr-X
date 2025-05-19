@@ -439,10 +439,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 toggle: appContext.dom.chatHistoryMenuItem, 
                 openers: [appContext.dom.emptyStateHistory] // Add emptyStateHistory as an opener
             },
-            { panel: appContext.dom.settingsMenu, toggle: appContext.dom.settingsButton, openers: [] },
             { panel: appContext.dom.apiSettingsPanel, toggle: appContext.dom.apiSettingsToggle, openers: [] },
             { panel: appContext.dom.promptSettingsPanel, toggle: appContext.dom.promptSettingsToggle, openers: [] },
-            { panel: appContext.dom.contextMenu, toggle: null, openers: [] } 
+            // { panel: appContext.dom.settingsMenu, toggle: appContext.dom.settingsButton, openers: [] },
+            // { panel: appContext.dom.contextMenu, toggle: null, openers: [] } 
         ];
 
         let clickInsideManagedElement = false;

@@ -13,7 +13,6 @@
  * @param {HTMLElement} appContext.dom.sendButton - 发送按钮元素
  * @param {HTMLElement} appContext.dom.inputContainer - 输入容器元素
  * @param {HTMLElement} appContext.dom.promptSettings - 提示词设置面板元素
- * @param {HTMLElement} appContext.dom.promptSettingsToggle - 提示词设置开关元素
  * @param {HTMLElement} appContext.dom.collapseButton - 收起按钮元素
  * @param {Object} appContext.services.chatHistoryUI - 聊天历史UI对象
  * @param {Object} appContext.services.imageHandler - 图片处理器对象
@@ -38,7 +37,6 @@ export function createUIManager(appContext) {
   const sendButton = dom.sendButton;
   const inputContainer = dom.inputContainer;
   const promptSettingsPanel = dom.promptSettingsPanel; // Renamed from promptSettings
-  const promptSettingsToggle = dom.promptSettingsToggle;
   const collapseButton = dom.collapseButton;
   const imageContainer = dom.imageContainer; // Added for updateSendButtonState
   // other DOM elements like sidebar, topBar, imagePreviewModal etc. can be accessed via dom if needed
@@ -234,6 +232,16 @@ export function createUIManager(appContext) {
             apiManager.renderFavoriteApis();
         };
 
+        
+        appContext.dom.promptSettingsToggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const wasVisible = dom.promptSettingsPanel.classList.contains('visible');
+          closeExclusivePanels();
+          if (!wasVisible) {
+            dom.promptSettingsPanel.classList.toggle('visible');
+          }
+        });
+
         const scheduleCloseSettingsMenu = () => {
             clearTimeout(settingsMenuTimeout);
             settingsMenuTimeout = setTimeout(() => {
@@ -262,53 +270,6 @@ export function createUIManager(appContext) {
     if (messageInput) {
         messageInput.addEventListener('focus', () => {
             closeExclusivePanels(); // Close panels when user focuses on input
-        });
-    }
-  }
-
-  /**
-   * 设置面板切换事件监听器
-   */
-  function setupPanelEventListeners() {
-    // Prompt Settings Panel Toggle
-    if (promptSettingsToggle) {
-      promptSettingsToggle.addEventListener('click', (e) => {
-        e.stopPropagation();
-        promptSettingsManager.togglePanel();
-      });
-    } else if (promptSettingsToggle && dom.promptSettingsPanel) { 
-        promptSettingsToggle.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const wasVisible = dom.promptSettingsPanel.classList.contains('visible');
-            closeExclusivePanels();
-            if (!wasVisible) {
-                dom.promptSettingsPanel.classList.toggle('visible');
-            }
-        });
-    }
-
-    // API Settings Panel Toggle
-    if (dom.apiSettingsToggle) {
-        dom.apiSettingsToggle.addEventListener('click', (e) => {
-            e.stopPropagation();
-            apiManager.togglePanel();
-        });
-    } 
-
-    // Chat History Panel Toggle
-    if (dom.chatHistoryToggle) {
-        dom.chatHistoryToggle.addEventListener('click', (e) => {
-            e.stopPropagation();
-            chatHistoryUI.toggleChatHistoryPanel();
-        });
-    }
-
-    // Collapse Sidebar Button
-    if (collapseButton) {
-        collapseButton.addEventListener('click', () => {
-            window.parent.postMessage({
-                type: 'CLOSE_SIDEBAR'
-            }, '*');
         });
     }
   }
@@ -369,7 +330,6 @@ export function createUIManager(appContext) {
   function init() {
     setupInputEventListeners();
     setupSettingsMenuEventListeners();
-    setupPanelEventListeners();
     setupChatContainerEventListeners();
     setupFocusEventListeners();
     
