@@ -362,7 +362,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         appContext.dom.repomixButton.addEventListener('click', async () => {
             const isGithubRepo = appContext.state.pageInfo?.url?.includes('github.com');
             if (isGithubRepo) {
-                const repoUrl = appContext.state.pageInfo?.url?.match(/https:\/\/github\.com\/[^\/]+\/[^\/]+/)?.[0];
+                const repoUrl = appContext.state.pageInfo?.url;
                 if (repoUrl) {
                     try {
                         appContext.utils.showNotification('正在打包仓库...', 3000);
