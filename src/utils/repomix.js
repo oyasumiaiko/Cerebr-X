@@ -133,11 +133,6 @@ export async function packRemoteRepoViaApiExtension(repoUrl, userSuppliedOptions
       let infoHeader = `打包仓库: ${repoUrl.replace('https://github.com/', '')}\n`;
       if (resolvedOptions.includePatterns) {
         infoHeader += `指定包含路径: ${resolvedOptions.includePatterns}\n`;
-      } else {
-        infoHeader += `处理范围: 整个仓库 (根目录)\n`;
-      }
-      if (resolvedOptions.ignorePatterns) {
-        infoHeader += `忽略规则: ${resolvedOptions.ignorePatterns}\n`;
       }
       infoHeader += '\n---\n\n';
       

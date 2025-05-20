@@ -379,7 +379,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                             if (messageElement) {
                                 // 用户添加的DOM操作：先设置输入框内容并聚焦
-                                appContext.dom.messageInput.textContent = '全面介绍一下当前仓库的结构和内容、逻辑';
+                                appContext.dom.messageInput.textContent = '全面分析介绍总结当前仓库的结构、内容、原理、核心逻辑的实现';
                                 appContext.dom.messageInput.focus();
                                 
                                 appContext.utils.showNotification('仓库内容已添加到当前对话。', 2000);
