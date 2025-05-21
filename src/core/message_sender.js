@@ -441,105 +441,124 @@ export function createMessageSender(appContext) {
   async function handleStreamResponse(response, loadingMessage) {
     const reader = response.body.getReader();
     let hasStartedResponse = false;
-    let aiResponse = '';
-    // 从 response.url 中判断是否为 Gemini API
+    let aiResponse = ''; // Accumulates the AI's textual response over multiple events
     const isGeminiApi = response.url.includes('generativelanguage.googleapis.com') && !response.url.includes('openai');
+    
+    let incomingDataBuffer = ''; 
+    const decoder = new TextDecoder();
+    let currentEventDataLines = []; // Store all "data: xxx" contents for the current event
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = new TextDecoder().decode(value);
-      // Gemini API 的 SSE 流每个事件可能包含多行，且 JSON 可能跨越多行
-      // 我们需要更健壮地处理块，而不是简单地按换行符分割
-
-      if (isGeminiApi) {
-        // Gemini API 流处理
-        // Gemini 的 SSE 事件通常以 "data: " 开头，后跟 JSON 对象
-        // 一个 chunk 可能包含多个 "data: " 事件，或者一个事件的一部分
-        // 我们需要累积数据直到可以解析一个完整的 JSON 对象
-        // 这里简化处理：假设每个 chunk 包含一个或多个完整的 "data: {"event"}\n" 格式的事件
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const jsonString = line.substring(5).trim(); // 移除 "data: " 并 trim
-            if (jsonString) {
-              try {
-                const data = JSON.parse(jsonString);
-                if (data.error) {
-                  const errorMessage = data.error.message || 'Unknown Gemini error';
-                  console.error('Gemini API error:', data.error);
-                  throw new Error(errorMessage);
-                }
-                const deltaContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (deltaContent) {
-                  if (!hasStartedResponse) {
-                    loadingMessage.remove();
-                    hasStartedResponse = true;
-                    scrollToBottom();
-                  }
-                  aiResponse += deltaContent;
-                  // Gemini 不需要nabla替换
-                  updateAIMessage(aiResponse, data.candidates?.[0]?.groundingMetadata);
-                }
-              } catch (e) {
-                // 忽略不完整的JSON解析错误，等待更多数据
-                if (!(e instanceof SyntaxError && e.message.includes('Unexpected end of JSON input'))) {
-                    console.error('解析 Gemini 响应出错:', e, 'Raw line:', line);
-                    // 如果是我们主动抛出的错误,则向上传播
-                    if (e.message.startsWith('Gemini API error')) {
-                        throw e;
-                    }
-                } else {
-                  // console.log('Incomplete JSON, waiting for more data...', jsonString);
-                }
-              }
-            }
-          }
+      if (done) {
+        // Process any buffered complete line at the end of the stream
+        if (incomingDataBuffer.length > 0) {
+             processLine(incomingDataBuffer); // Process the last buffered line
+             incomingDataBuffer = ''; 
         }
-      } else {
-        // 原有 OpenRouter/OpenAI 流处理
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const content = line.slice(6);
-            if (content.trim() === '[DONE]') continue;
-            try {
-              const data = JSON.parse(content);
-              
-              if (data.error) {
-                const errorMessage = data.error.message || 'Unknown error';
-                console.error('OpenRouter error:', data.error);
-                throw new Error(errorMessage);
-              }
-
-              if (data.choices?.[0]?.error) {
-                const errorMessage = data.choices[0].error.message || 'Unknown error';
-                console.error('Model error:', data.choices[0].error);
-                throw new Error(errorMessage);
-              }
-              
-              const deltaContent = data.choices?.[0]?.delta?.content || 
-                                  data.choices?.[0]?.delta?.reasoning_content;
-              if (deltaContent) {
-                if (!hasStartedResponse) {
-                  loadingMessage.remove();
-                  hasStartedResponse = true;
-                  scrollToBottom();
-                }
-                aiResponse += deltaContent;
-                aiResponse = aiResponse.replace(/\nabla/g, '\\\\nabla');
-                updateAIMessage(aiResponse, data.choices?.[0]?.groundingMetadata);
-              }
-            } catch (e) {
-              console.error('解析响应出错:', e);
-              if (e.message !== 'Unexpected end of JSON input') {
-                throw e;
-              }
-            }
-          }
+        // If there's pending event data, try to process it as the final event
+        if (currentEventDataLines.length > 0) {
+          processEvent();
         }
+        break; 
       }
+
+      incomingDataBuffer += decoder.decode(value, { stream: true });
+
+      let lineEndIndex;
+      while ((lineEndIndex = incomingDataBuffer.indexOf('\n')) >= 0) {
+        const line = incomingDataBuffer.substring(0, lineEndIndex);
+        incomingDataBuffer = incomingDataBuffer.substring(lineEndIndex + 1);
+        processLine(line);
+      }
+    }
+
+    function processLine(line) {
+      // Trim the line to handle potential CR characters as well (e.g. '\r\n')
+      const trimmedLine = line.trim();
+
+      if (trimmedLine === '') { // Empty line: dispatch event
+        if (currentEventDataLines.length > 0) {
+          processEvent();
+        }
+      } else if (trimmedLine.startsWith('data:')) {
+        // Add content after "data:" (and optional single space) to current event's data lines
+        currentEventDataLines.push(trimmedLine.substring(5).trimStart()); 
+      } 
+      // Ignoring event:, id:, : (comments) as they are not used by current response structures
+    }
+
+    function processEvent() {
+      // Join with newlines as per SSE spec for multi-line data fields
+      const fullEventData = currentEventDataLines.join('\n'); 
+      currentEventDataLines = []; // Reset for next event
+
+      if (fullEventData.trim() === '') return; // Nothing to process
+
+      // OpenAI specific [DONE] signal check
+      if (!isGeminiApi && fullEventData.trim() === '[DONE]') {
+        return;
+      }
+
+      try {
+        const jsonData = JSON.parse(fullEventData);
+        if (isGeminiApi) {
+          handleGeminiEvent(jsonData);
+        } else {
+          handleOpenAIEvent(jsonData);
+        }
+      } catch (e) {
+        console.error('解析SSE事件JSON出错:', e, 'Event data:', `'${fullEventData}'`);
+        // Potentially re-throw or handle critical parsing errors if needed
+        // For instance, if the error is not just an 'unexpected end' from a legitimately partial stream
+        // but a more fundamental JSON structure issue from the server.
+      }
+    }
+
+    function handleGeminiEvent(data) {
+      if (data.error) {
+        const errorMessage = data.error.message || 'Unknown Gemini error';
+        console.error('Gemini API error:', data.error);
+        if (loadingMessage && loadingMessage.parentNode) loadingMessage.remove();
+        throw new Error(errorMessage); // Propagates to sendMessage's catch block
+      }
+      const deltaContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (deltaContent) {
+        if (!hasStartedResponse) {
+          if (loadingMessage && loadingMessage.parentNode) loadingMessage.remove();
+          hasStartedResponse = true;
+          scrollToBottom();
+        }
+        aiResponse += deltaContent;
+        updateAIMessage(aiResponse, data.candidates?.[0]?.groundingMetadata);
+      }
+    }
+
+    function handleOpenAIEvent(data) {
+        if (data.error) { 
+            const msg = data.error.message || 'Unknown OpenAI error'; 
+            console.error('OpenAI API error:', data.error);
+            if (loadingMessage && loadingMessage.parentNode) loadingMessage.remove();
+            throw new Error(msg);
+        }
+        if (data.choices?.[0]?.error) { 
+            const msg = data.choices[0].error.message || 'Unknown OpenAI model error';
+            console.error('OpenAI Model error:', data.choices[0].error);
+            if (loadingMessage && loadingMessage.parentNode) loadingMessage.remove();
+            throw new Error(msg);
+        }
+        
+        const deltaContent = data.choices?.[0]?.delta?.content || data.choices?.[0]?.delta?.reasoning_content;
+        if (deltaContent) {
+            if (!hasStartedResponse) {
+                if (loadingMessage && loadingMessage.parentNode) loadingMessage.remove();
+                hasStartedResponse = true;
+                scrollToBottom();
+            }
+            aiResponse += deltaContent;
+            aiResponse = aiResponse.replace(/\nabla/g, '\\nabla'); 
+            updateAIMessage(aiResponse, data.choices?.[0]?.groundingMetadata);
+        }
     }
   }
 
