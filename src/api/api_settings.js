@@ -533,25 +533,74 @@ export function createApiManager(appContext) {
    */
   function buildRequest({ messages, config, overrides = {} }) {
     // 构造请求基本结构
-    let requestBody = {
-      model: config.modelName,
-      messages: messages,
-      stream: true,
-      temperature: config.temperature ?? 1.0, // 确保有默认值
-      top_p: 0.95,
-      ...overrides // 允许覆盖默认参数
-    };
+    let requestBody = {};
 
-    // 如果存在自定义参数，解析并合并
-    if (config.customParams) {
-      try {
-        const extraParams = JSON.parse(config.customParams);
-        requestBody = { ...requestBody, ...extraParams };
-      } catch (e) {
-        console.error("解析自定义参数 JSON 失败，请检查格式。", e);
+    if (config.baseUrl === 'genai') {
+      // Gemini API 请求格式
+      const contents = messages.map(msg => {
+        // Gemini API 使用 'user' 和 'model' 角色
+        const role = msg.role === 'assistant' ? 'model' : msg.role;
+        // Gemini API 将 'system' 消息作为单独的 systemInstruction
+        if (msg.role === 'system') {
+          return null; // 在后面单独处理
+        }
+        return {
+          role: role,
+          parts: [{ text: msg.content }]
+        };
+      }).filter(Boolean); // 过滤掉 null (即 system 消息)
+
+      requestBody = {
+        contents: contents,
+        generationConfig: {
+          responseMimeType: "text/plain",
+          temperature: config.temperature ?? 1.0,
+          // topP: 0.95, // Gemini 使用 topP 而不是 top_p
+        },
+        // tools: [ // 根据需要添加 tools
+        //   { "googleSearch": {} }
+        // ],
+        ...overrides
+      };
+
+      // 处理 system 消息
+      const systemMessage = messages.find(msg => msg.role === 'system');
+      if (systemMessage && systemMessage.content) {
+        requestBody.systemInstruction = {
+          role: "system", // Gemini API文档中 systemInstruction 内部似乎不需要 role，但其类型是 Content，Content可以有role
+          parts: [{ text: systemMessage.content }]
+        };
+      }
+       // 如果存在自定义参数，解析并合并到 generationConfig
+      if (config.customParams) {
+        try {
+          const extraParams = JSON.parse(config.customParams);
+          requestBody.generationConfig = { ...requestBody.generationConfig, ...extraParams };
+        } catch (e) {
+          console.error("解析自定义参数 JSON 失败 (Gemini)，请检查格式。", e);
+        }
+      }
+
+    } else {
+      // 其他 API (如 OpenAI) 请求格式
+      requestBody = {
+        model: config.modelName,
+        messages: messages,
+        stream: true,
+        temperature: config.temperature ?? 1.0, // 确保有默认值
+        top_p: 0.95,
+        ...overrides // 允许覆盖默认参数
+      };
+      // 如果存在自定义参数，解析并合并
+      if (config.customParams) {
+        try {
+          const extraParams = JSON.parse(config.customParams);
+          requestBody = { ...requestBody, ...extraParams };
+        } catch (e) {
+          console.error("解析自定义参数 JSON 失败，请检查格式。", e);
+        }
       }
     }
-
     return requestBody;
   }
 
@@ -590,12 +639,24 @@ export function createApiManager(appContext) {
          throw new Error(`Selected API Key for ${config.displayName || config.modelName} is empty.`);
     }
 
-    return fetch(config.baseUrl, {
+    let endpointUrl = config.baseUrl;
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+
+    if (config.baseUrl === 'genai') {
+      // Gemini API endpoint 和 key 参数
+      // modelName 示例: "gemini-2.5-flash-preview-0520" or "gemini-2.5-pro-preview-0506"
+      endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${config.modelName}:streamGenerateContent?key=${selectedKey}&alt=sse`;
+      // Gemini API 不需要 Authorization Bearer token header
+    } else {
+      // 其他 API (如 OpenAI)
+      headers['Authorization'] = `Bearer ${selectedKey}`;
+    }
+
+    return fetch(endpointUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${selectedKey}`, // 使用选中的 Key
-      },
+      headers: headers,
       body: JSON.stringify(requestBody),
       signal
     });

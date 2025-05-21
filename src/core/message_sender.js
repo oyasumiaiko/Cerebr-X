@@ -442,53 +442,100 @@ export function createMessageSender(appContext) {
     const reader = response.body.getReader();
     let hasStartedResponse = false;
     let aiResponse = '';
+    // 从 response.url 中判断是否为 Gemini API
+    const isGeminiApi = response.url.includes('generativelanguage.googleapis.com') && !response.url.includes('openai');
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
       const chunk = new TextDecoder().decode(value);
-      const lines = chunk.split('\n');
+      // Gemini API 的 SSE 流每个事件可能包含多行，且 JSON 可能跨越多行
+      // 我们需要更健壮地处理块，而不是简单地按换行符分割
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const content = line.slice(6);
-          if (content.trim() === '[DONE]') continue;
-          try {
-            const data = JSON.parse(content);
-            
-            // 检查是否有错误响应
-            if (data.error) {
-              const errorMessage = data.error.message || 'Unknown error';
-              console.error('OpenRouter error:', data.error);
-              throw new Error(errorMessage);
-            }
-
-            // 检查choices中的错误
-            if (data.choices?.[0]?.error) {
-              const errorMessage = data.choices[0].error.message || 'Unknown error';
-              console.error('Model error:', data.choices[0].error);
-              throw new Error(errorMessage);
-            }
-            
-            const deltaContent = data.choices?.[0]?.delta?.content || 
-                                data.choices?.[0]?.delta?.reasoning_content;
-            if (deltaContent) {
-              if (!hasStartedResponse) {
-                // 收到首批令牌：移除加载消息并立即滚动到底部
-                loadingMessage.remove();
-                hasStartedResponse = true;
-                scrollToBottom();
+      if (isGeminiApi) {
+        // Gemini API 流处理
+        // Gemini 的 SSE 事件通常以 "data: " 开头，后跟 JSON 对象
+        // 一个 chunk 可能包含多个 "data: " 事件，或者一个事件的一部分
+        // 我们需要累积数据直到可以解析一个完整的 JSON 对象
+        // 这里简化处理：假设每个 chunk 包含一个或多个完整的 "data: {"event"}\n" 格式的事件
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const jsonString = line.substring(5).trim(); // 移除 "data: " 并 trim
+            if (jsonString) {
+              try {
+                const data = JSON.parse(jsonString);
+                if (data.error) {
+                  const errorMessage = data.error.message || 'Unknown Gemini error';
+                  console.error('Gemini API error:', data.error);
+                  throw new Error(errorMessage);
+                }
+                const deltaContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (deltaContent) {
+                  if (!hasStartedResponse) {
+                    loadingMessage.remove();
+                    hasStartedResponse = true;
+                    scrollToBottom();
+                  }
+                  aiResponse += deltaContent;
+                  // Gemini 不需要nabla替换
+                  updateAIMessage(aiResponse, data.candidates?.[0]?.groundingMetadata);
+                }
+              } catch (e) {
+                // 忽略不完整的JSON解析错误，等待更多数据
+                if (!(e instanceof SyntaxError && e.message.includes('Unexpected end of JSON input'))) {
+                    console.error('解析 Gemini 响应出错:', e, 'Raw line:', line);
+                    // 如果是我们主动抛出的错误,则向上传播
+                    if (e.message.startsWith('Gemini API error')) {
+                        throw e;
+                    }
+                } else {
+                  // console.log('Incomplete JSON, waiting for more data...', jsonString);
+                }
               }
-              aiResponse += deltaContent;
-              aiResponse = aiResponse.replace(/\nabla/g, '\\nabla');
-              updateAIMessage(aiResponse, data.choices?.[0]?.groundingMetadata);
             }
-          } catch (e) {
-            console.error('解析响应出错:', e);
-            // 如果是我们主动抛出的错误,则向上传播
-            if (e.message !== 'Unexpected end of JSON input') {
-              throw e;
+          }
+        }
+      } else {
+        // 原有 OpenRouter/OpenAI 流处理
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const content = line.slice(6);
+            if (content.trim() === '[DONE]') continue;
+            try {
+              const data = JSON.parse(content);
+              
+              if (data.error) {
+                const errorMessage = data.error.message || 'Unknown error';
+                console.error('OpenRouter error:', data.error);
+                throw new Error(errorMessage);
+              }
+
+              if (data.choices?.[0]?.error) {
+                const errorMessage = data.choices[0].error.message || 'Unknown error';
+                console.error('Model error:', data.choices[0].error);
+                throw new Error(errorMessage);
+              }
+              
+              const deltaContent = data.choices?.[0]?.delta?.content || 
+                                  data.choices?.[0]?.delta?.reasoning_content;
+              if (deltaContent) {
+                if (!hasStartedResponse) {
+                  loadingMessage.remove();
+                  hasStartedResponse = true;
+                  scrollToBottom();
+                }
+                aiResponse += deltaContent;
+                aiResponse = aiResponse.replace(/\nabla/g, '\\\\nabla');
+                updateAIMessage(aiResponse, data.choices?.[0]?.groundingMetadata);
+              }
+            } catch (e) {
+              console.error('解析响应出错:', e);
+              if (e.message !== 'Unexpected end of JSON input') {
+                throw e;
+              }
             }
           }
         }
