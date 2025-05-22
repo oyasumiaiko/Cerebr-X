@@ -517,6 +517,10 @@ input:checked + .slider:before {
     opacity: 1;
 }
 
+.api-cards{
+    margin-bottom: 50vh;
+}
+
 .settings-header {
     display: flex;
     align-items: center;
