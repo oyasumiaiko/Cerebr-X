@@ -42,6 +42,79 @@ export function createMessageProcessor(appContext) {
   };
 
   /**
+   * 设置或更新思考过程的显示区域
+   * @param {HTMLElement} messageWrapperDiv - 包裹单条消息的顶层div (e.g., .message)
+   * @param {string|null} rawThoughts - 原始的思考过程文本，为null则移除该区域
+   * @param {Function} processMathAndMarkdownFn - 用于处理Markdown和数学的函数引用
+   */
+  function setupThoughtsDisplay(messageWrapperDiv, rawThoughts, processMathAndMarkdownFn) {
+    let thoughtsContentDiv = messageWrapperDiv.querySelector('.thoughts-content');
+
+    if (rawThoughts && rawThoughts.trim() !== '') {
+      let thoughtsInnerContent;
+      let expandButton;
+
+      if (!thoughtsContentDiv) {
+        thoughtsContentDiv = document.createElement('div');
+        thoughtsContentDiv.className = 'thoughts-content'; // .expanded is toggled by button
+
+        const thoughtsPrefix = document.createElement('div');
+        thoughtsPrefix.className = 'thoughts-prefix';
+        thoughtsPrefix.textContent = '思考过程:';
+        thoughtsContentDiv.appendChild(thoughtsPrefix);
+
+        thoughtsInnerContent = document.createElement('div');
+        thoughtsInnerContent.className = 'thoughts-inner-content';
+        thoughtsContentDiv.appendChild(thoughtsInnerContent);
+
+        expandButton = document.createElement('button');
+        expandButton.className = 'expand-thoughts-btn';
+        expandButton.setAttribute('type', 'button'); // Good practice for buttons
+        expandButton.setAttribute('aria-label', '切换思考过程');
+        expandButton.setAttribute('aria-expanded', 'false');
+        // 使用 Font Awesome 图标 - 确保您的项目已包含 Font Awesome
+        expandButton.innerHTML = '<i class="fa-light fa-arrows-from-line icon-expand"></i><i class="fa-light fa-arrows-to-line icon-collapse"></i>';
+        expandButton.style.fontSize = '1.2em';
+        
+        expandButton.addEventListener('click', (e) => {
+          e.stopPropagation(); // Prevent click from bubbling to messageDiv if it has listeners
+          const isExpanded = thoughtsContentDiv.classList.toggle('expanded');
+          expandButton.setAttribute('aria-expanded', isExpanded.toString());
+        });
+        // 将按钮放在 thoughts-prefix 之后，但在 inner-content 之前，或根据CSS调整为绝对定位
+        // For absolute positioning of button within thoughtsContentDiv, DOM order is less critical for visual.
+        // Let's append it directly to thoughtsContentDiv. CSS handles positioning.
+        thoughtsContentDiv.appendChild(expandButton);
+        
+        const textContentElement = messageWrapperDiv.querySelector('.text-content');
+        if (textContentElement) {
+             messageWrapperDiv.insertBefore(thoughtsContentDiv, textContentElement);
+        } else {
+             messageWrapperDiv.appendChild(thoughtsContentDiv); // Fallback
+        }
+      } else {
+        // Thoughts section already exists, get its parts
+        thoughtsInnerContent = thoughtsContentDiv.querySelector('.thoughts-inner-content');
+        expandButton = thoughtsContentDiv.querySelector('.expand-thoughts-btn');
+        // Reset expansion state if content is being updated (optional, depends on desired UX)
+        // thoughtsContentDiv.classList.remove('expanded');
+        // if(expandButton) expandButton.setAttribute('aria-expanded', 'false');
+      }
+      
+      if (thoughtsInnerContent) {
+          thoughtsInnerContent.innerHTML = processMathAndMarkdownFn(rawThoughts);
+      }
+      if (expandButton) { // Ensure button is visible if thoughts exist
+          expandButton.style.display = ''; 
+      }
+
+    } else if (thoughtsContentDiv) {
+      // No new thoughts, or thoughts are cleared, remove the entire thoughts section
+      thoughtsContentDiv.remove();
+    }
+  }
+
+  /**
    * 添加消息到聊天窗口
    * @param {string} text - 消息文本内容
    * @param {string} sender - 发送者 ('user' 或 'ai')
@@ -60,35 +133,34 @@ export function createMessageProcessor(appContext) {
       messageDiv = chatContainer.querySelector(`[data-message-id="${messageIdToUpdate}"]`);
       if (!messageDiv) {
         console.error('appendMessage: 试图更新的消息未找到 DOM 元素', messageIdToUpdate);
-        return null; // 或者创建一个新的
+        // Create a new one if update target is missing, this indicates a potential logic flaw elsewhere
+        messageDiv = document.createElement('div');
+        messageDiv.classList.add('message', `${sender}-message`);
+        if (fragment) messageDiv.classList.add('batch-load'); // if it was intended for a fragment
       }
-      // 清理现有内容以便重新渲染，但保留消息ID等属性
-      const textContentDiv = messageDiv.querySelector('.text-content');
-      if (textContentDiv) textContentDiv.innerHTML = '';
-      const thoughtsDiv = messageDiv.querySelector('.thoughts-content');
-      if (thoughtsDiv) thoughtsDiv.remove(); // 移除旧的思考内容区域
+      // For updates, main text and thoughts are handled by updateAIMessage or setupThoughtsDisplay called from there.
+      // appendMessage when messageIdToUpdate is present is mostly for ensuring the messageDiv exists.
+      // So, we'll mostly clear and let updateAIMessage fill.
+      // However, this function signature with messageIdToUpdate might be part of a specific workflow.
+      // For now, let's assume if messageIdToUpdate is given, it's for initial AI message shell creation in streaming.
+      // And actual content updates will be handled by updateAIMessage.
+
     } else {
       messageDiv = document.createElement('div');
       messageDiv.classList.add('message', `${sender}-message`);
     }
 
-    // 如果是批量加载，添加特殊类名
-    if (fragment && !messageIdToUpdate) { // 仅在新建时且使用fragment时添加
+    if (fragment && !messageIdToUpdate) {
       messageDiv.classList.add('batch-load');
     }
 
-    // 存储原始文本用于复制
-    messageDiv.setAttribute('data-original-text', text);
-    if (initialThoughtsRaw) {
-      messageDiv.setAttribute('data-original-thoughts', initialThoughtsRaw);
-    }
-    
-    // 如果存在图片内容，则创建图片区域容器 (仅在新建时)
+    messageDiv.setAttribute('data-original-text', text); // Main answer text
+    // initialThoughtsRaw is handled below by setupThoughtsDisplay
+
     if (imagesHTML && imagesHTML.trim() && !messageIdToUpdate) {
       const imageContentDiv = document.createElement('div');
       imageContentDiv.classList.add('image-content');
       imageContentDiv.innerHTML = imagesHTML;
-      // 为图片添加点击预览事件
       imageContentDiv.querySelectorAll('img').forEach(img => {
         img.addEventListener('click', (e) => {
           e.preventDefault();
@@ -98,13 +170,23 @@ export function createMessageProcessor(appContext) {
       });
       messageDiv.appendChild(imageContentDiv);
     }
+    
+    // Setup thoughts display (handles creation/removal)
+    // Pass `processMathAndMarkdown` from the outer scope
+    setupThoughtsDisplay(messageDiv, initialThoughtsRaw, processMathAndMarkdown);
 
-    // 创建或获取文本内容容器，并处理 Markdown 与数学公式
+
     let textContentDiv = messageDiv.querySelector('.text-content');
     if (!textContentDiv) {
         textContentDiv = document.createElement('div');
         textContentDiv.classList.add('text-content');
-        messageDiv.appendChild(textContentDiv);
+        // Ensure textContentDiv is after thoughtsDiv if thoughtsDiv was added
+        const thoughtsDiv = messageDiv.querySelector('.thoughts-content');
+        if (thoughtsDiv && thoughtsDiv.nextSibling) {
+            messageDiv.insertBefore(textContentDiv, thoughtsDiv.nextSibling);
+        } else {
+            messageDiv.appendChild(textContentDiv);
+        }
     }
     try {
       textContentDiv.innerHTML = processMathAndMarkdown(text);
@@ -112,39 +194,22 @@ export function createMessageProcessor(appContext) {
       console.error('处理数学公式和Markdown失败:', error);
       textContentDiv.innerText = text;
     }
-
-    // 创建思考过程的显示区域 (如果需要)
-    if (initialThoughtsRaw) {
-      let thoughtsDiv = messageDiv.querySelector('.thoughts-content');
-      if (!thoughtsDiv) {
-        thoughtsDiv = document.createElement('div');
-        thoughtsDiv.classList.add('thoughts-content');
-        // 将思考内容区域插入到文本内容之前，或根据需要调整位置
-        messageDiv.insertBefore(thoughtsDiv, textContentDiv);
-      }
-      thoughtsDiv.innerHTML = `<div class="thoughts-prefix">思考过程:</div>${processMathAndMarkdown(initialThoughtsRaw)}`;
-    }
     
-    // 处理消息中的其他元素
-    messageDiv.querySelectorAll('a').forEach(link => {
+    messageDiv.querySelectorAll('a:not(.reference-number)').forEach(link => { // Avoid affecting reference links
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
     });
 
-    // 处理代码块的语法高亮
     messageDiv.querySelectorAll('pre code').forEach(block => {
       hljs.highlightElement(block);
     });
 
-    // 渲染 LaTeX 公式
     try {
       renderMathInElement(messageDiv, MATH_DELIMITERS.renderConfig);
     } catch (error) {
       console.error('渲染LaTeX公式失败:', error);
-      // 渲染失败时保持原样
     }
 
-    // 如果提供了文档片段，添加到片段中；否则直接添加到聊天容器 (仅在新建时)
     if (!messageIdToUpdate) {
       if (fragment) {
         fragment.appendChild(messageDiv);
@@ -153,19 +218,18 @@ export function createMessageProcessor(appContext) {
       }
     }
     
-    // 更新聊天历史，将文本和图片信息封装到一个对象中
     if (!skipHistory) {
       if (messageIdToUpdate) {
-        // 更新现有节点
         node = chatHistoryManager.chatHistory.messages.find(m => m.id === messageIdToUpdate);
         if (node) {
-          node.content = text;
-          if (initialThoughtsRaw !== null) { // 允许清空thoughts
+          node.content = text; // Main answer
+          if (initialThoughtsRaw !== undefined) { // Allow setting thoughts to null/empty
              node.thoughtsRaw = initialThoughtsRaw;
           }
+        } else {
+             console.warn(`appendMessage: History node not found for update: ${messageIdToUpdate}`);
         }
       } else {
-        // 创建新节点
         const processedContent = imageHandler.processImageTags(text, imagesHTML);
         node = chatHistoryManager.addMessageToTree(
           sender === 'user' ? 'user' : 'assistant',
@@ -175,11 +239,10 @@ export function createMessageProcessor(appContext) {
         if (initialThoughtsRaw) {
           node.thoughtsRaw = initialThoughtsRaw;
         }
-        // 为消息div添加节点ID
         messageDiv.setAttribute('data-message-id', node.id);
       }
 
-      if (sender === 'ai' && !messageIdToUpdate) { // 仅在新建AI消息时添加updating
+      if (sender === 'ai' && !messageIdToUpdate) {
         messageDiv.classList.add('updating');
       }
     }
@@ -199,55 +262,40 @@ export function createMessageProcessor(appContext) {
 
     if (!messageDiv || !node) {
       console.error('updateAIMessage: 消息或历史节点未找到', messageId);
-      // 理论上，此时消息应该已由 appendMessage 创建，如果未找到则可能是逻辑错误
-      // 可以考虑调用 appendMessage 创建一个新的，但这可能表明流程问题
-      // appendMessage(newAnswerContent, 'ai', false, null, null, newThoughtsRaw, null);
+      // Fallback: if messageDiv doesn't exist, create it. This implies the initial appendMessage in stream handler failed or was skipped.
+      // appendMessage(newAnswerContent, 'ai', false, null, null, newThoughtsRaw, messageId /* if we want to try to use this id */);
       return;
     }
 
-    // 更新原始文本属性
     messageDiv.setAttribute('data-original-text', newAnswerContent);
-    if (newThoughtsRaw !== null) { // 允许 null 来表示没有思考过程
-      messageDiv.setAttribute('data-original-thoughts', newThoughtsRaw || '');
-    }
-
-    // 更新聊天历史节点
+    // newThoughtsRaw is handled by setupThoughtsDisplay
+    
     node.content = newAnswerContent;
-    if (newThoughtsRaw !== null) {
+    if (newThoughtsRaw !== undefined) { // Allow setting thoughts to null/empty explicitly
         node.thoughtsRaw = newThoughtsRaw;
     }
 
-    // 更新思考过程显示
-    let thoughtsDiv = messageDiv.querySelector('.thoughts-content');
-    if (newThoughtsRaw) {
-      if (!thoughtsDiv) {
-        thoughtsDiv = document.createElement('div');
-        thoughtsDiv.classList.add('thoughts-content');
-        // 确保 thoughtsDiv 在 textContentDiv 之前或之后，按需调整
-        const textContentDivForOrder = messageDiv.querySelector('.text-content');
-        if (textContentDivForOrder) {
-            messageDiv.insertBefore(thoughtsDiv, textContentDivForOrder);
-        } else {
-            messageDiv.appendChild(thoughtsDiv); // Fallback if textContent isn't there yet (should be rare)
-        }
-      }
-      thoughtsDiv.innerHTML = `<div class="thoughts-prefix">思考过程:</div>${processMathAndMarkdown(newThoughtsRaw)}`;
-    } else if (thoughtsDiv) {
-      thoughtsDiv.remove(); // 如果没有新的思考内容，移除旧的
-    }
+    // Setup/Update thoughts display
+    // Pass `processMathAndMarkdown` from the outer scope
+    setupThoughtsDisplay(messageDiv, newThoughtsRaw, processMathAndMarkdown);
 
-    // 更新答案显示
-    const textContentDiv = messageDiv.querySelector('.text-content');
-    if (!textContentDiv) {
-        console.error('updateAIMessage: .text-content div not found for message', messageId);
-        return;
+    let textContentDiv = messageDiv.querySelector('.text-content');
+    if (!textContentDiv) { // Should exist if appendMessage created it, but good to check
+        textContentDiv = document.createElement('div');
+        textContentDiv.classList.add('text-content');
+        // Ensure textContentDiv is after thoughtsDiv if thoughtsDiv was added
+        const thoughtsDiv = messageDiv.querySelector('.thoughts-content');
+        if (thoughtsDiv && thoughtsDiv.nextSibling) {
+            messageDiv.insertBefore(textContentDiv, thoughtsDiv.nextSibling);
+        } else {
+            messageDiv.appendChild(textContentDiv);
+        }
     }
     
     let processedText = newAnswerContent;
     let htmlElements = [];
     let processedResult = newAnswerContent;
 
-    // 处理引用标记和来源信息(如果存在)
     if (groundingMetadata) {
       processedResult = addGroundingToMessage(newAnswerContent, groundingMetadata);
       if (typeof processedResult === 'object') {
@@ -256,25 +304,20 @@ export function createMessageProcessor(appContext) {
       }
     }
 
-    // 处理数学公式和Markdown
     textContentDiv.innerHTML = processMathAndMarkdown(processedText);
 
-    // 处理新渲染的链接
-    textContentDiv.querySelectorAll('a').forEach(link => {
+    textContentDiv.querySelectorAll('a:not(.reference-number)').forEach(link => {
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
     });
 
-    // 处理代码块的语法高亮
     textContentDiv.querySelectorAll('pre code').forEach(block => {
       hljs.highlightElement(block);
     });
 
-    // 渲染LaTeX公式
-    renderMathInElement(messageDiv, MATH_DELIMITERS.renderConfig); // Render in whole messageDiv for thoughts + answer
+    renderMathInElement(messageDiv, MATH_DELIMITERS.renderConfig);
 
     if (groundingMetadata) {
-      // 替换引用标记占位符为HTML元素 (在答案部分)
       if (htmlElements && htmlElements.length > 0) {
         htmlElements.forEach(element => {
           const placeholder = element.placeholder;
@@ -282,17 +325,13 @@ export function createMessageProcessor(appContext) {
           textContentDiv.innerHTML = textContentDiv.innerHTML.replace(placeholder, html);
         });
       }
-
-      // 清理任何剩余的未替换placeholder (在答案部分)
       textContentDiv.innerHTML = textContentDiv.innerHTML.replace(/\u200B😎REF_\d+😎\u200B/g, '');
-
-      // 添加引用来源列表 (在答案部分之后)
       if (typeof processedResult === 'object' && processedResult.sources && processedResult.sources.length > 0) {
-        renderSourcesList(textContentDiv, processedResult, groundingMetadata); // Append to textContentDiv
+        // Ensure renderSourcesList appends to textContentDiv or an appropriate container within messageDiv
+        const sourcesContainer = messageDiv.querySelector('.sources-list-container') || textContentDiv; 
+        renderSourcesList(sourcesContainer, processedResult, groundingMetadata);
       }
     }
-
-    // 执行滚动
     scrollToBottom();
   }
 

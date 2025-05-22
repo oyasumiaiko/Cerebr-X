@@ -3246,78 +3246,125 @@ body.hide-references .reference-number.superscript {
 
 /* --- Styles for Thinking Process --- */
 
-/* Styles for the Thinking Process display */
+/* Styles for Collapsible Thinking Process */
 .message .thoughts-content {
+    position: relative; /* For absolute positioning of the button */
     padding: 10px 12px;
-    margin-top: 6px;
-    margin-bottom: 12px;
+    /* Adjust padding-right to make space for the button if it's inside the padding box */
+    /* padding-right: 40px; */
+    margin: 8px 0;
     border-radius: 8px;
-    background-color: color-mix(in srgb, var(--cerebr-message-ai-bg) 50%, var(--cerebr-border-color));
-    border: 1px solid var(--cerebr-border-color);
-    font-size: 0.85em; /* 比主消息文本略小 */
+    background-color: rgba(128, 128, 128, 0.05); /* Light gray, semi-transparent */
+    border: 1px solid rgba(128, 128, 128, 0.1); /* Very faint border */
+    font-size: 0.85em; /* Slightly smaller than main message text */
     line-height: 1.5;
-    color: var(--cerebr-text-color);
-    position: relative;
-    overflow: hidden; /* 用于配合可能的伪元素背景 */
+    color: rgba(0, 0, 0, 0.6); /* Softer text color for light theme */
   }
-
+  
+  .dark-theme .message .thoughts-content {
+    background-color: rgba(255, 255, 255, 0.04); /* Adjusted for dark theme */
+    border-color: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.55); /* Softer text color for dark theme */
+  }
+  
   .message .thoughts-content .thoughts-prefix {
-    font-weight: 600; /* 略微加粗 "思考过程:" 文本 */
-    color: var(--cerebr-text-color);
+    font-weight: 600;
+    color: rgba(0, 0, 0, 0.7); /* Light theme prefix color */
     margin-bottom: 6px;
+    display: block;
     display: none;
   }
+  
+  .dark-theme .message .thoughts-content .thoughts-prefix {
+    color: rgba(255, 255, 255, 0.65); /* Dark theme prefix color */
+  }
+  
+  /* This div wraps the actual HTML from markdown processing of thoughts */
+  .message .thoughts-content .thoughts-inner-content {
+    overflow: hidden; /* Clips content that's 'display: none' effectively */
+    /* Add some padding if button is outside, or manage spacing */
+  }
+  
+    /* 1. 隐藏所有直接子元素 */
+    .message .thoughts-content .thoughts-inner-content > * {
+        display: none;
+    }
+    .message .thoughts-content .thoughts-inner-content > p:nth-last-of-type(2){
+        margin-top: 0;
+    }
 
-  
-  /* 可以考虑为思考过程内部的 Markdown 元素做一些细微调整，如果需要的话 */
-  .message .thoughts-content p {
-    margin-top: 0;
-    margin-bottom: 8px;
+    /* 2. 显示最后两个 <p> 类型的子元素 */
+    .message .thoughts-content .thoughts-inner-content > p:nth-last-of-type(2),
+    .message .thoughts-content .thoughts-inner-content > p:nth-last-of-type(1) {
+        display: block;
+    }
+
+    /* 3. 确保最后一个 <p> 元素 (即倒数第一个 p) 的 margin-bottom 为 0 */
+    .message .thoughts-content .thoughts-inner-content > p:nth-last-of-type(1) {
+        margin-bottom: 0;
+    }
+
+  /* Expanded state: show all direct children */
+  .message .thoughts-content.expanded .thoughts-inner-content > * {
+    display: block; /* Or their natural display type if more complex */
+  }
+  .message .thoughts-content.expanded .thoughts-inner-content > p:last-of-type {
+    /* Restore bottom margin if it was removed and is needed when expanded */
+    /* margin-bottom: 8px; */ /* Example, adjust as per your standard <p> styling */
   }
   
-  .message .thoughts-content pre {
-    background-color: rgba(0, 0, 0, 0.03); /* 思考过程中代码块的背景色 */
-    padding: 8px;
-    border-radius: 4px;
-    font-size: 0.9em; /* 代码块字体略小 */
-  }
   
-  body.dark-theme .message .thoughts-content pre {
-    background-color: rgba(255, 255, 255, 0.05);
-  }
-  
-  /* 可选：添加一个非常细微的内阴影或高光来增加深度感 */
-  .message .thoughts-content::before {
-    content: '';
+  /* Expand/Collapse Button */
+  .expand-thoughts-btn {
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    border-radius: inherit; /* 继承父元素的圆角 */
-    /* 示例：非常细微的顶部高光 */
-    /* box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1); */
-    /* 示例：非常细微的整体内阴影 */
-    /* box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.02); */
-    pointer-events: none; /* 确保不影响交互 */
+    top: 6px;    /* Fine-tune position */
+    right: 6px;  /* Fine-tune position */
+    background: rgba(128, 128, 128, 0.0); /* Transparent background */
+    border: 1px solid rgba(128, 128, 128, 0.15); /* Subtle border */
+    color: rgba(0, 0, 0, 0.5); /* Icon color for light theme */
+    cursor: pointer;
+    padding: 4px 6px;
+    font-size: 0.8em; /* Icon size */
+    line-height: 1;
+    border-radius: 4px;
+    z-index: 10; /* Ensure it's above content */
+    transition: background-color 0.2s, border-color 0.2s;
+  }
+  .message .thoughts-content .thoughts-prefix + .expand-thoughts-btn {
+      /* If prefix is immediately followed by button (DOM order wise), this could apply */
+      /* This CSS implies button is a sibling of thoughts-inner-content and thoughts-prefix */
   }
   
-  /* 如果您希望有一个更“玻璃态”的效果，可以尝试背景模糊 (backdrop-filter)
-     注意: backdrop-filter 的浏览器支持性以及对性能的潜在影响。
-     需要在 .thoughts-content 上使用 rgba 背景色，使其有透明度才能看到效果。
-  */
-  /*
-  .message .thoughts-content {
-    backdrop-filter: blur(5px) saturate(180%);
-    -webkit-backdrop-filter: blur(5px) saturate(180%);
-    background-color: rgba(230, 230, 230, 0.45); // 亮色主题玻璃背景
-    border: 1px solid rgba(255, 255, 255, 0.18);
+  
+  .dark-theme .expand-thoughts-btn {
+    color: rgba(255, 255, 255, 0.45);
+    border-color: rgba(255, 255, 255, 0.15);
   }
   
-  body.dark-theme .message .thoughts-content {
-    background-color: rgba(40, 40, 40, 0.65); // 暗色主题玻璃背景
-    border: 1px solid rgba(255, 255, 255, 0.1);
+  .expand-thoughts-btn:hover {
+    background: rgba(128, 128, 128, 0.1);
+    border-color: rgba(128, 128, 128, 0.3);
+    color: rgba(0, 0, 0, 0.8);
   }
-  */
+  .dark-theme .expand-thoughts-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.75);
+  }
+  
+  /* Icons for expand/collapse state using Font Awesome classes */
+  .expand-thoughts-btn .icon-expand {
+    display: inline-block; /* Use inline-block for better control if needed */
+  }
+  .expand-thoughts-btn .icon-collapse {
+    display: none;
+  }
+  
+  .message .thoughts-content.expanded .expand-thoughts-btn .icon-expand {
+    display: none;
+  }
+  .message .thoughts-content.expanded .expand-thoughts-btn .icon-collapse {
+    display: inline-block;
+  }
   
   /* --- End of Styles for Thinking Process --- */
