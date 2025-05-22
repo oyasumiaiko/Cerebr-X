@@ -3289,7 +3289,7 @@ body.hide-references .reference-number.superscript {
     .message .thoughts-content .thoughts-inner-content > * {
         display: none;
     }
-    .message .thoughts-content .thoughts-inner-content > p:nth-last-of-type(2){
+    .message .thoughts-content:not(.expanded) .thoughts-inner-content > p:nth-last-of-type(2){
         margin-top: 0;
     }
 
@@ -3304,14 +3304,14 @@ body.hide-references .reference-number.superscript {
         margin-bottom: 0;
     }
 
-  /* Expanded state: show all direct children */
-  .message .thoughts-content.expanded .thoughts-inner-content > * {
-    display: block; /* Or their natural display type if more complex */
-  }
-  .message .thoughts-content.expanded .thoughts-inner-content > p:last-of-type {
-    /* Restore bottom margin if it was removed and is needed when expanded */
-    /* margin-bottom: 8px; */ /* Example, adjust as per your standard <p> styling */
-  }
+    /* Expanded state: show all direct children */
+    .message .thoughts-content.expanded .thoughts-inner-content > * {
+        display: block; /* Or their natural display type if more complex */
+    }
+    .message .thoughts-content.expanded .thoughts-inner-content > p:last-of-type {
+        /* Restore bottom margin if it was removed and is needed when expanded */
+        /* margin-bottom: 8px; */ /* Example, adjust as per your standard <p> styling */
+    }
   
   
   /* Expand/Collapse Button */
