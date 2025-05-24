@@ -675,8 +675,7 @@ export function createMessageSender(appContext) {
 
         // 根据模型名称决定使用哪个提示词
         // forceQuery为true时, 强制使用 'query' 提示词
-        const promptType = forceQuery ? 'query' : 
-          ((prompts.selection.model || '').endsWith('-search') ? 'selection' : 'query');
+        const promptType = forceQuery ? 'query' : 'selection';
         const prompt = prompts[promptType].prompt.replace('<SELECTION>', selectedText);
 
         // 发送消息

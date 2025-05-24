@@ -383,7 +383,10 @@ export function createMessageProcessor(appContext) {
         const sourceRefs = [];
         if (support.groundingChunkIndices?.length > 0) {
             support.groundingChunkIndices.forEach((chunkIndex, idx) => {
-                const chunk = groundingMetadata.groundingChunks[chunkIndex];
+                // Check if groundingChunks exists and if chunkIndex is valid
+                const chunk = (groundingMetadata.groundingChunks && groundingMetadata.groundingChunks[chunkIndex]) 
+                                ? groundingMetadata.groundingChunks[chunkIndex] 
+                                : null;
                 const confidence = support.confidenceScores?.[idx] || 0;
 
                 if (chunk?.web) {
