@@ -1032,57 +1032,129 @@ async function extractPageContent() {
   }
 
   // 等待内容加载和网络请求完成
-  console.log('非PDF，执行HTML页面内容提取逻辑');
+  console.log('非PDF，执行HTML页面内容提取逻辑（包含Shadow DOM支持）');
   await waitForContent();
 
-  // 创建一个文档片段来处理内容
-  const tempContainer = document.createElement('div');
-  tempContainer.innerHTML = document.body.innerHTML;
-
-  // 移除不需要的元素
-  const selectorsToRemove = [
-    'script', 'style', 'nav', 'header', 'footer',
-    'iframe', 'noscript', 'img', 'svg', 'video',
-    '[role="complementary"]', '[role="navigation"]',
-    '.sidebar', '.nav', '.footer', '.header',
-    '.immersive-translate-target-inner',
+  const texts = [];
+  // 选择器，用于跳过不应提取文本的元素
+  // 标签名选择器（小写）
+  const tagSelectorsToSkip = [
+    'script', 'style', 'noscript', 'canvas', 'video', 'audio', 'embed', 'object',
+    'img', 'svg', 'map', 'area', 'track', 'applet',
+    'nav', 'footer', 'header', 'aside', // 常见的非主要内容区域
+    'iframe', // iframe 由后续的专用逻辑处理
+    'cerebr-root' // 跳过扩展自身的UI根元素
+  ];
+  // CSS选择器 (用于 element.matches)
+  const cssSelectorsToSkip = [
+    '[role="complementary"]', '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]', '[role="search"]',
+    '[aria-hidden="true"]', // 跳过明确标记为隐藏的元素
+    // '.sidebar', '.nav', '.menu', '.toc', '.pagination', '.breadcrumb', '.toolbar', '.status-bar',
+    '.footer', '.header', // 常见的类名
+    '.ad', '.ads', '.advertisement', '[class*="advert"]', '[id*="advert"]', // 广告
+    // '.popup', '.modal', '.dialog', '[role="dialog"]', '[role="alertdialog"]', // 弹窗和对话框
+    '.immersive-translate-target-inner', // 项目特定的类
+    '[data-nosnippet]' // Google no-snippet attribute
   ];
 
-  // 使用DocumentFragment优化DOM操作，一次性移除所有不需要的元素
-  const fragment = document.createDocumentFragment();
-  fragment.appendChild(tempContainer);
-  const elementsToRemove = fragment.querySelectorAll(selectorsToRemove.join(','));
-  elementsToRemove.forEach(element => element.remove());
+  function shouldSkipElement(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE) {
+      return false;
+    }
+    const tagName = element.tagName.toLowerCase();
+    if (tagSelectorsToSkip.includes(tagName)) {
+      return true;
+    }
+    try {
+      if (cssSelectorsToSkip.some(selector => element.matches(selector))) {
+        return true;
+      }
+    } catch (e) {
+      // console.warn('Error matching selector for skip:', element.tagName, e.message);
+    }
+    // 检查计算样式是否为 display: none
+    const computedStyle = window.getComputedStyle(element);
+    if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden') {
+        // console.log('Skipping non-visible element:', element.tagName, element.id, element.className);
+        return true;
+    }
+    return false;
+  }
 
-  // 使用TreeWalker替代手动遍历，性能更好
-  const texts = [];
-  const treeWalker = document.createTreeWalker(
-    fragment,
-    NodeFilter.SHOW_TEXT,
-    {
-      acceptNode: function(node) {
-        return node.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+  function extractTextRecursively(node) {
+    if (shouldSkipElement(node)) {
+      return;
+    }
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      const trimmedText = node.textContent.trim();
+      if (trimmedText) {
+        texts.push(trimmedText);
+      }
+    } else if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+      // 优先处理 Light DOM 子节点
+      for (const child of node.childNodes) {
+        extractTextRecursively(child);
+      }
+      // 然后处理 Shadow DOM (仅对 Element 节点)
+      if (node.nodeType === Node.ELEMENT_NODE && node.shadowRoot && node.shadowRoot.mode === 'open') {
+        // console.log('Extracting from open shadowRoot of:', node.tagName);
+        for (const shadowChild of node.shadowRoot.childNodes) {
+          extractTextRecursively(shadowChild);
+        }
       }
     }
-  );
-
-  // 预分配合理大小的数组以避免扩容
-  // const estimatedTextNodes = Math.min(tempContainer.getElementsByTagName('*').length * 2, 10000);
-  // texts.length = estimatedTextNodes; // 这行会导致后续 texts.join 为 undefined, 因为数组中充满了 empty slots
-  
-  let currentTextNode;
-  while (currentTextNode = treeWalker.nextNode()) {
-    texts.push(currentTextNode.textContent.trim());
   }
-  // texts.length = i; // 截断到实际长度 // i 未定义
 
-  // 改进文本处理逻辑
-  let mainContent = texts
-    .join(' ')
-    .replace(/\s+/g, ' ')  // 将多个空白字符替换为单个空格
-    .trim();
+  // 从 document.body 开始递归提取文本
+  extractTextRecursively(document.body);
 
+  let mainContent = texts.join(' ').replace(/\s+/g, ' ').trim();
 
+  // 新增：提取 iframe 内容 (此部分逻辑基本不变，但主内容提取已包含 Shadow DOM)
+  let iframeContent = '';
+  const iframes = document.querySelectorAll('iframe');
+  console.log('页面中的iframe数量:', iframes.length);
+  for (const iframe of iframes) {
+    // 跳过Cerebr侧边栏的iframe
+    if (iframe.classList.contains('cerebr-sidebar__iframe')) {
+        console.log('跳过Cerebr侧边栏的iframe:', iframe.id || iframe.className);
+        continue;
+    }
+    console.log('尝试处理iframe:', iframe.id || iframe.src);
+    try {
+      // 检查iframe是否可访问
+      if (iframe.contentDocument || iframe.contentWindow) {
+        const iframeDocument = iframe.contentDocument || iframe.contentWindow.document;
+        // 确保iframe body存在
+        if (iframeDocument && iframeDocument.body) {
+          const iframeBodyStyle = iframe.contentWindow.getComputedStyle(iframeDocument.body);
+          if (iframeBodyStyle.display === 'none' || iframeBodyStyle.visibility === 'hidden') {
+            console.log('跳过隐藏或不可见的iframe body:', iframe.id || iframe.src);
+            continue;
+          }
+          const content = iframeDocument.body.innerText;
+          if (content && content.trim()) {
+            console.log('成功从iframe中提取内容 (前100字符):', content.substring(0,100) + "...");
+            iframeContent += content.trim() + '\n\n'; // 添加换行符分隔不同iframe的内容
+          } else {
+            console.log('iframe内容为空:', iframe.id || iframe.src);
+          }
+        } else {
+          console.log('无法访问iframe的body:', iframe.id || iframe.src);
+        }
+      } else {
+         console.log('无法访问iframe的document或window对象:', iframe.id || iframe.src);
+      }
+    } catch (e) {
+      console.warn('无法访问该iframe内容 (可能是跨域):', iframe.id || iframe.src, e.message);
+    }
+  }
+
+  if (iframeContent) {
+    mainContent += '\n\n--- iFrame Content ---\n\n' + iframeContent.trim();
+  }
+  
   const result = {
     title: document.title || window.location.href, // 为标题提供备用值
     url: window.location.href,
@@ -1090,6 +1162,7 @@ async function extractPageContent() {
     selectedText: currentSelection
   };
   
+  // console.log('最终提取的内容 (前200字符):', result.content.substring(0,200));
   return result;
 }
 
