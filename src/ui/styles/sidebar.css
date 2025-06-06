@@ -1873,17 +1873,15 @@ body.hide-references .reference-number.superscript {
 }
 
 #save-prompts {
-    background: var(--cerebr-highlight);
-    border: none;
-    color: var(--cerebr-text-color);
+    background: var(--cerebr-bg-color);
+    border: 0px;
+    color: var(--cerebr-icon-color);
+    box-shadow: 0 0 2px 0px var(--cerebr-icon-color);
 }
 
 #save-prompts:hover {
-    background: var(--cerebr-highlight);
-}
-
-#save-prompts:active {
-    transform: scale(0.98);
+    background: var(--cerebr-bg-color);
+    box-shadow: 0 0 3px 1px var(--cerebr-icon-color);
 }
 
 /* 深色模式适配 */
