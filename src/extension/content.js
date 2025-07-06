@@ -896,7 +896,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   else if (message.type === 'REQUEST_FAILED') {
     requestManager.handleRequestFailed(message.requestId);
-    console.log('请求失败，待处理请求数:', requestManager.getPendingRequestsCount());
+    // console.log('请求失败，待处理请求数:', requestManager.getPendingRequestsCount());
   }
   return true;
 });
@@ -1033,7 +1033,7 @@ async function extractPageContent() {
 
   // 等待内容加载和网络请求完成
   console.log('非PDF，执行HTML页面内容提取逻辑（包含Shadow DOM支持）');
-  await waitForContent();
+  // await waitForContent();
 
   const texts = [];
   // 选择器，用于跳过不应提取文本的元素
