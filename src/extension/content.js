@@ -2,15 +2,96 @@ console.log('Cerebr content script loaded at:', new Date().toISOString());
 console.log('Window location:', window.location.href);
 console.log('Document readyState:', document.readyState);
 
-// 新增：全局变量，用于存储当前选中的文本
+// 全局变量，用于存储当前选中的文本
 let currentSelection = "";
+// 存储已附加监听器的 iframe 窗口，防止重复操作
+const monitoredFrames = new WeakSet();
 
-// 新增：监听选区变化事件
-document.addEventListener('selectionchange', () => {
-  currentSelection = window.getSelection().toString();
-  // 可选：如果需要实时调试，可以取消下面的注释
-  // console.log('Selection changed:', currentSelection);
-});
+/**
+ * 统一的选区变化处理函数
+ * 当任何地方的选区发生变化时被调用
+ */
+function handleGlobalSelectionChange() {
+    setTimeout(() => {
+        let activeSelectionText = "";
+        let activeSelectionSource = "main"; // 默认来源是主窗口
+
+        // 1. 遍历页面上所有 iframe，检查它们的选区
+        document.querySelectorAll('iframe').forEach(iframe => {
+            // 精准排除您自己的侧边栏 iframe
+            if (iframe.classList.contains('cerebr-sidebar__iframe')) {
+                return; // 跳过
+            }
+
+            try {
+                const iframeWindow = iframe.contentWindow;
+                if (iframeWindow) {
+                    const iframeSelection = iframeWindow.getSelection();
+                    if (iframeSelection && !iframeSelection.isCollapsed) {
+                        const text = iframeSelection.toString().trim();
+                        if (text) {
+                            activeSelectionText = text;
+                            activeSelectionSource = iframe.src || "iframe"; // 记录来源
+                        }
+                    }
+                }
+            } catch (e) {
+                // 忽略跨域等错误
+            }
+        });
+
+        // 2. 如果所有 iframe 内都没有选区，再检查主窗口的选区
+        if (!activeSelectionText) {
+            try {
+                const mainSelection = window.getSelection();
+                if (mainSelection && !mainSelection.isCollapsed) {
+                    activeSelectionText = mainSelection.toString().trim();
+                    activeSelectionSource = "main";
+                }
+            } catch (e) {
+                // 忽略错误
+            }
+        }
+        
+        // 3. 只有在文本内容确实发生变化时才更新状态并打印日志
+        if (activeSelectionText !== currentSelection) {
+            currentSelection = activeSelectionText;
+            console.log(`[Cerebr Selection] Updated from "${activeSelectionSource}":`, `"${currentSelection}"`);
+            
+            // 在这里可以触发您插件的其他逻辑，例如：
+            // if (currentSelection) {
+            //   showMyPopup(currentSelection);
+            // } else {
+            //   hideMyPopup();
+            // }
+        }
+    }, 0);
+}
+
+/**
+ * 扫描并为新出现的 iframe 附加监听器
+ */
+function monitorNewFrames() {
+  document.querySelectorAll('iframe').forEach(iframe => {
+      // 排除您自己的侧边栏 iframe
+      if (iframe.classList.contains('cerebr-sidebar__iframe')) {
+          return;
+      }
+
+      try {
+          const iframeWindow = iframe.contentWindow;
+          // 确保 iframe 可访问且尚未被监控
+          if (iframeWindow && !monitoredFrames.has(iframeWindow)) {
+              console.log('[Cerebr Selection] New generic iframe found, attaching listener to:', iframe.src || 'inline frame');
+              monitoredFrames.add(iframeWindow);
+              // 为 iframe 内部的 document 附加监听器
+              iframeWindow.document.addEventListener('selectionchange', handleGlobalSelectionChange);
+          }
+      } catch (e) {
+          // 忽略因跨域策略而无法访问的 iframe
+      }
+  });
+}
 
 class CerebrSidebar {
   constructor() {
@@ -740,7 +821,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
       case 'QUICK_SUMMARY':
         sidebar.toggle(true);  // 明确传入 true 表示打开
-        let selectedContent = window.getSelection().toString();
+        let selectedContent = currentSelection;
         iframe.contentWindow.postMessage({
             type: 'QUICK_SUMMARY_COMMAND',
             selectedContent: selectedContent
@@ -748,7 +829,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
       case 'QUICK_SUMMARY_QUERY':
         sidebar.toggle(true);  // 明确传入 true 表示打开
-        let selectedContentQuery = window.getSelection().toString();
+        let selectedContentQuery = currentSelection;
         iframe.contentWindow.postMessage({
             type: 'QUICK_SUMMARY_COMMAND_QUERY',
             selectedContent: selectedContentQuery
@@ -817,9 +898,26 @@ if (document.readyState === 'loading') {
   setTimeout(sendInitMessage, 500);
 }
 
-window.addEventListener('error', (event) => {
-  console.error('全局错误:', event.error);
-});
+// ========================================================================
+//  启动选区监听 (添加到 content.js 文件末尾)
+// ========================================================================
+
+function startSelectionMonitoring() {
+  // 1. 为顶层主窗口附加监听器
+  console.log('[Cerebr Selection] Attaching listener to the main window.');
+  document.addEventListener('selectionchange', handleGlobalSelectionChange);
+
+  // 2. 启动一个定时器，持续扫描新出现的 iframe
+  console.log('[Cerebr Selection] Starting generic iframe scanner...');
+  setInterval(monitorNewFrames, 1500); // 每 1.5 秒扫描一次
+}
+
+// 确保在所有初始化逻辑后启动监听
+startSelectionMonitoring();
+
+// window.addEventListener('error', (event) => {
+//   console.error('全局错误:', event.error);
+// });
 
 window.addEventListener('unhandledrejection', (event) => {
   console.error('未处理的 Promise 拒绝:', event.reason);
