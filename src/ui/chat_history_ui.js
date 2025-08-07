@@ -1160,7 +1160,7 @@ export function createChatHistoryUI(appContext) {
       const isConvPinned = pinnedIds.includes(conv.id);
 
       if (!isConvPinned) {
-        const convDate = new Date(conv.startTime);
+        const convDate = new Date(conv.endTime);
         const groupLabel = getGroupLabel(convDate);
 
         const isFirstUnpinnedAfterPinnedBlock = (convIndex === currentPinnedItemsCountInDisplay);

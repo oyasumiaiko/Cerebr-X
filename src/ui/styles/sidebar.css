@@ -2127,16 +2127,12 @@ body.hide-references .reference-number.superscript {
     margin-top: 12px;
     margin-bottom: 6px;
     color: var(--cerebr-text-color);
-    opacity: 0;
-    animation: chatHistoryItemFadeIn 0.1s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 .chat-history-item {
     border-bottom: 1px solid var(--cerebr-border-color);
     padding: 6px 0;
     cursor: pointer;
-    opacity: 0;
-    animation: chatHistoryItemFadeIn 0.1s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 @keyframes chatHistoryItemFadeIn {
