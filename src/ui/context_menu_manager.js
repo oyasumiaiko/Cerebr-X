@@ -69,11 +69,14 @@ export function createContextMenuManager(appContext) {
     const codeBlock = e.target.closest('pre code');
 
     // 根据消息状态显示或隐藏停止更新按钮
-    if (messageElement.classList.contains('updating')) {
+    // 除了当前消息为 updating 外，只要有任意 AI 消息处于 updating（包括“正在等待回复”的占位消息），也显示“停止更新”
+    const anyUpdating = !!chatContainer.querySelector('.ai-message.updating, .loading-message.updating');
+    if (messageElement.classList.contains('updating') || anyUpdating) {
       stopUpdateButton.style.display = 'flex';
     } else {
       stopUpdateButton.style.display = 'none';
     }
+    // 每次打开菜单时刷新 click 处理，保证调用最新的 messageSender.abortCurrentRequest()
     stopUpdateButton.onclick = () => {
       if (messageSender) messageSender.abortCurrentRequest();
       hideContextMenu();
@@ -383,8 +386,9 @@ export function createContextMenuManager(appContext) {
     // 按钮点击处理
     copyMessageButton.addEventListener('click', copyMessageContent);
     copyCodeButton.addEventListener('click', copyCodeContent);
+    // 修复：使用 messageSender.abortCurrentRequest()，避免未定义的 abortCurrentRequest 引发错误
     stopUpdateButton.addEventListener('click', () => {
-      abortCurrentRequest();
+      if (messageSender) messageSender.abortCurrentRequest();
       hideContextMenu();
     });
     deleteMessageButton.addEventListener('click', () => {

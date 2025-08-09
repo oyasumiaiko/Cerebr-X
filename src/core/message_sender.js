@@ -242,6 +242,8 @@ export function createMessageSender(appContext) {
       // 添加加载状态消息
       loadingMessage = messageProcessor.appendMessage('正在处理...', 'ai', true);
       loadingMessage.classList.add('loading-message');
+      // 让“等待回复”占位消息也带有 updating 状态，便于右键菜单显示“停止更新”
+      loadingMessage.classList.add('updating');
 
       // 如果不是临时模式，获取网页内容
       if (!isTemporaryMode) {

@@ -1308,7 +1308,7 @@ export function createThemeManager() {
         '--cerebr-opacity': '0.85',
         '--cerebr-bg-color': 'rgba(0, 0, 0, var(--cerebr-opacity))',
         '--cerebr-text-color': '#ffffff',
-        '--cerebr-message-user-bg': 'rgba(20, 20, 20, var(--cerebr-opacity))',
+        '--cerebr-message-user-bg': 'rgba(32, 32, 32, var(--cerebr-opacity))',
         '--cerebr-message-ai-bg': 'rgba(15, 15, 15, var(--cerebr-opacity))',
         '--cerebr-input-bg': 'rgba(10, 10, 10, var(--cerebr-opacity))',
         '--cerebr-icon-color': '#ff6600',
