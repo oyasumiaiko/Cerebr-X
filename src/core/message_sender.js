@@ -777,6 +777,21 @@ export function createMessageSender(appContext) {
     if (currentController) {
       currentController.abort();
       currentController = null;
+      // UI 清理：移除“正在更新”的占位消息与状态
+      try {
+        // 移除所有 loading 占位消息（尚未开始输出首字时存在）
+        const loadingMessages = chatContainer.querySelectorAll('.loading-message');
+        loadingMessages.forEach(el => el.remove());
+
+        // 移除可能残留的 updating 状态，避免右键菜单误判
+        const updatingMessages = chatContainer.querySelectorAll('.ai-message.updating');
+        updatingMessages.forEach(el => el.classList.remove('updating'));
+
+        // 同步移除输入容器 glow 效果
+        GetInputContainer().classList.remove('auto-scroll-glow');
+      } catch (e) {
+        console.error('中止后清理占位消息失败:', e);
+      }
       return true;
     }
     return false;
