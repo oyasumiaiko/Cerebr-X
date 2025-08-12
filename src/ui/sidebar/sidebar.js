@@ -281,13 +281,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateApiMenuText();
     window.addEventListener('apiConfigsUpdated', updateApiMenuText);
 
-    appContext.dom.showReferenceSwitch.addEventListener('change', (e) => {
-        appContext.services.settingsManager.setShowReference(e.target.checked);
-    });
-
-    appContext.dom.sendChatHistorySwitch.addEventListener('change', (e) => {
-        appContext.services.settingsManager.setSendChatHistory(e.target.checked);
-    });
+    // 移除重复事件绑定：改为由 settings_manager.js 的通用 schema 统一绑定与持久化
 
     if (appContext.dom.emptyStateHistory) {
         appContext.dom.emptyStateHistory.addEventListener('click', () => {

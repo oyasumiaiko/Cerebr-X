@@ -722,8 +722,9 @@ export function createMessageSender(appContext) {
 
       if (selectedText) {
         // 检查是否需要清空聊天记录
-        const result = await chrome.storage.sync.get(['clearOnSearch']);
-        if (result.clearOnSearch !== false) { // 默认为true
+        // 统一改为通过 settingsManager 获取，避免分散读取存储
+        const clearOnSearch = settingsManager?.getSetting('clearOnSearch');
+        if (clearOnSearch !== false) { // 默认为true
           await chatHistoryUI.clearChatHistory();
         }
 

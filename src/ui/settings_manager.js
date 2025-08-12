@@ -91,6 +91,111 @@ export function createSettingsManager(appContext) {
   // 当前设置
   let currentSettings = {...DEFAULT_SETTINGS};
   
+  // 订阅者注册表：用于跨模块监听设置变化
+  /** @type {Map<string, Set<(value:any)=>void>>} */
+  const subscribers = new Map();
+
+  // 基于 schema 的通用设置定义：统一绑定、应用与UI写入
+  // 主题相关暂保留原有定制逻辑，待下一步迁移
+  const SETTINGS_SCHEMA = {
+    autoScroll: {
+      element: () => autoScrollSwitch,
+      readFromUI: (el) => !!el?.checked,
+      writeToUI: (el, v) => { if (el) el.checked = !!v; },
+      apply: (v) => applyAutoScroll(v)
+    },
+    stopAtTop: {
+      element: () => stopAtTopSwitch,
+      readFromUI: (el) => !!el?.checked,
+      writeToUI: (el, v) => { if (el) el.checked = !!v; },
+      apply: (v) => applyStopAtTop(v)
+    },
+    clearOnSearch: {
+      element: () => clearOnSearchSwitch,
+      readFromUI: (el) => !!el?.checked,
+      writeToUI: (el, v) => { if (el) el.checked = !!v; },
+      apply: (v) => applyClearOnSearch(v)
+    },
+    shouldSendChatHistory: {
+      element: () => sendChatHistorySwitch,
+      readFromUI: (el) => !!el?.checked,
+      writeToUI: (el, v) => { if (el) el.checked = !!v; },
+      apply: (v) => applySendChatHistory(v)
+    },
+    showReference: {
+      element: () => showReferenceSwitch,
+      readFromUI: (el) => !!el?.checked,
+      writeToUI: (el, v) => { if (el) el.checked = !!v; },
+      apply: (v) => applyShowReference(v)
+    },
+    sidebarPosition: {
+      element: () => sidebarPositionSwitch,
+      // UI 勾选表示右侧
+      readFromUI: (el) => el?.checked ? 'right' : 'left',
+      writeToUI: (el, v) => { if (el) el.checked = (v === 'right'); },
+      apply: (v) => applySidebarPosition(v)
+    },
+    sidebarWidth: {
+      element: () => sidebarWidthSlider,
+      readFromUI: (el) => parseInt(el?.value ?? DEFAULT_SETTINGS.sidebarWidth, 10),
+      writeToUI: (el, v) => { if (el) el.value = parseInt(v, 10); },
+      apply: (v) => applySidebarWidth(v)
+    },
+    fontSize: {
+      element: () => fontSizeSlider,
+      readFromUI: (el) => parseInt(el?.value ?? DEFAULT_SETTINGS.fontSize, 10),
+      writeToUI: (el, v) => { if (el) el.value = parseInt(v, 10); },
+      apply: (v) => applyFontSize(v)
+    },
+    scaleFactor: {
+      element: () => scaleFactorSlider,
+      readFromUI: (el) => parseFloat(el?.value ?? DEFAULT_SETTINGS.scaleFactor),
+      writeToUI: (el, v) => { if (el) el.value = parseFloat(v); },
+      apply: (v) => applyScaleFactor(v)
+    }
+  };
+
+  /**
+   * 统一设置更新入口
+   * @param {string} key - 设置键
+   * @param {any} value - 新值
+   */
+  function setSetting(key, value) {
+    if (!(key in DEFAULT_SETTINGS)) return;
+    currentSettings[key] = value;
+    // 应用
+    if (SETTINGS_SCHEMA[key]?.apply) {
+      SETTINGS_SCHEMA[key].apply(value);
+    }
+    // 持久化
+    saveSetting(key, value);
+    // 通知订阅者
+    const set = subscribers.get(key);
+    if (set) {
+      set.forEach((cb) => {
+        try { cb(value); } catch (e) { console.error('订阅回调异常', e); }
+      });
+    }
+  }
+
+  /**
+   * 从 schema 绑定 DOM 事件（统一 change 入口）
+   */
+  function bindSettingsFromSchema() {
+    Object.keys(SETTINGS_SCHEMA).forEach((key) => {
+      const def = SETTINGS_SCHEMA[key];
+      const el = def.element?.();
+      if (!el) return;
+      // 避免重复绑定：先移除已存在的监听（若实现上无此需求，可忽略）
+      el.addEventListener('change', (e) => {
+        const newValue = def.readFromUI ? def.readFromUI(el) : e.target?.value;
+        setSetting(key, newValue);
+      });
+      // 初始 UI 同步
+      if (def.writeToUI) def.writeToUI(el, currentSettings[key]);
+    });
+  }
+  
   // 初始化所有设置
   async function initSettings() {
     try {
@@ -396,93 +501,38 @@ export function createSettingsManager(appContext) {
     if (themeSelect) {
       // 初始化主题选项
       populateThemeOptions();
-      
-      themeSelect.addEventListener('change', function() {
-        const selectedTheme = this.value;
-        setTheme(selectedTheme);
-      });
+      // 选择变化由 schema 通用绑定处理
     }
     
-    // 侧边栏宽度滑块
+    // 侧边栏宽度滑块（仅负责即时 UI 显示，实际保存由 schema 绑定处理）
     if (sidebarWidthSlider) {
       sidebarWidthSlider.addEventListener('input', (e) => {
         if (widthValueDisplay) {
           widthValueDisplay.textContent = `${e.target.value}px`;
         }
       });
-      
-      sidebarWidthSlider.addEventListener('change', (e) => {
-        setSidebarWidth(parseInt(e.target.value));
-      });
     }
     
-    // 字体大小滑块
+    // 字体大小滑块（仅负责即时 UI 显示，实际保存由 schema 绑定处理）
     if (fontSizeSlider) {
       fontSizeSlider.addEventListener('input', (e) => {
         if (fontSizeValueDisplay) {
           fontSizeValueDisplay.textContent = `${e.target.value}px`;
         }
       });
-      
-      fontSizeSlider.addEventListener('change', (e) => {
-        setFontSize(parseInt(e.target.value));
-      });
     }
     
-    // 缩放比例滑块
+    // 缩放比例滑块（仅负责即时 UI 显示，实际保存由 schema 绑定处理）
     if (scaleFactorSlider) {
       scaleFactorSlider.addEventListener('input', (e) => {
         if (scaleValueDisplay) {
           scaleValueDisplay.textContent = `${parseFloat(e.target.value).toFixed(1)}x`;
         }
       });
-      
-      scaleFactorSlider.addEventListener('change', (e) => {
-        setScaleFactor(parseFloat(e.target.value));
-      });
     }
     
-    // 自动滚动开关
-    if (autoScrollSwitch) {
-      autoScrollSwitch.addEventListener('change', (e) => {
-        setAutoScroll(e.target.checked);
-      });
-    }
-    
-    // 滚动到顶部时停止开关
-    if (stopAtTopSwitch) {
-      stopAtTopSwitch.addEventListener('change', (e) => {
-        setStopAtTop(e.target.checked);
-      });
-    }
-    
-    // 划词搜索清空聊天开关
-    if (clearOnSearchSwitch) {
-      clearOnSearchSwitch.addEventListener('change', (e) => {
-        setClearOnSearch(e.target.checked);
-      });
-    }
-    
-    // 发送聊天历史开关
-    if (sendChatHistorySwitch) {
-      sendChatHistorySwitch.addEventListener('change', (e) => {
-        setSendChatHistory(e.target.checked);
-      });
-    }
-    
-    // 显示引用标记开关
-    if (showReferenceSwitch) {
-      showReferenceSwitch.addEventListener('change', (e) => {
-        setShowReference(e.target.checked);
-      });
-    }
-    
-    // 侧边栏位置开关
-    if (sidebarPositionSwitch) {
-      sidebarPositionSwitch.addEventListener('change', (e) => {
-        setSidebarPosition(e.target.checked ? 'right' : 'left');
-      });
-    }
+    // 通用绑定（保存+应用+广播）
+    bindSettingsFromSchema();
   }
   
   // 填充主题选项
@@ -545,77 +595,42 @@ export function createSettingsManager(appContext) {
   
   // ===== 设置操作方法 =====
   
-  // 设置主题
+  // 设置主题（保留定制逻辑，下一步纳入 schema）
   function setTheme(theme) {
     const themeValue = theme === true ? 'dark' : theme === false ? 'light' : theme;
     currentSettings.theme = themeValue;
     applyTheme(themeValue);
     saveSetting('theme', themeValue);
+    const set = subscribers.get('theme');
+    if (set) set.forEach(cb => { try { cb(themeValue); } catch(e){ console.error(e);} });
   }
   
   // 设置侧边栏宽度
-  function setSidebarWidth(width) {
-    currentSettings.sidebarWidth = width;
-    applySidebarWidth(width);
-    saveSetting('sidebarWidth', width);
-  }
+  function setSidebarWidth(width) { setSetting('sidebarWidth', width); }
   
   // 设置字体大小
-  function setFontSize(size) {
-    currentSettings.fontSize = size;
-    applyFontSize(size);
-    saveSetting('fontSize', size);
-  }
+  function setFontSize(size) { setSetting('fontSize', size); }
   
   // 设置缩放比例
-  function setScaleFactor(value) {
-    currentSettings.scaleFactor = value;
-    applyScaleFactor(value);
-    saveSetting('scaleFactor', value);
-  }
+  function setScaleFactor(value) { setSetting('scaleFactor', value); }
   
   // 设置自动滚动
-  function setAutoScroll(enabled) {
-    currentSettings.autoScroll = enabled;
-    applyAutoScroll(enabled);
-    saveSetting('autoScroll', enabled);
-  }
+  function setAutoScroll(enabled) { setSetting('autoScroll', enabled); }
   
   // 设置滚动到顶部时停止
-  function setStopAtTop(enabled) {
-    currentSettings.stopAtTop = enabled;
-    applyStopAtTop(enabled);
-    saveSetting('stopAtTop', enabled);
-  }
+  function setStopAtTop(enabled) { setSetting('stopAtTop', enabled); }
   
   // 设置划词搜索清空聊天
-  function setClearOnSearch(enabled) {
-    currentSettings.clearOnSearch = enabled;
-    applyClearOnSearch(enabled);
-    saveSetting('clearOnSearch', enabled);
-  }
+  function setClearOnSearch(enabled) { setSetting('clearOnSearch', enabled); }
   
   // 设置发送聊天历史
-  function setSendChatHistory(enabled) {
-    currentSettings.shouldSendChatHistory = enabled;
-    applySendChatHistory(enabled);
-    saveSetting('shouldSendChatHistory', enabled);
-  }
+  function setSendChatHistory(enabled) { setSetting('shouldSendChatHistory', enabled); }
   
   // 设置显示引用标记
-  function setShowReference(enabled) {
-    currentSettings.showReference = enabled;
-    applyShowReference(enabled);
-    saveSetting('showReference', enabled);
-  }
+  function setShowReference(enabled) { setSetting('showReference', enabled); }
   
   // 设置侧边栏位置
-  function setSidebarPosition(position) {
-    console.log(`设置侧边栏位置: ${position}`);
-    currentSettings.sidebarPosition = position;
-    applySidebarPosition(position);
-    saveSetting('sidebarPosition', position);
-  }
+  function setSidebarPosition(position) { console.log(`设置侧边栏位置: ${position}`); setSetting('sidebarPosition', position); }
   
   // 获取当前设置
   function getSettings() {
@@ -625,6 +640,21 @@ export function createSettingsManager(appContext) {
   // 获取单个设置
   function getSetting(key) {
     return currentSettings[key];
+  }
+
+  /**
+   * 订阅设置变化
+   * @param {string} key - 设置键
+   * @param {(value:any)=>void} callback - 回调
+   * @returns {() => void} 取消订阅函数
+   */
+  function subscribe(key, callback) {
+    if (!subscribers.has(key)) subscribers.set(key, new Set());
+    subscribers.get(key).add(callback);
+    return () => {
+      const set = subscribers.get(key);
+      if (set) set.delete(callback);
+    };
   }
   
   // 初始化
@@ -642,6 +672,7 @@ export function createSettingsManager(appContext) {
     init,
     getSettings,
     getSetting,
+    subscribe,
     setTheme,
     setSidebarWidth,
     setFontSize,
