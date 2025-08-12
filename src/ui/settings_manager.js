@@ -94,20 +94,123 @@ export function createSettingsManager(appContext) {
   // 动态设置注册表：新增设置仅需在此处登记即可自动渲染与持久化
   // type: 'toggle' | 'range' | 'select'
   const SETTINGS_REGISTRY = [
-    // 示例：未在HTML中存在的项将自动生成控件
+    // 主题（复用现有隐藏下拉框，不额外渲染）
     {
-      key: 'lineHeight',
+      key: 'theme',
+      type: 'select',
+      id: 'theme-select',
+      label: '主题选择',
+      options: () => (themeManager.getAvailableThemes?.() || []).map(t => ({ label: t.name, value: t.id })),
+      defaultValue: DEFAULT_SETTINGS.theme,
+      apply: (v) => applyTheme(v)
+    },
+    // 自动滚动
+    {
+      key: 'autoScroll',
+      type: 'toggle',
+      id: 'auto-scroll-switch',
+      label: '自动滚动',
+      defaultValue: DEFAULT_SETTINGS.autoScroll,
+      apply: (v) => applyAutoScroll(v)
+    },
+    // 滚动到顶部时停止
+    {
+      key: 'stopAtTop',
+      type: 'toggle',
+      id: 'stop-at-top-switch',
+      label: '滚动到顶部时停止',
+      defaultValue: DEFAULT_SETTINGS.stopAtTop,
+      apply: (v) => applyStopAtTop(v)
+    },
+    // 划词搜索清空聊天
+    {
+      key: 'clearOnSearch',
+      type: 'toggle',
+      id: 'clear-on-search-switch',
+      label: '划词搜索时清空聊天',
+      defaultValue: DEFAULT_SETTINGS.clearOnSearch,
+      apply: (v) => applyClearOnSearch(v)
+    },
+    // 发送聊天历史
+    {
+      key: 'shouldSendChatHistory',
+      type: 'toggle',
+      id: 'send-chat-history-switch',
+      label: '发送聊天历史',
+      defaultValue: DEFAULT_SETTINGS.shouldSendChatHistory,
+      apply: (v) => applySendChatHistory(v)
+    },
+    // 显示引用标记
+    {
+      key: 'showReference',
+      type: 'toggle',
+      id: 'show-reference-switch',
+      label: '显示引用标记',
+      defaultValue: DEFAULT_SETTINGS.showReference,
+      apply: (v) => applyShowReference(v)
+    },
+    // 侧边栏位置（使用切换表示右侧）
+    {
+      key: 'sidebarPosition',
+      type: 'toggle',
+      id: 'sidebar-position-switch',
+      label: '侧栏在右侧显示',
+      defaultValue: DEFAULT_SETTINGS.sidebarPosition,
+      readFromUI: (el) => el?.checked ? 'right' : 'left',
+      writeToUI: (el, v) => { if (el) el.checked = (v === 'right'); },
+      apply: (v) => applySidebarPosition(v)
+    },
+    // 侧边栏宽度
+    {
+      key: 'sidebarWidth',
       type: 'range',
-      label: '行距',
-      min: 1.2,
-      max: 2.0,
+      id: 'sidebar-width',
+      label: '侧栏宽度',
+      min: 500,
+      max: 1500,
+      step: 10,
+      unit: 'px',
+      defaultValue: DEFAULT_SETTINGS.sidebarWidth,
+      apply: (v) => applySidebarWidth(v)
+    },
+    // 字体大小
+    {
+      key: 'fontSize',
+      type: 'range',
+      id: 'font-size',
+      label: '字体大小',
+      min: 12,
+      max: 24,
+      step: 1,
+      unit: 'px',
+      defaultValue: DEFAULT_SETTINGS.fontSize,
+      apply: (v) => applyFontSize(v)
+    },
+    // 缩放比例
+    {
+      key: 'scaleFactor',
+      type: 'range',
+      id: 'scale-factor',
+      label: '缩放比例',
+      min: 0.5,
+      max: 2,
       step: 0.1,
       unit: 'x',
-      defaultValue: DEFAULT_SETTINGS.lineHeight,
-      apply: (v) => { document.documentElement.style.setProperty('--cerebr-line-height', String(v)); }
+      defaultValue: DEFAULT_SETTINGS.scaleFactor,
+      apply: (v) => applyScaleFactor(v)
     },
-    // 如需新增设置，只需在此添加定义；若不需要副作用，可省略 apply
-    // { key: 'myNewSetting', type: 'toggle', label: '我的新设置', defaultValue: true }
+    // // 行距（示例：页面原本没有控件则自动渲染）
+    // {
+    //   key: 'lineHeight',
+    //   type: 'range',
+    //   label: '行距',
+    //   min: 1.2,
+    //   max: 2.0,
+    //   step: 0.1,
+    //   unit: 'x',
+    //   defaultValue: DEFAULT_SETTINGS.lineHeight,
+    //   apply: (v) => { document.documentElement.style.setProperty('--cerebr-line-height', String(v)); }
+    // }
   ];
 
   // 动态生成的元素映射（仅对注册表项）
@@ -117,65 +220,8 @@ export function createSettingsManager(appContext) {
   /** @type {Map<string, Set<(value:any)=>void>>} */
   const subscribers = new Map();
 
-  // 基于 schema 的通用设置定义：统一绑定、应用与UI写入
-  // 主题相关暂保留原有定制逻辑，待下一步迁移
-  const SETTINGS_SCHEMA = {
-    autoScroll: {
-      element: () => autoScrollSwitch,
-      readFromUI: (el) => !!el?.checked,
-      writeToUI: (el, v) => { if (el) el.checked = !!v; },
-      apply: (v) => applyAutoScroll(v)
-    },
-    stopAtTop: {
-      element: () => stopAtTopSwitch,
-      readFromUI: (el) => !!el?.checked,
-      writeToUI: (el, v) => { if (el) el.checked = !!v; },
-      apply: (v) => applyStopAtTop(v)
-    },
-    clearOnSearch: {
-      element: () => clearOnSearchSwitch,
-      readFromUI: (el) => !!el?.checked,
-      writeToUI: (el, v) => { if (el) el.checked = !!v; },
-      apply: (v) => applyClearOnSearch(v)
-    },
-    shouldSendChatHistory: {
-      element: () => sendChatHistorySwitch,
-      readFromUI: (el) => !!el?.checked,
-      writeToUI: (el, v) => { if (el) el.checked = !!v; },
-      apply: (v) => applySendChatHistory(v)
-    },
-    showReference: {
-      element: () => showReferenceSwitch,
-      readFromUI: (el) => !!el?.checked,
-      writeToUI: (el, v) => { if (el) el.checked = !!v; },
-      apply: (v) => applyShowReference(v)
-    },
-    sidebarPosition: {
-      element: () => sidebarPositionSwitch,
-      // UI 勾选表示右侧
-      readFromUI: (el) => el?.checked ? 'right' : 'left',
-      writeToUI: (el, v) => { if (el) el.checked = (v === 'right'); },
-      apply: (v) => applySidebarPosition(v)
-    },
-    sidebarWidth: {
-      element: () => sidebarWidthSlider,
-      readFromUI: (el) => parseInt(el?.value ?? DEFAULT_SETTINGS.sidebarWidth, 10),
-      writeToUI: (el, v) => { if (el) el.value = parseInt(v, 10); },
-      apply: (v) => applySidebarWidth(v)
-    },
-    fontSize: {
-      element: () => fontSizeSlider,
-      readFromUI: (el) => parseInt(el?.value ?? DEFAULT_SETTINGS.fontSize, 10),
-      writeToUI: (el, v) => { if (el) el.value = parseInt(v, 10); },
-      apply: (v) => applyFontSize(v)
-    },
-    scaleFactor: {
-      element: () => scaleFactorSlider,
-      readFromUI: (el) => parseFloat(el?.value ?? DEFAULT_SETTINGS.scaleFactor),
-      writeToUI: (el, v) => { if (el) el.value = parseFloat(v); },
-      apply: (v) => applyScaleFactor(v)
-    }
-  };
+  // 基于 schema 的通用设置定义（保留为空，统一由注册表生成）
+  const SETTINGS_SCHEMA = {};
 
   // 由注册表构建 schema（仅针对动态生成的元素）
   let generatedSchema = {};
@@ -200,14 +246,16 @@ export function createSettingsManager(appContext) {
       element: () => dynamicElements.get(def.key) || null,
       readFromUI: (el) => {
         if (!el) return currentSettings[def.key];
+        if (typeof def.readFromUI === 'function') return def.readFromUI(el);
         if (def.type === 'toggle') return !!el.checked;
-        if (def.type === 'range') return def.step && Number(def.step) % 1 !== 0 ? parseFloat(el.value) : parseFloat(el.value);
+        if (def.type === 'range') return parseFloat(el.value);
         if (def.type === 'select') return el.value;
         return el.value;
       },
       writeToUI: (el, v) => {
         if (!el) return;
-        if (def.type === 'toggle') el.checked = !!v; else el.value = v;
+        if (typeof def.writeToUI === 'function') { def.writeToUI(el, v); }
+        else if (def.type === 'toggle') el.checked = !!v; else el.value = v;
         // 同步右侧显示值
         const valueSpan = el.closest('.menu-item')?.querySelector('.setting-value');
         if (valueSpan) {
@@ -332,7 +380,8 @@ export function createSettingsManager(appContext) {
       } else if (def.type === 'select') {
         const select = document.createElement('select');
         select.id = def.id || `setting-${def.key}`;
-        (def.options || []).forEach(opt => {
+        const optionsArr = typeof def.options === 'function' ? def.options() : (def.options || []);
+        optionsArr.forEach(opt => {
           const o = document.createElement('option');
           if (typeof opt === 'string') {
             o.value = opt; o.textContent = opt;
@@ -385,39 +434,9 @@ export function createSettingsManager(appContext) {
   
   // 应用所有设置到UI
   function applyAllSettings() {
-    // 应用主题
-    applyTheme(currentSettings.theme);
-    
-    // 应用侧边栏宽度
-    applySidebarWidth(currentSettings.sidebarWidth);
-    
-    // 应用字体大小
-    applyFontSize(currentSettings.fontSize);
-    
-    // 应用缩放比例
-    applyScaleFactor(currentSettings.scaleFactor);
-    
-    // 应用自动滚动设置
-    applyAutoScroll(currentSettings.autoScroll);
-    
-    // 应用滚动到顶部时停止设置
-    applyStopAtTop(currentSettings.stopAtTop);
-    
-    // 应用划词搜索清空聊天设置
-    applyClearOnSearch(currentSettings.clearOnSearch);
-    
-    // 应用发送聊天历史设置
-    applySendChatHistory(currentSettings.shouldSendChatHistory);
-    
-    // 应用显示引用标记设置
-    applyShowReference(currentSettings.showReference);
-    
-    // 应用侧边栏位置设置
-    applySidebarPosition(currentSettings.sidebarPosition);
-
-    // 应用注册表定义的设置（无副作用的定义将跳过）
+    // 应用所有注册项设置（有 apply 的会被调用），并同步 UI
     SETTINGS_REGISTRY.forEach(def => {
-      const value = currentSettings[def.key];
+      const value = currentSettings[def.key] ?? def.defaultValue;
       if (typeof def.apply === 'function') {
         try { def.apply(value); } catch (e) { console.error('应用设置失败', def.key, e); }
       }
