@@ -219,7 +219,6 @@ export function createApiManager(appContext) {
     
     const maxHistoryValue = document.createElement('span');
     maxHistoryValue.className = 'max-history-value temperature-value';
-    maxHistoryValue.textContent = `${config.maxChatHistory || 500}条`;
     
     maxHistoryHeader.appendChild(maxHistoryLabel);
     maxHistoryHeader.appendChild(maxHistoryValue);
@@ -228,9 +227,15 @@ export function createApiManager(appContext) {
     maxHistoryInput.type = 'range';
     maxHistoryInput.className = 'max-chat-history temperature';
     maxHistoryInput.min = '10';
-    maxHistoryInput.max = '1000';
-    maxHistoryInput.step = '10';
-    maxHistoryInput.value = config.maxChatHistory || 500;
+    maxHistoryInput.max = '500';
+    maxHistoryInput.step = '5';
+
+    // 初始化值与显示：500 => 无限制；其余按条数显示
+    const currentMax = Number.isFinite(config.maxChatHistory) ? config.maxChatHistory : 500;
+    const isUnlimited = currentMax >= 500;
+    const clamped = Math.min(499, Math.max(10, isUnlimited ? 499 : currentMax));
+    maxHistoryInput.value = isUnlimited ? '500' : String(clamped);
+    maxHistoryValue.textContent = isUnlimited ? '无限制' : `${clamped}条`;
     
     maxHistoryGroup.appendChild(maxHistoryHeader);
     maxHistoryGroup.appendChild(maxHistoryInput);
@@ -241,11 +246,18 @@ export function createApiManager(appContext) {
     
     // 添加事件监听
     maxHistoryInput.addEventListener('input', () => {
-      maxHistoryValue.textContent = `${maxHistoryInput.value}条`;
+      const v = parseInt(maxHistoryInput.value, 10);
+      if (v >= 500) {
+        maxHistoryValue.textContent = '无限制';
+      } else {
+        maxHistoryValue.textContent = `${v}条`;
+      }
     });
     
     maxHistoryInput.addEventListener('change', () => {
-      apiConfigs[index].maxChatHistory = parseInt(maxHistoryInput.value);
+      const v = parseInt(maxHistoryInput.value, 10);
+      // 500 代表关闭限制，保存为一个极大值，message_sender 会按此视为“发送全部”
+      apiConfigs[index].maxChatHistory = (v >= 500) ? 2147483647 : v;
       saveAPIConfigs();
     });
 
