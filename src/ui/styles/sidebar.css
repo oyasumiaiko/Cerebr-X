@@ -1823,15 +1823,49 @@ body.hide-references .reference-number.superscript {
 }
 
 .prompt-settings-content {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    display: block;
 }
+
+.settings-section {
+    margin-bottom: 14px;
+    padding: 12px;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
+    border: 1px solid var(--cerebr-border-color);
+}
+
+.section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 10px 0;
+    font-size: 13px;
+    font-weight: 600;
+    opacity: 0.9;
+}
+.section-title i { opacity: 0.7; }
+
+.prompt-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+.prompt-grid.one-column { grid-template-columns: 1fr; }
 
 .prompt-group {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
+    padding: 12px;
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    border: 1px solid var(--cerebr-border-color);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.02);
+    transition: box-shadow 0.2s ease, transform 0.1s ease;
+}
+
+.prompt-group:hover {
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.03);
 }
 
 .prompt-group label {
@@ -1841,7 +1875,7 @@ body.hide-references .reference-number.superscript {
 }
 
 .prompt-group textarea {
-    min-height: 100px;
+    min-height: 120px;
     max-width: -webkit-fill-available;
     padding: 12px;
     border-radius: 8px;
@@ -1871,7 +1905,7 @@ body.hide-references .reference-number.superscript {
     display: flex;
     gap: 12px;
     justify-content: flex-end;
-    margin-top: 20px;
+    margin-top: 12px;
 }
 
 .prompt-actions button {
@@ -1960,6 +1994,100 @@ body.hide-references .reference-number.superscript {
 
 .reset-single-prompt:hover svg {
     opacity: 1;
+}
+
+/* 模型选择器样式（由 JS 动态插入的 .model-select-container） */
+.model-select-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+}
+.model-select-container label {
+    font-size: 12px;
+    opacity: 0.7;
+}
+.model-select-container .model-select {
+    flex: 1;
+    appearance: none;
+    padding: 6px 10px;
+    background: var(--cerebr-message-user-bg);
+    color: var(--cerebr-text-color);
+    border: 1px solid var(--cerebr-border-color);
+    border-radius: 6px;
+    outline: none;
+}
+.model-select-container .model-select:focus {
+    border-color: rgba(0, 122, 255, 0.5);
+    box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.2);
+}
+
+/* URL 规则列表美化 */
+.url-rules-container {
+    padding: 8px;
+    background: var(--cerebr-message-user-bg);
+    border: 1px dashed var(--cerebr-border-color);
+    border-radius: 8px;
+}
+.url-rules-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.url-rule-item {
+    padding: 8px;
+    border: 1px solid var(--cerebr-border-color);
+    border-radius: 6px;
+    background: var(--cerebr-message-ai-bg);
+}
+.url-rule-item.new-rule {
+    border-style: dashed;
+    opacity: 0.9;
+}
+.url-rule-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.url-rule-pattern-input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid var(--cerebr-border-color);
+    border-radius: 6px;
+    background: var(--cerebr-bg-color);
+    color: var(--cerebr-text-color);
+}
+.url-rule-actions {
+    display: flex;
+    gap: 6px;
+}
+.url-rule-action-btn {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--cerebr-border-color);
+    background: var(--cerebr-message-user-bg);
+    color: var(--cerebr-text-color);
+    border-radius: 6px;
+    cursor: pointer;
+}
+.url-rule-content {
+    margin-top: 8px;
+    display: grid;
+    grid-template-columns: minmax(140px, 220px) 1fr;
+    gap: 8px;
+}
+.url-rule-content textarea.url-rule-prompt {
+    min-height: 80px;
+    border-radius: 6px;
+}
+
+/* 两列网格容器对齐 */
+.prompt-settings-content .one-column {
+    grid-template-columns: 1fr;
 }
 
 /* 移除旧的样式 */
@@ -2056,15 +2184,6 @@ body.hide-references .reference-number.superscript {
 .model-select option:disabled {
     color: color-mix(in srgb, var(--cerebr-text-color) 50%, transparent);
     background-color: var(--cerebr-message-ai-bg);
-}
-
-/* 深色模式适配 */
-:root.dark-theme .model-select {
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23abb2bf' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
-}
-
-:root.dark-theme .model-select:hover {
-    background-color: color-mix(in srgb, var(--cerebr-input-bg) 95%, white);
 }
 
 /* Firefox 特定样式 */

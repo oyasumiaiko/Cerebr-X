@@ -257,54 +257,71 @@
             <span class="settings-title">提示词设置</span>
         </div>
         <div class="prompt-settings-content">
-            <!-- 基础设置 -->
-            <div class="prompt-group">
-                <label>系统提示词</label>
-                <textarea id="system-prompt" placeholder="输入系统提示词..."></textarea>
-            </div>
-            <div class="prompt-group">
-                <label>快速总结提示词</label>
-                <textarea id="summary-prompt" placeholder="输入页面总结时使用的提示词..."></textarea>
-            </div>
-
-            <!-- 搜索相关 -->
-            <div class="prompt-group">
-                <label>划词提示词</label>
-                <textarea id="query-prompt" placeholder="输入直接查询时使用的提示词..."></textarea>
-            </div>
-            <div class="prompt-group">
-                <label>联网划词提示词</label>
-                <textarea id="selection-prompt" placeholder="输入划词搜索时使用的提示词..."></textarea>
-            </div>
-
-            <!-- 内容分析 -->
-            <div class="prompt-group" style="display: none;">
-                <label>PDF快速总结提示词</label>
-                <textarea id="pdf-prompt" placeholder="输入PDF文档分析时使用的提示词..."></textarea>
-            </div>
-            <div class="prompt-group">
-                <label>图片默认提示词</label>
-                <textarea id="image-prompt" placeholder="输入图片解释时使用的提示词..."></textarea>
-            </div>
-            <div class="prompt-group" style="display: none;">
-                <label>截图解释提示词</label>
-                <textarea id="screenshot-prompt" placeholder="输入截图解释时使用的提示词..."></textarea>
-            </div>
-            <div class="prompt-group" style="display: none;">
-                <label>提取关键信息提示词</label>
-                <textarea id="extract-prompt" placeholder="输入提取关键信息时使用的提示词..."></textarea>
-            </div>
-            <!-- URL规则预设 -->
-            <div class="prompt-group">
-                <label>URL规则预设</label>
-                <div class="url-rules-container">
-                    <div id="url-rules-list" class="url-rules-list">
-                        <!-- 规则列表将动态生成 -->
+            <div class="settings-section">
+                <h4 class="section-title"><i class="far fa-sliders" aria-hidden="true"></i><span>基础设置</span></h4>
+                <div class="prompt-grid">
+                    <div class="prompt-group">
+                        <label>系统提示词</label>
+                        <textarea id="system-prompt" placeholder="输入系统提示词..."></textarea>
+                    </div>
+                    <div class="prompt-group">
+                        <label>快速总结提示词</label>
+                        <textarea id="summary-prompt" placeholder="输入页面总结时使用的提示词..."></textarea>
                     </div>
                 </div>
-                <textarea id="url-rules-prompt" style="display: none;"></textarea>
             </div>
-            
+
+            <div class="settings-section">
+                <h4 class="section-title"><i class="far fa-magnifying-glass" aria-hidden="true"></i><span>搜索相关</span></h4>
+                <div class="prompt-grid">
+                    <div class="prompt-group">
+                        <label>划词提示词</label>
+                        <textarea id="query-prompt" placeholder="输入直接查询时使用的提示词..."></textarea>
+                    </div>
+                    <div class="prompt-group">
+                        <label>联网划词提示词</label>
+                        <textarea id="selection-prompt" placeholder="输入划词搜索时使用的提示词..."></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h4 class="section-title"><i class="far fa-diagram-project" aria-hidden="true"></i><span>内容分析</span></h4>
+                <div class="prompt-grid">
+                    <div class="prompt-group" style="display: none;">
+                        <label>PDF快速总结提示词</label>
+                        <textarea id="pdf-prompt" placeholder="输入PDF文档分析时使用的提示词..."></textarea>
+                    </div>
+                    <div class="prompt-group">
+                        <label>图片默认提示词</label>
+                        <textarea id="image-prompt" placeholder="输入图片解释时使用的提示词..."></textarea>
+                    </div>
+                    <div class="prompt-group" style="display: none;">
+                        <label>截图解释提示词</label>
+                        <textarea id="screenshot-prompt" placeholder="输入截图解释时使用的提示词..."></textarea>
+                    </div>
+                    <div class="prompt-group" style="display: none;">
+                        <label>提取关键信息提示词</label>
+                        <textarea id="extract-prompt" placeholder="输入提取关键信息时使用的提示词..."></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h4 class="section-title"><i class="far fa-link" aria-hidden="true"></i><span>URL 规则预设</span></h4>
+                <div class="prompt-grid one-column">
+                    <div class="prompt-group">
+                        <label>URL规则预设</label>
+                        <div class="url-rules-container">
+                            <div id="url-rules-list" class="url-rules-list">
+                                <!-- 规则列表将动态生成 -->
+                            </div>
+                        </div>
+                        <textarea id="url-rules-prompt" style="display: none;"></textarea>
+                    </div>
+                </div>
+            </div>
+
             <div class="prompt-actions" style="position: sticky; bottom: 0;">
                 <button id="reset-prompts" style="display: none;">恢复默认</button>
                 <button id="save-prompts">保存更改</button>
