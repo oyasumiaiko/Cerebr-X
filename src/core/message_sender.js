@@ -465,9 +465,8 @@ export function createMessageSender(appContext) {
     }
 
     // 根据设置决定是否发送聊天历史
-    const sendChatHistory = shouldSendChatHistory && 
-      currentPromptType !== 'selection' && 
-      currentPromptType !== 'image';
+    // 放开 selection：仅在图片模式下不发送历史
+    const sendChatHistory = shouldSendChatHistory && currentPromptType !== 'image';
       
     if (sendChatHistory) {
       // 获取当前 API 配置的最大历史消息条数设置
