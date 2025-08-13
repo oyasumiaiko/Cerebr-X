@@ -465,11 +465,11 @@ export function createContextMenuManager(appContext) {
 
     const saveBtn = document.createElement('button');
     saveBtn.className = 'inline-editor-save';
-    saveBtn.textContent = '保存';
+    saveBtn.innerHTML = '<i class="far fa-check"></i><span>保存</span>';
 
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'inline-editor-cancel';
-    cancelBtn.textContent = '取消';
+    cancelBtn.innerHTML = '<i class="far fa-times"></i><span>取消</span>';
 
     actionBar.appendChild(saveBtn);
     actionBar.appendChild(cancelBtn);
@@ -480,9 +480,9 @@ export function createContextMenuManager(appContext) {
     textDiv.style.display = 'none';
     messageElement.insertBefore(editorWrapper, textDiv.nextSibling);
 
-    // 自适应高度
-    autoResize(textarea);
-    textarea.addEventListener('input', () => autoResize(textarea));
+    // 设置默认高度为视口的一半，并启用滚动
+    textarea.style.height = '50vh';
+    textarea.style.overflow = 'auto';
     textarea.focus();
 
     // 绑定事件
@@ -517,7 +517,17 @@ export function createContextMenuManager(appContext) {
       // 更新历史节点
       const node = chatHistory.messages.find(m => m.id === messageId);
       if (!node) { console.error('未找到消息历史节点'); return; }
-      node.content = newText;
+      if (Array.isArray(node.content)) {
+        const images = node.content.filter(part => part && part.type === 'image_url');
+        const hasText = typeof newText === 'string' && newText.trim() !== '';
+        const newParts = [...images];
+        if (hasText) {
+          newParts.push({ type: 'text', text: newText });
+        }
+        node.content = newParts;
+      } else {
+        node.content = newText;
+      }
 
       // 更新 DOM 显示
       const textDiv = messageElement.querySelector('.text-content');

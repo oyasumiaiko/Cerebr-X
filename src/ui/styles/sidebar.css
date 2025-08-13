@@ -183,6 +183,7 @@ body {
 }
 
 .ai-message {
+    width: -webkit-fill-available;
     background-color: var(--cerebr-message-ai-bg);
     margin-right: auto;
     margin-left: 0;
@@ -3409,3 +3410,77 @@ body.hide-references .reference-number.superscript {
   }
   
   /* --- End of Styles for Thinking Process --- */
+
+
+  /* Inline editor for message re-edit */
+.inline-editor-wrapper {
+    margin-top: 8px;
+    background: transparent;
+  }
+  
+  .inline-editor-textarea {
+    width: 100%;
+    min-height: 240px;
+    max-height: 70vh;
+    box-sizing: border-box;
+    border: 1px solid var(--cerebr-border-color);
+    outline: none;
+    resize: vertical;
+    padding: 12px 14px;
+    font-size: var(--cerebr-font-size);
+    color: var(--cerebr-text-color);
+    background: var(--cerebr-input-bg);
+    line-height: 1.7;
+    border-radius: 10px;
+    box-shadow: 0 1px 0 0 color-mix(in srgb, var(--cerebr-border-color) 70%, transparent) inset;
+  }
+  
+  .inline-editor-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 8px 2px;
+    background: transparent;
+  }
+  
+  .inline-editor-actions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+    background: color-mix(in srgb, var(--cerebr-bg-color) 85%, transparent);
+    color: var(--cerebr-text-color);
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: calc(var(--cerebr-font-size) - 1px);
+  }
+  
+  .inline-editor-actions button i {
+    font-size: 12px;
+  }
+  
+  .inline-editor-save {
+    border-color: color-mix(in srgb, var(--cerebr-green) 50%, var(--cerebr-border-color));
+  }
+  
+  .inline-editor-cancel {
+    border-color: color-mix(in srgb, var(--cerebr-red) 50%, var(--cerebr-border-color));
+  }
+  
+  /* Subtle custom scrollbar for the inline editor */
+  .inline-editor-textarea::-webkit-scrollbar {
+    width: 10px;
+  }
+  .inline-editor-textarea::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .inline-editor-textarea::-webkit-scrollbar-thumb {
+    background-color: color-mix(in srgb, var(--cerebr-text-color) 20%, transparent);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  .inline-editor-textarea::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in srgb, var(--cerebr-text-color) 35%, transparent);
+  }
