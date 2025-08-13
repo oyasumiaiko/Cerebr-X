@@ -940,6 +940,9 @@ input:checked + .slider:before {
 .message .image-tag .delete-btn {
     display: none;
 }
+.message.editing .image-tag .delete-btn {
+    display: inline-flex;
+}
 
 .image-tag .delete-btn {
     position: absolute;
@@ -1073,23 +1076,8 @@ input:checked + .slider:before {
         color: #58a6ff;
     }
 
-    .image-tag {
-        background: rgba(10, 132, 255, 0.12);
-        border-color: rgba(10, 132, 255, 0.2);
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-    }
-
-    .image-tag:hover {
-        background: rgba(10, 132, 255, 0.18);
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
-    }
-
     .message {
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-    }
-
-    .message:hover {
-        /* box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); */
     }
 }
 

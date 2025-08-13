@@ -443,6 +443,7 @@ export function createContextMenuManager(appContext) {
     const messageId = messageElement.getAttribute('data-message-id');
     if (!messageId) return;
     isEditing = true;
+    try { messageElement.classList.add('editing'); } catch (_) {}
 
     // 定义延迟定位函数：在DOM更新后再滚动，避免初算不准
     const scheduleScrollAfterSetup = () => {
@@ -467,6 +468,17 @@ export function createContextMenuManager(appContext) {
     // 原始HTML和纯文本
     const originalHtml = textDiv.innerHTML;
     const originalText = messageElement.getAttribute('data-original-text') || textDiv.textContent || '';
+    const imageContainerInMessage = messageElement.querySelector('.image-content');
+    const originalImagesHTML = imageContainerInMessage ? imageContainerInMessage.innerHTML : '';
+    // 委托删除图片（适配历史DOM中未绑定事件的删除按钮）
+    const delegatedDeleteHandler = (e) => {
+      const deleteBtn = e.target.closest && e.target.closest('.delete-btn');
+      if (!deleteBtn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const tag = deleteBtn.closest('.image-tag');
+      if (tag) tag.remove();
+    };
 
     // 记录变更前的原始消息尺寸（避免后续DOM修改影响测量）
     const originalMsgRect = messageElement.getBoundingClientRect();
@@ -544,7 +556,35 @@ export function createContextMenuManager(appContext) {
       }
     });
 
+    // 允许在编辑时通过粘贴添加图片
+    textarea.addEventListener('paste', (e) => {
+      try {
+        const items = Array.from(e.clipboardData?.items || []);
+        const imageItem = items.find(it => it.type && it.type.startsWith('image/'));
+        if (!imageItem) return;
+        e.preventDefault();
+        const file = imageItem.getAsFile();
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          // 确保消息内存在图片容器
+          let imgContainer = messageElement.querySelector('.image-content');
+          if (!imgContainer) {
+            imgContainer = document.createElement('div');
+            imgContainer.className = 'image-content';
+            messageElement.insertBefore(imgContainer, textDiv); // 放在文本上方
+          }
+          const tag = appContext.services.imageHandler.createImageTag(reader.result, file.name);
+          imgContainer.appendChild(tag);
+        };
+        reader.readAsDataURL(file);
+      } catch (err) {
+        console.error('编辑时粘贴图片失败:', err);
+      }
+    });
+
     // 绑定事件
+    try { messageElement.addEventListener('click', delegatedDeleteHandler); } catch (_) {}
     saveBtn.addEventListener('click', async () => {
       const newText = textarea.value;
       await applyInlineEdit(messageElement, messageId, newText);
@@ -553,13 +593,32 @@ export function createContextMenuManager(appContext) {
     cancelBtn.addEventListener('click', () => {
       textDiv.style.display = '';
       editorWrapper.remove();
+      // 还原图片区域
+      try {
+        const imgContainer = messageElement.querySelector('.image-content');
+        if (imgContainer) {
+          imgContainer.innerHTML = originalImagesHTML;
+          // 重新绑定预览
+          imgContainer.querySelectorAll('img').forEach(img => {
+            img.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              appContext.services.imageHandler.showImagePreview(img.src);
+            });
+          });
+        }
+      } catch (e) { console.error('恢复图片区域失败:', e); }
       isEditing = false;
+      try { messageElement.classList.remove('editing'); } catch (_) {}
+      try { messageElement.removeEventListener('click', delegatedDeleteHandler); } catch (_) {}
     });
 
     function cleanup() {
       textDiv.style.display = '';
       editorWrapper.remove();
       isEditing = false;
+      try { messageElement.classList.remove('editing'); } catch (_) {}
+      try { messageElement.removeEventListener('click', delegatedDeleteHandler); } catch (_) {}
     }
   }
 
@@ -576,8 +635,14 @@ export function createContextMenuManager(appContext) {
       // 更新历史节点
       const node = chatHistory.messages.find(m => m.id === messageId);
       if (!node) { console.error('未找到消息历史节点'); return; }
+      // 从 DOM 读取当前图片（允许在编辑过程中删除或添加）
+      const currentImageTags = Array.from(messageElement.querySelectorAll('.image-content .image-tag'));
+      const images = currentImageTags.map(tag => {
+        const base64Data = tag.getAttribute('data-image') || tag.querySelector('img')?.src || '';
+        return base64Data ? { type: 'image_url', image_url: { url: base64Data } } : null;
+      }).filter(Boolean);
+
       if (Array.isArray(node.content)) {
-        const images = node.content.filter(part => part && part.type === 'image_url');
         const hasText = typeof newText === 'string' && newText.trim() !== '';
         const newParts = [...images];
         if (hasText) {
@@ -585,7 +650,13 @@ export function createContextMenuManager(appContext) {
         }
         node.content = newParts;
       } else {
-        node.content = newText;
+        // 非数组：升级为多模态结构（根据当前图片与文本）
+        const hasText = typeof newText === 'string' && newText.trim() !== '';
+        if (images.length > 0) {
+          node.content = hasText ? [...images, { type: 'text', text: newText }] : images;
+        } else {
+          node.content = newText;
+        }
       }
 
       // 更新 DOM 显示
