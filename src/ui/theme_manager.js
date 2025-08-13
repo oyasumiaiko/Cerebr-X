@@ -1041,12 +1041,12 @@ export function createThemeManager() {
       description: '淡粉色透明梦幻主题',
       type: 'light',
       variables: {
-        '--cerebr-opacity': '0.8',
-        '--cerebr-bg-color': 'rgba(255, 250, 250, var(--cerebr-opacity))',
-        '--cerebr-text-color': '#5d4c5c',
-        '--cerebr-message-user-bg': 'rgba(255, 230, 240, 0.25)',
-        '--cerebr-message-ai-bg': 'rgba(250, 240, 245, 0.2)',
-        '--cerebr-input-bg': 'rgba(255, 245, 250, 0.3)',
+        '--cerebr-opacity': 1,
+        '--cerebr-bg-color': 'rgb(253 253 253 / 88%)',
+        '--cerebr-text-color': 'hsl(304 10% 12% / 1)',
+        '--cerebr-message-user-bg': 'rgb(255 230 240)',
+        '--cerebr-message-ai-bg': 'rgb(250 240 245)',
+        '--cerebr-input-bg': 'rgb(255 245 250)',
         '--cerebr-icon-color': '#e68bb3',
         '--cerebr-border-color': 'rgba(230, 210, 220, 0.4)',
         '--cerebr-hover-color': 'rgba(230, 139, 179, 0.05)',
@@ -1341,6 +1341,139 @@ export function createThemeManager() {
         '--cerebr-code-bg': '#f7f7f7',
         '--cerebr-code-color': '#000000',
         '--cerebr-code-border': '#eeeeee'       
+      }
+    },
+    // 不透明高可读性主题（新增）
+    {
+      id: 'clarity-light',
+      name: 'Clarity Light',
+      description: '高对比极简浅色不透明主题',
+      type: 'light',
+      variables: {
+        '--cerebr-opacity': '1',
+        '--cerebr-bg-color': '#f7f7f8',
+        '--cerebr-text-color': '#1f2937',
+        '--cerebr-message-user-bg': '#ffffff',
+        '--cerebr-message-ai-bg': '#f9fafb',
+        '--cerebr-input-bg': '#ffffff',
+        '--cerebr-icon-color': '#667085',
+        '--cerebr-border-color': '#e5e7eb',
+        '--cerebr-hover-color': 'rgba(0, 0, 0, 0.03)',
+        '--cerebr-tooltip-bg': '#ffffff',
+        '--cerebr-highlight': '#3a5da8',
+        '--cerebr-code-bg': '#f3f4f6',
+        '--cerebr-code-color': '#1f2937',
+        '--cerebr-code-border': '#e5e7eb'       
+      }
+    },
+    {
+      id: 'sepia-light',
+      name: 'Warm Sepia',
+      description: '护眼暖调浅色不透明主题',
+      type: 'light',
+      variables: {
+        '--cerebr-opacity': '1',
+        '--cerebr-bg-color': '#f8f4e8',
+        '--cerebr-text-color': '#3e3529',
+        '--cerebr-message-user-bg': '#efe6d4',
+        '--cerebr-message-ai-bg': '#fbf7ee',
+        '--cerebr-input-bg': '#f5efe2',
+        '--cerebr-icon-color': '#8b6f47',
+        '--cerebr-border-color': '#e4dccb',
+        '--cerebr-hover-color': 'rgba(0, 0, 0, 0.03)',
+        '--cerebr-tooltip-bg': '#fffdf7',
+        '--cerebr-highlight': '#c47f2c',
+        '--cerebr-code-bg': '#f2ebda',
+        '--cerebr-code-color': '#3e3529',
+        '--cerebr-code-border': '#e4dccb'       
+      }
+    },
+    {
+      id: 'slate-light',
+      name: 'Slate Light',
+      description: '中性灰浅色不透明主题',
+      type: 'light',
+      variables: {
+        '--cerebr-opacity': '1',
+        '--cerebr-bg-color': '#f7f7f8',
+        '--cerebr-text-color': '#202227',
+        '--cerebr-message-user-bg': '#e6f0ff',
+        '--cerebr-message-ai-bg': '#ffffff',
+        '--cerebr-input-bg': '#ffffff',
+        '--cerebr-icon-color': '#5b616e',
+        '--cerebr-border-color': '#d9dde3',
+        '--cerebr-hover-color': 'rgba(0, 0, 0, 0.03)',
+        '--cerebr-tooltip-bg': '#ffffff',
+        '--cerebr-highlight': '#0ea5e9',
+        '--cerebr-code-bg': '#eef2f7',
+        '--cerebr-code-color': '#202227',
+        '--cerebr-code-border': '#d9dde3'       
+      }
+    },
+    {
+      id: 'charcoal-dark',
+      name: 'Charcoal',
+      description: '高对比炭黑不透明主题',
+      type: 'dark',
+      variables: {
+        '--cerebr-opacity': '1',
+        '--cerebr-bg-color': '#121417',
+        '--cerebr-text-color': '#cdd1d6',
+        '--cerebr-message-user-bg': '#1e232a',
+        '--cerebr-message-ai-bg': '#171b20',
+        '--cerebr-input-bg': '#0f1216',
+        '--cerebr-icon-color': '#9aa3ad',
+        '--cerebr-border-color': '#2a2f36',
+        '--cerebr-hover-color': 'rgba(255, 255, 255, 0.06)',
+        '--cerebr-tooltip-bg': '#0e1115',
+        '--cerebr-highlight': '#4ea1ff',
+        '--cerebr-code-bg': '#0f141a',
+        '--cerebr-code-color': '#cdd1d6',
+        '--cerebr-code-border': '#2a2f36'       
+      }
+    },
+    {
+      id: 'graphite-dark',
+      name: 'Graphite Dark',
+      description: '中性灰深色不透明主题',
+      type: 'dark',
+      variables: {
+        '--cerebr-opacity': '1',
+        '--cerebr-bg-color': '#1a1c1f',
+        '--cerebr-text-color': '#d0d5dd',
+        '--cerebr-message-user-bg': '#23262b',
+        '--cerebr-message-ai-bg': '#1f2226',
+        '--cerebr-input-bg': '#15171a',
+        '--cerebr-icon-color': '#9ea7b3',
+        '--cerebr-border-color': '#343a40',
+        '--cerebr-hover-color': 'rgba(255, 255, 255, 0.06)',
+        '--cerebr-tooltip-bg': '#131519',
+        '--cerebr-highlight': '#7aa2f7',
+        '--cerebr-code-bg': '#121417',
+        '--cerebr-code-color': '#d0d5dd',
+        '--cerebr-code-border': '#343a40'       
+      }
+    },
+    {
+      id: 'espresso-dark',
+      name: 'Espresso',
+      description: '暖调咖啡深色不透明主题',
+      type: 'dark',
+      variables: {
+        '--cerebr-opacity': '1',
+        '--cerebr-bg-color': '#1c1a19',
+        '--cerebr-text-color': '#e6d9c6',
+        '--cerebr-message-user-bg': '#262220',
+        '--cerebr-message-ai-bg': '#201d1b',
+        '--cerebr-input-bg': '#151312',
+        '--cerebr-icon-color': '#d0b48a',
+        '--cerebr-border-color': '#3a322c',
+        '--cerebr-hover-color': 'rgba(230, 217, 198, 0.08)',
+        '--cerebr-tooltip-bg': '#141210',
+        '--cerebr-highlight': '#d08a4e',
+        '--cerebr-code-bg': '#171513',
+        '--cerebr-code-color': '#e6d9c6',
+        '--cerebr-code-border': '#3a322c'       
       }
     }
   ];
