@@ -241,8 +241,13 @@ export function createApiManager(appContext) {
     maxHistoryGroup.appendChild(maxHistoryInput);
     
     // 在自定义参数之前插入最大聊天历史设置
-    const customParamsGroup = apiForm.querySelector('.form-group:last-child');
-    apiForm.insertBefore(maxHistoryGroup, customParamsGroup);
+    // 将“最大聊天历史”放在左侧（api-form-left 的末尾）
+    const formLeft = apiForm.querySelector('.api-form-left');
+    if (formLeft) {
+      formLeft.appendChild(maxHistoryGroup);
+    } else {
+      apiForm.appendChild(maxHistoryGroup);
+    }
     
     // 添加事件监听
     maxHistoryInput.addEventListener('input', () => {
@@ -436,16 +441,18 @@ export function createApiManager(appContext) {
       }
     });
 
+    // 自定义 Headers 功能已移除
+
     // 复制配置
     template.querySelector('.duplicate-btn').addEventListener('click', (e) => {
       e.stopPropagation();
-      const newConfig = { ...config, id: generateUUID() };
-      // 重置 apiKey 轮询状态 (如果复制的是多 key 配置)
-      const newConfigId = getConfigIdentifier(newConfig);
-      if (Array.isArray(newConfig.apiKey) && newConfig.apiKey.length > 0) {
+      const copied = JSON.parse(JSON.stringify(config));
+      copied.id = generateUUID();
+      apiConfigs.push(copied);
+      const newConfigId = getConfigIdentifier(copied);
+      if (Array.isArray(copied.apiKey) && copied.apiKey.length > 0) {
           apiKeyUsageIndex[newConfigId] = 0;
       }
-      apiConfigs.push(newConfig);
       saveAPIConfigs();
       renderAPICards();
     });

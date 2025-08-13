@@ -205,43 +205,49 @@
                     </div>
                 </div>
                 <div class="api-form">
-                    <div class="form-group">
-                        <div class="form-group-header">
-                            <label>API Key (逗号分隔轮询多个Key)</label>
+                    <div class="api-form-grid">
+                        <div class="api-form-left">
+                            <div class="form-group">
+                                <div class="form-group-header">
+                                    <label>API Key (逗号分隔轮询多个Key)</label>
+                                </div>
+                                <div class="input-wrapper">
+                                    <input type="password" class="api-key" placeholder="输入 API Key">
+                                    <button class="toggle-password-btn" title="切换密码显示">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                            <circle cx="12" cy="12" r="3"/>
+                                            <path class="eye-slash" d="M3 3l18 18"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>API 端点 URL</label>
+                                <input type="text" class="base-url" placeholder="输入 Base URL">
+                            </div>
+                            <div class="form-group">
+                                <label>模型ID</label>
+                                <input type="text" class="model-name" placeholder="输入模型名称">
+                            </div>
+                            <div class="form-group">
+                                <label>显示名称</label>
+                                <input type="text" class="display-name" placeholder="输入显示名称（可选）">
+                            </div>
+                            <div class="form-group">
+                                <div class="form-group-header">
+                                    <label>Temperature</label>
+                                    <span class="temperature-value">1.0</span>
+                                </div>
+                                <input type="range" class="temperature" min="0" max="2" step="0.1" value="1">
+                            </div>
                         </div>
-                        <div class="input-wrapper">
-                            <input type="password" class="api-key" placeholder="输入 API Key">
-                            <button class="toggle-password-btn" title="切换密码显示">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                    <circle cx="12" cy="12" r="3"/>
-                                    <path class="eye-slash" d="M3 3l18 18"/>
-                                </svg>
-                            </button>
+                        <div class="api-form-right">
+                            <div class="form-group custom-params-group">
+                                <label>自定义参数</label>
+                                <textarea class="custom-params" placeholder='例如: {"Authorization": "Bearer sk-...", "X-Org": "acme"}'></textarea>
+                            </div>
                         </div>
-                    </div>
-                    <div class="form-group">
-                        <label>API 端点 URL</label>
-                        <input type="text" class="base-url" placeholder="输入 Base URL">
-                    </div>
-                    <div class="form-group">
-                        <label>显示名称</label>
-                        <input type="text" class="display-name" placeholder="输入显示名称（可选）">
-                    </div>
-                    <div class="form-group">
-                        <label>模型名称</label>
-                        <input type="text" class="model-name" placeholder="输入模型名称">
-                    </div>
-                    <div class="form-group">
-                        <div class="form-group-header">
-                            <label>Temperature</label>
-                            <span class="temperature-value">1.0</span>
-                        </div>
-                        <input type="range" class="temperature" min="0" max="2" step="0.1" value="1">
-                    </div>
-                    <div class="form-group">
-                        <label>自定义参数</label>
-                        <textarea class="custom-params" placeholder='例如: {"max_tokens": 8192, "top-k": 1}'></textarea>
                     </div>
                 </div>
             </div>
