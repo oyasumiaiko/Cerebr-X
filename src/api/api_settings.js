@@ -749,15 +749,20 @@ export function createApiManager(appContext) {
 
     // 2. 检查特定提示词类型是否指定了特定模型 (原有逻辑)
     if (promptType && promptsConfig && promptsConfig[promptType]?.model) {
-      const preferredModel = promptsConfig[promptType].model;
-      // 查找对应的模型配置 (优先按 modelName 和 baseUrl 匹配)
-      const config = apiConfigs.find(c => c.modelName === preferredModel && c.baseUrl); // 确保 baseUrl 存在
-      if (config) {
-        console.log(`根据 promptType "${promptType}" 使用配置: ${config.displayName || config.modelName}`);
-        return config; // 返回找到的特定配置
+      const preferredValue = String(promptsConfig[promptType].model || '').trim();
+      if (preferredValue) {
+        // 先按 displayName 精确匹配
+        let config = apiConfigs.find(c => (c.displayName || '').trim() === preferredValue);
+        if (!config) {
+          // 回退：再按 modelName 匹配
+          config = apiConfigs.find(c => (c.modelName || '').trim() === preferredValue);
+        }
+        if (config) {
+          console.log(`根据 promptType "${promptType}" 使用配置: ${config.displayName || config.modelName}`);
+          return config;
+        }
+        console.log(`未找到 promptType "${promptType}" 指定的配置 "${preferredValue}"，将使用默认选中配置。`);
       }
-      // 如果仅按 modelName 找不到，可以考虑其他逻辑或回退
-      console.log(`未找到 promptType "${promptType}" 指定的模型配置 "${preferredModel}"，将使用默认选中配置。`);
     }
 
     // 1. 检查对话长度并尝试查找特定配置

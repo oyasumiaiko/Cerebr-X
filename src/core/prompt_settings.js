@@ -200,19 +200,17 @@ class PromptSettings {
 
         // 获取所有可用的模型
         const getAvailableModels = () => {
-            const models = new Set();
-            // Try to get models from apiManager via appContext if available and updated
+            // 返回“可选项值”的列表：优先使用 displayName，否则回退 modelName
+            const values = new Set();
             const apiManager = this.appContext.services.apiManager;
-            const apiConfigs = apiManager ? apiManager.getAllConfigs() : window.apiConfigs; 
-
-            if (apiConfigs) {
+            const apiConfigs = apiManager ? apiManager.getAllConfigs() : window.apiConfigs;
+            if (apiConfigs && Array.isArray(apiConfigs)) {
                 apiConfigs.forEach(config => {
-                    if (config.modelName) {
-                        models.add(config.modelName);
-                    }
+                    const value = (config.displayName && String(config.displayName).trim()) || config.modelName;
+                    if (value) values.add(value);
                 });
             }
-            return Array.from(models);
+            return Array.from(values);
         };
 
         promptTypes.forEach(type => {
@@ -265,7 +263,7 @@ class PromptSettings {
                     availableModels = models;
                 }
 
-                // 添加已配置的模型
+                // 添加已配置的“显示名称/模型名”
                 availableModels.forEach(model => {
                     const option = document.createElement('option');
                     option.value = model;
@@ -566,7 +564,8 @@ class PromptSettings {
             
             prompts[type] = {
                 prompt: promptValue,
-                model: this.savedPrompts?.[type]?.model || DEFAULT_PROMPTS[type].model
+                // 将 model 字段存储为“选择值”（displayName 或 modelName），由 apiManager 在 getModelConfig 中解析
+                model: this.modelSelects[type]?.value || this.savedPrompts?.[type]?.model || DEFAULT_PROMPTS[type].model
             };
         });
         return prompts;
