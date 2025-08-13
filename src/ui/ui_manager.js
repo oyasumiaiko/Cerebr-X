@@ -112,58 +112,24 @@ export function createUIManager(appContext) {
    * 关闭互斥面板函数
    */
   function closeExclusivePanels() {
-    // 定义需要互斥的面板ID列表
-    const panelsToCloseDirectly = ['prompt-settings', 'api-settings']; // REMOVED 'settings-menu'
-    
-    // Close panels managed by their respective services if they have a close method
-    if (chatHistoryUI && typeof chatHistoryUI.closeChatHistoryPanel === 'function') {
-      chatHistoryUI.closeChatHistoryPanel();
-    }
-    if (promptSettingsManager && typeof promptSettingsManager.closePanel === 'function') {
+    // 仅互斥以下三者：聊天记录、API 设置、提示词设置；设置菜单不参与
+    const isPanelOpen = (el) => !!el && el.classList?.contains('visible');
+
+    const chatPanel = document.getElementById('chat-history-panel');
+    const apiPanel = appContext.dom.apiSettingsPanel;
+    const promptPanel = appContext.dom.promptSettingsPanel;
+
+    if (chatHistoryUI?.closeChatHistoryPanel) chatHistoryUI.closeChatHistoryPanel();
+    if (promptSettingsManager?.closePanel) {
       promptSettingsManager.closePanel();
-    } else if (appContext.dom.promptSettingsPanel) { // Use appContext.dom reference
-      appContext.dom.promptSettingsPanel.classList.remove('visible');
+    } else if (isPanelOpen(promptPanel)) {
+      promptPanel.classList.remove('visible');
     }
-
-    if (apiManager && typeof apiManager.closePanel === 'function') {
+    if (apiManager?.closePanel) {
       apiManager.closePanel();
-    } else if (appContext.dom.apiSettingsPanel) { // Use appContext.dom reference
-      appContext.dom.apiSettingsPanel.classList.remove('visible');
+    } else if (isPanelOpen(apiPanel)) {
+      apiPanel.classList.remove('visible');
     }
-
-    // REMOVE block for settingsManager and settingsMenu from here
-    // if (settingsManager && typeof settingsManager.closePanel === 'function') {
-    //   settingsManager.closePanel();
-    // } else if (appContext.dom.settingsMenu) { 
-    //   appContext.dom.settingsMenu.classList.remove('visible');
-    // }
-    
-    // Fallback for any other panels by ID if not covered by services
-    panelsToCloseDirectly.forEach(pid => {
-      const panel = document.getElementById(pid);
-      if (panel && panel.classList.contains('visible')) {
-        // Check if a dedicated service method already handled it
-        let handledByService = false;
-        if (pid === 'prompt-settings' && promptSettingsManager?.closePanel) {
-          handledByService = true; 
-        } else if (pid === 'api-settings' && apiManager?.closePanel) {
-          handledByService = true;
-        } 
-        // REMOVE: else if (pid === 'settings-menu' && settingsManager?.closePanel) { 
-        //   handledByService = true; 
-        // }
-
-        if (!handledByService) {
-           // Corrected logic: only check for panels that are still in panelsToCloseDirectly
-           // and are not handled by their specific service's closePanel method.
-           if (panelsToCloseDirectly.includes(pid) && 
-               !((pid === 'prompt-settings' && promptSettingsManager?.closePanel) || 
-                 (pid === 'api-settings' && apiManager?.closePanel))) {
-               panel.classList.remove('visible');
-           }
-        }
-      }
-    });
   }
 
   /**
@@ -216,18 +182,7 @@ export function createUIManager(appContext) {
     if (dom.settingsButton && dom.settingsMenu) {
         const openSettingsMenu = () => {
             clearTimeout(settingsMenuTimeout);
-            // Ensure other exclusive panels are closed before opening this one
-            // Call a more targeted close if closeExclusivePanels is too broad for just hover
-            // For now, assuming closeExclusivePanels handles this fine.
-            const otherPanelsOpen = 
-                (document.getElementById('chat-history-panel') && document.getElementById('chat-history-panel').classList.contains('visible')) ||
-                (dom.apiSettingsPanel && dom.apiSettingsPanel.classList.contains('visible')) ||
-                (dom.promptSettingsPanel && dom.promptSettingsPanel.classList.contains('visible'));
-
-            if (otherPanelsOpen) {
-                 closeExclusivePanels(); // Close others if they are open
-            }
-
+            // 设置菜单不参与互斥：打开它不应关闭其他面板
             dom.settingsMenu.classList.add('visible');
             apiManager.renderFavoriteApis();
         };
@@ -267,11 +222,7 @@ export function createUIManager(appContext) {
 
     // The global document click listener is in sidebar.js for closing by clicking outside.
 
-    if (messageInput) {
-        messageInput.addEventListener('focus', () => {
-            closeExclusivePanels(); // Close panels when user focuses on input
-        });
-    }
+    // 不再在输入框获得焦点时强制关闭其他面板，避免与面板互斥逻辑产生冲突
   }
 
   /**

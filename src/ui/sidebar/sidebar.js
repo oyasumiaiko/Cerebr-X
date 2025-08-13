@@ -480,9 +480,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             if (appContext.state.isComposing) return;
-            const isOpen = appContext.services.chatHistoryUI.isChatHistoryPanelOpen();
-            appContext.services.uiManager.closeExclusivePanels();
-            if (!isOpen) {
+            const chatOpen = appContext.services.chatHistoryUI.isChatHistoryPanelOpen();
+            const apiOpen = appContext.dom.apiSettingsPanel?.classList.contains('visible');
+            const promptOpen = appContext.dom.promptSettingsPanel?.classList.contains('visible');
+            const anyPanelOpen = chatOpen || apiOpen || promptOpen;
+
+            if (anyPanelOpen) {
+                appContext.services.uiManager.closeExclusivePanels();
+            } else {
                 appContext.services.chatHistoryUI.showChatHistoryPanel();
             }
             e.preventDefault();
@@ -501,7 +506,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             },
             { panel: appContext.dom.apiSettingsPanel, toggle: appContext.dom.apiSettingsToggle, openers: [] },
             { panel: appContext.dom.promptSettingsPanel, toggle: appContext.dom.promptSettingsToggle, openers: [] },
-            // { panel: appContext.dom.settingsMenu, toggle: appContext.dom.settingsButton, openers: [] },
+            // 设置菜单不参与互斥，不纳入 auto-close 列表
             // { panel: appContext.dom.contextMenu, toggle: null, openers: [] } 
         ];
 
