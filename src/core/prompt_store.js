@@ -16,18 +16,25 @@
 /**
  * 常量定义
  */
-export const MAX_SYNC_ITEM_BYTES = 8000; // 留出缓冲，chrome.storage.sync.QUOTA_BYTES_PER_ITEM = 8192
 export const PROMPT_KEY_PREFIX = 'prompt_';
 export const PROMPT_CHUNK_KEY_PREFIX_SUFFIX = '_chunk_';
+
+import {
+  MAX_SYNC_ITEM_BYTES,
+  DEFAULT_CHUNK_SUFFIX,
+  getStringByteLength,
+  splitStringToByteChunks,
+  setChunksToSync,
+  getChunksFromSync,
+  removeChunksByPrefix
+} from '../utils/sync_chunk.js';
 
 /**
  * 获取字符串的UTF-8字节长度
  * @param {string} str - 输入字符串
  * @returns {number} 字符串的UTF-8字节长度
  */
-function getStringByteLength(str) {
-  return new TextEncoder().encode(str).length;
-}
+// 统一改用 ../utils/sync_chunk.js 提供的实现
 
 /**
  * 迁移旧格式的提示词设置到新格式
@@ -85,22 +92,9 @@ export async function loadPromptByType(type) {
 
       let settings = result[mainKey];
       if (settings && settings.isChunked && typeof settings.chunkCount === 'number' && settings.chunkCount > 0) {
-        const chunkKeyBase = `${PROMPT_KEY_PREFIX}${type}${PROMPT_CHUNK_KEY_PREFIX_SUFFIX}`;
-        const chunkKeys = Array.from({ length: settings.chunkCount }, (_, i) => `${chunkKeyBase}${i}`);
+        const chunkKeyBase = `${PROMPT_KEY_PREFIX}${type}${DEFAULT_CHUNK_SUFFIX}`;
         try {
-          const chunkResults = await new Promise((res, rej) => {
-            chrome.storage.sync.get(chunkKeys, (chunks) => {
-              if (chrome.runtime.lastError) {
-                rej(new Error(chrome.runtime.lastError.message));
-              } else {
-                res(chunks);
-              }
-            });
-          });
-          let fullPrompt = '';
-          for (let i = 0; i < settings.chunkCount; i++) {
-            fullPrompt += (chunkResults[`${chunkKeyBase}${i}`] || '');
-          }
+          const fullPrompt = await getChunksFromSync(chunkKeyBase, settings.chunkCount);
           settings = { prompt: fullPrompt, model: settings.model };
         } catch (e) {
           console.error(`读取分块失败: ${type}`, e);
@@ -121,23 +115,8 @@ export async function loadPromptByType(type) {
  */
 export async function clearChunksForType(type) {
   try {
-    const allItems = await new Promise(resolve => chrome.storage.sync.get(null, resolve));
-    if (chrome.runtime.lastError) {
-      console.error(`Error getting all items for chunk clearing (type: ${type}):`, chrome.runtime.lastError.message);
-      return;
-    }
-    const chunkPrefix = `${PROMPT_KEY_PREFIX}${type}${PROMPT_CHUNK_KEY_PREFIX_SUFFIX}`;
-    const keys = Object.keys(allItems).filter(k => k.startsWith(chunkPrefix));
-    if (keys.length === 0) return;
-    await new Promise((resolve, reject) => {
-      chrome.storage.sync.remove(keys, () => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else {
-          resolve();
-        }
-      });
-    });
+    const chunkPrefix = `${PROMPT_KEY_PREFIX}${type}${DEFAULT_CHUNK_SUFFIX}`;
+    await removeChunksByPrefix(chunkPrefix);
   } catch (e) {
     console.error(`Exception while clearing chunks for type ${type}:`, e);
   }
@@ -170,42 +149,13 @@ export async function savePromptSettingsBulk(items, previousSavedState = {}) {
     }
 
     // 分块存储
-    const chunkKeyBase = `${PROMPT_KEY_PREFIX}${type}${PROMPT_CHUNK_KEY_PREFIX_SUFFIX}`;
+    const chunkKeyBase = `${PROMPT_KEY_PREFIX}${type}${DEFAULT_CHUNK_SUFFIX}`;
     const promptToChunk = item.prompt || '';
-    let chunkIndex = 0;
-    let charOffset = 0;
-    const chunks = [];
     const maxBytesPerChunkData = MAX_SYNC_ITEM_BYTES - 1000; // 预留开销
-
-    while (charOffset < promptToChunk.length) {
-      let currentChunkStr = '';
-      let currentChunkByteLen = 0;
-      let currentEnd = charOffset;
-
-      while (currentEnd < promptToChunk.length) {
-        const nextChar = promptToChunk[currentEnd];
-        const bytes = getStringByteLength(nextChar);
-        if (currentChunkByteLen + bytes > maxBytesPerChunkData) {
-          if (currentChunkStr === '') {
-            console.error(`单字符过大，无法分块保存: type=${type}, index=${currentEnd}`);
-            // 回退该类型
-            newState[type] = previousSavedState[type] || { prompt: '', model: item.model };
-            currentEnd = promptToChunk.length;
-          }
-          break;
-        }
-        currentChunkStr += nextChar;
-        currentChunkByteLen += bytes;
-        currentEnd++;
-      }
-
-      if (!currentChunkStr) break;
-      chunks.push({ key: `${chunkKeyBase}${chunkIndex++}`, value: currentChunkStr });
-      charOffset = currentEnd;
-    }
+    const chunks = splitStringToByteChunks(promptToChunk, maxBytesPerChunkData);
 
     if (chunks.length > 0) {
-      chunks.forEach(c => saveOps.push(chrome.storage.sync.set({ [c.key]: c.value })));
+      await setChunksToSync(chunkKeyBase, chunks);
       saveOps.push(chrome.storage.sync.set({ [mainKey]: { model: item.model, isChunked: true, chunkCount: chunks.length } }));
       newState[type] = { prompt: item.prompt, model: item.model };
     } else if ((promptToChunk || '').length > 0) {

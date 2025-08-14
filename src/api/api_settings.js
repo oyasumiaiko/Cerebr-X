@@ -11,6 +11,16 @@
  * @param {Function} options.closeExclusivePanels - 关闭其他面板的函数
  * @returns {Object} API 管理器实例
  */
+import {
+  MAX_SYNC_ITEM_BYTES,
+  DEFAULT_CHUNK_SUFFIX,
+  getStringByteLength,
+  splitStringToByteChunks,
+  setChunksToSync,
+  getChunksFromSync,
+  removeChunksByPrefix
+} from '../utils/sync_chunk.js';
+
 export function createApiManager(appContext) {
   // 私有状态
   let apiConfigs = [];
@@ -27,6 +37,70 @@ export function createApiManager(appContext) {
   const apiSettingsPanel = dom.apiSettingsPanel; // Use renamed dom property
   const apiCardsContainer = dom.apiCardsContainer;
   const closeExclusivePanels = utils.closeExclusivePanels; // Or services.uiManager.closeExclusivePanels if preferred & ready
+
+  // ---- Sync Chunking Helpers ----
+  const SYNC_CHUNK_META_KEY = 'apiConfigs_chunks_meta';
+  const SYNC_CHUNK_KEY_PREFIX = 'apiConfigs_chunk_';
+
+
+  function minifyJsonIfPossible(input) {
+    if (!input || typeof input !== 'string') return input || '';
+    try {
+      const parsed = JSON.parse(input);
+      return JSON.stringify(parsed);
+    } catch (_) {
+      return input.trim();
+    }
+  }
+
+  function compactConfigsForSync(configs) {
+    return configs.map(c => ({
+      id: c.id,
+      apiKey: c.apiKey, // 保留Key用于跨设备直接可用；如担心配额，可改为只保留当前设备
+      baseUrl: c.baseUrl,
+      modelName: c.modelName,
+      displayName: c.displayName,
+      temperature: c.temperature,
+      isFavorite: !!c.isFavorite,
+      maxChatHistory: c.maxChatHistory ?? 500,
+      customParams: minifyJsonIfPossible(c.customParams || ''),
+      customSystemPrompt: (c.customSystemPrompt || '').trim()
+    }));
+  }
+
+  async function saveConfigsToSyncChunked(configs) {
+    try {
+      const slim = compactConfigsForSync(configs);
+      const serialized = JSON.stringify({ v: 1, items: slim });
+      // 清理旧分片
+      await removeChunksByPrefix(SYNC_CHUNK_KEY_PREFIX);
+      // 切分并写入
+      const maxBytesPerChunkData = MAX_SYNC_ITEM_BYTES - 1000;
+      const chunks = splitStringToByteChunks(serialized, maxBytesPerChunkData);
+      await setChunksToSync(SYNC_CHUNK_KEY_PREFIX, chunks);
+      await chrome.storage.sync.set({ [SYNC_CHUNK_META_KEY]: { count: chunks.length, updatedAt: Date.now() } });
+      return true;
+    } catch (e) {
+      console.warn('保存API配置到 sync 失败：', e);
+      return false;
+    }
+  }
+
+  async function loadConfigsFromSyncChunked() {
+    try {
+      const metaWrap = await chrome.storage.sync.get([SYNC_CHUNK_META_KEY]);
+      const meta = metaWrap[SYNC_CHUNK_META_KEY];
+      if (!meta || !meta.count || meta.count <= 0) return null;
+      const serialized = await getChunksFromSync(SYNC_CHUNK_KEY_PREFIX, meta.count);
+      if (!serialized) return null;
+      const parsed = JSON.parse(serialized);
+      if (!parsed || parsed.v !== 1 || !Array.isArray(parsed.items)) return null;
+      return parsed.items;
+    } catch (e) {
+      console.warn('从 sync 读取API配置失败：', e);
+      return null;
+    }
+  }
 
   // 为每个 API 配置提供稳定 ID
   function generateUUID() {
@@ -45,7 +119,29 @@ export function createApiManager(appContext) {
    */
   async function loadAPIConfigs() {
     try {
-      const result = await chrome.storage.sync.get(['apiConfigs', 'selectedConfigIndex']);
+      // 读取顺序统一：sync 分片 → 旧 sync 字段（一次性迁移）
+      let result = { apiConfigs: null, selectedConfigIndex: 0 };
+      const chunked = await loadConfigsFromSyncChunked();
+      if (chunked && chunked.length > 0) {
+        result.apiConfigs = chunked;
+        const syncSel = await chrome.storage.sync.get(['selectedConfigIndex']);
+        result.selectedConfigIndex = syncSel.selectedConfigIndex || 0;
+      } else {
+        // 兼容最老的存储形态（仅一次性迁移）
+        const syncResult = await chrome.storage.sync.get(['apiConfigs', 'selectedConfigIndex']);
+        if (syncResult.apiConfigs && syncResult.apiConfigs.length > 0) {
+          result.apiConfigs = syncResult.apiConfigs;
+          result.selectedConfigIndex = syncResult.selectedConfigIndex || 0;
+          // 迁移到分片并清理旧键
+          try {
+            await saveConfigsToSyncChunked(result.apiConfigs);
+            await chrome.storage.sync.remove(['apiConfigs']);
+          } catch (e) {
+            console.warn('迁移最老 apiConfigs 到分片失败：', e);
+          }
+        }
+      }
+
       if (result.apiConfigs && result.apiConfigs.length > 0) {
         apiConfigs = result.apiConfigs.map(config => ({ ...config }));
         selectedConfigIndex = result.selectedConfigIndex || 0;
@@ -121,10 +217,11 @@ export function createApiManager(appContext) {
         // delete config.nextApiKeyIndex; // 不在 config 对象中保存索引
         return config;
       });
-      await chrome.storage.sync.set({
-        apiConfigs: configsToSave,
-        selectedConfigIndex
-      });
+      // 仅同步到 sync（分片以规避配额），并同步 selectedConfigIndex
+      try { await saveConfigsToSyncChunked(configsToSave); } catch (e) { console.warn('同步 apiConfigs 到 sync 失败（可忽略）:', e); }
+      try { await chrome.storage.sync.set({ selectedConfigIndex }); } catch (e) { console.warn('同步 selectedConfigIndex 到 sync 失败（可忽略）:', e); }
+      // 清理本地遗留的 local 缓存（如有）
+      try { await chrome.storage.local.remove(['apiConfigs', 'selectedConfigIndex']); } catch (_) {}
       // 更新 window.apiConfigs 并触发事件 (向后兼容)
       window.apiConfigs = apiConfigs; // 保持内存中的对象包含索引
       (apiSettingsPanel || document).dispatchEvent(new Event('apiConfigsUpdated', { bubbles: true, composed: true }));
@@ -780,13 +877,13 @@ export function createApiManager(appContext) {
     const backButtonElement = currentAppContext.dom.apiSettingsBackButton;
 
     // 显示/隐藏 API 设置
-    toggleButton.addEventListener('click', () => {
+      toggleButton.addEventListener('click', () => {
       const wasVisible = panel.classList.contains('visible');
       (currentAppContext.utils.closeExclusivePanels || currentAppContext.services.uiManager.closeExclusivePanels)();
 
       if (!wasVisible) {
         panel.classList.toggle('visible');
-        loadAPIConfigs().then(() => {
+          loadAPIConfigs().then(() => {
             renderAPICards(); // 确保加载最新配置后渲染
             renderFavoriteApis();
         });
