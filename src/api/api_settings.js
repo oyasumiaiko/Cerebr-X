@@ -77,8 +77,7 @@ export function createApiManager(appContext) {
       // 切分并写入
       const maxBytesPerChunkData = MAX_SYNC_ITEM_BYTES - 1000;
       const chunks = splitStringToByteChunks(serialized, maxBytesPerChunkData);
-      await setChunksToSync(SYNC_CHUNK_KEY_PREFIX, chunks);
-      await chrome.storage.sync.set({ [SYNC_CHUNK_META_KEY]: { count: chunks.length, updatedAt: Date.now() } });
+      await setChunksToSync(SYNC_CHUNK_KEY_PREFIX, chunks, { [SYNC_CHUNK_META_KEY]: { count: chunks.length, updatedAt: Date.now() } });
       return true;
     } catch (e) {
       console.warn('保存API配置到 sync 失败：', e);

@@ -60,13 +60,15 @@ export function splitStringToByteChunks(str, maxBytesPerChunk) {
  * @param {string[]} chunks - 分片字符串数组
  * @returns {Promise<void>}
  */
-export async function setChunksToSync(chunkKeyBase, chunks) {
-  const ops = [];
+export async function setChunksToSync(chunkKeyBase, chunks, extraEntries = null) {
+  const toSet = {};
   chunks.forEach((val, idx) => {
-    const key = `${chunkKeyBase}${idx}`;
-    ops.push(chrome.storage.sync.set({ [key]: val }));
+    toSet[`${chunkKeyBase}${idx}`] = val;
   });
-  await Promise.all(ops);
+  if (extraEntries && typeof extraEntries === 'object') {
+    Object.assign(toSet, extraEntries);
+  }
+  await chrome.storage.sync.set(toSet);
 }
 
 /**

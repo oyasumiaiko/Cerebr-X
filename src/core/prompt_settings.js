@@ -405,18 +405,12 @@ class PromptSettings {
      */
     _setupAutosaveForTextareas() {
         const textareas = this.promptSettings.querySelectorAll('textarea');
-        let timer = null;
         textareas.forEach((ta) => {
-            ['input','change'].forEach(evt => {
-                ta.addEventListener(evt, () => {
-                    const status = document.getElementById('save-status');
-                    if (status) status.textContent = '正在保存...';
-                    if (timer) clearTimeout(timer);
-                    timer = setTimeout(async () => {
-                        await this.autoSavePromptSettings();
-                        if (status) status.textContent = '所有更改已保存';
-                    }, 300);
-                });
+            ta.addEventListener('blur', async () => {
+                const status = document.getElementById('save-status');
+                if (status) status.textContent = '正在保存...';
+                await this.autoSavePromptSettings();
+                if (status) status.textContent = '所有更改已保存';
             });
         });
     }

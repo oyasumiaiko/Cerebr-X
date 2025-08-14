@@ -155,8 +155,7 @@ export async function savePromptSettingsBulk(items, previousSavedState = {}) {
     const chunks = splitStringToByteChunks(promptToChunk, maxBytesPerChunkData);
 
     if (chunks.length > 0) {
-      await setChunksToSync(chunkKeyBase, chunks);
-      saveOps.push(chrome.storage.sync.set({ [mainKey]: { model: item.model, isChunked: true, chunkCount: chunks.length } }));
+      await setChunksToSync(chunkKeyBase, chunks, { [mainKey]: { model: item.model, isChunked: true, chunkCount: chunks.length } });
       newState[type] = { prompt: item.prompt, model: item.model };
     } else if ((promptToChunk || '').length > 0) {
       console.warn(`Prompt 过长且分块失败，未保存: ${type}`);
