@@ -812,6 +812,18 @@ input:checked + .slider:before {
 .api-card.expanded .api-form-right .custom-params {
     height: 100%;
 }
+.api-card.expanded .api-form-right .custom-params-group,
+.api-card.expanded .api-form-right .custom-system-prompt-group {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+}
+.api-card.expanded .api-form-right .custom-params,
+.api-card.expanded .api-form-right .custom-system-prompt {
+    flex: 1 1 auto;
+    min-height: 0;
+}
 .api-card.expanded .api-form-grid {
     align-items: stretch;
 }
@@ -835,6 +847,11 @@ input:checked + .slider:before {
 }
 
 .custom-params-group textarea.custom-params {
+    min-height: 140px;
+    resize: none;
+    overflow: auto;
+}
+.custom-system-prompt-group textarea.custom-system-prompt {
     min-height: 140px;
     resize: none;
     overflow: auto;
@@ -2551,9 +2568,10 @@ body.hide-references .reference-number.superscript {
     transition: opacity 0.5s ease;
 }
 
-.api-card .custom-params {
-    min-height: calc(3rem + 12px);               /* 调整为大约三行的高度 */
-    padding: 6px 8px;               /* 较小的内边距 */
+.api-card .custom-params,
+.api-card .custom-system-prompt {
+    min-height: calc(3rem + 12px);
+    padding: 6px 8px;
     border-radius: 4px;
     background: var(--cerebr-input-bg);
     border: 1px solid var(--cerebr-border-color);
@@ -2562,6 +2580,11 @@ body.hide-references .reference-number.superscript {
     line-height: 1.4;
     resize: vertical;
     transition: all 0.2s ease;
+}
+
+/* 展开时，右列两个文本区域平分可用高度 */
+.api-card.expanded .api-form-right {
+    display: flex;
 }
 
 /* 新增截屏按钮样式 */

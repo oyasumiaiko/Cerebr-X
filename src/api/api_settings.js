@@ -76,6 +76,7 @@ export function createApiManager(appContext) {
           temperature: 1,
           isFavorite: false, // 添加收藏状态字段
           customParams: '',
+          customSystemPrompt: '',
           maxChatHistory: 500
         }];
         selectedConfigIndex = 0;
@@ -93,6 +94,7 @@ export function createApiManager(appContext) {
         temperature: 1,
         isFavorite: false,
         customParams: '',
+        customSystemPrompt: '',
         maxChatHistory: 500
       }];
       selectedConfigIndex = 0;
@@ -206,6 +208,7 @@ export function createApiManager(appContext) {
     const togglePasswordBtn = template.querySelector('.toggle-password-btn');
     const selectBtn = template.querySelector('.select-btn');
     const customParamsInput = template.querySelector('.custom-params');
+    const customSystemPromptInput = template.querySelector('.custom-system-prompt');
 
     // 在 temperature 设置后添加最大聊天历史设置
     const maxHistoryGroup = document.createElement('div');
@@ -330,6 +333,9 @@ export function createApiManager(appContext) {
     temperatureInput.value = config.temperature ?? 1;
     temperatureValue.textContent = (config.temperature ?? 1).toFixed(1);
     customParamsInput.value = config.customParams || '';
+    if (customSystemPromptInput) {
+      customSystemPromptInput.value = config.customSystemPrompt || '';
+    }
 
     // 监听温度变化
     temperatureInput.addEventListener('input', (e) => {
@@ -440,6 +446,21 @@ export function createApiManager(appContext) {
         console.error("自定义参数格式化失败:", e);
       }
     });
+
+    // 自定义提示词处理（不做 JSON 校验，仅保存文本）
+    if (customSystemPromptInput) {
+      customSystemPromptInput.addEventListener('input', () => {
+        apiConfigs[index].customSystemPrompt = customSystemPromptInput.value;
+      });
+      customSystemPromptInput.addEventListener('blur', () => {
+        apiConfigs[index].customSystemPrompt = customSystemPromptInput.value || '';
+        saveAPIConfigs();
+      });
+      customSystemPromptInput.addEventListener('change', () => {
+        apiConfigs[index].customSystemPrompt = customSystemPromptInput.value || '';
+        saveAPIConfigs();
+      });
+    }
 
     // 自定义 Headers 功能已移除
 
@@ -560,9 +581,26 @@ export function createApiManager(appContext) {
     // 构造请求基本结构
     let requestBody = {};
 
+    // 复制并规范化消息，按需注入“自定义提示词”至系统提示词最顶端
+    let normalizedMessages = Array.isArray(messages) ? messages.map(m => ({ ...m })) : [];
+    const customSystemPrompt = (config.customSystemPrompt || '').trim();
+    if (customSystemPrompt) {
+      const systemIndex = normalizedMessages.findIndex(m => m && m.role === 'system');
+      if (systemIndex >= 0) {
+        const current = normalizedMessages[systemIndex];
+        const currentContent = typeof current.content === 'string' ? current.content : '';
+        normalizedMessages[systemIndex] = {
+          ...current,
+          content: `${customSystemPrompt}\n${currentContent}`.trim()
+        };
+      } else {
+        normalizedMessages.unshift({ role: 'system', content: customSystemPrompt });
+      }
+    }
+
     if (config.baseUrl === 'genai') {
       // Gemini API 请求格式
-      const contents = messages.map(msg => {
+      const contents = normalizedMessages.map(msg => {
         // Gemini API 使用 'user' 和 'model' 角色
         const role = msg.role === 'assistant' ? 'model' : msg.role;
         // Gemini API 将 'system' 消息作为单独的 systemInstruction
@@ -618,8 +656,8 @@ export function createApiManager(appContext) {
         ...overrides
       };
 
-      // 处理 system 消息
-      const systemMessage = messages.find(msg => msg.role === 'system');
+      // 处理 system 消息（优先使用规范化后的消息）
+      const systemMessage = normalizedMessages.find(msg => msg.role === 'system');
       if (systemMessage && systemMessage.content) {
         requestBody.systemInstruction = {
           // 根据Gemini API文档，systemInstruction是Content类型，其role是可选的 ('user'或'model')
@@ -653,7 +691,7 @@ export function createApiManager(appContext) {
       // 其他 API (如 OpenAI) 请求格式
       requestBody = {
         model: config.modelName,
-        messages: messages, // OpenAI API可以直接处理包含图片数组的 messages
+        messages: normalizedMessages, // OpenAI API可以直接处理包含图片数组的 messages
         stream: true,
         temperature: config.temperature ?? 1.0, // 确保有默认值
         top_p: 0.95,
@@ -859,6 +897,7 @@ export function createApiManager(appContext) {
       displayName: partialConfig.displayName || '',
       temperature: partialConfig.temperature ?? 1.0,
       customParams: partialConfig.customParams || '',
+      customSystemPrompt: partialConfig.customSystemPrompt || '',
       maxChatHistory: 500, // 添加默认值
       // isFavorite: false // 新创建的默认不收藏
     };
@@ -921,6 +960,7 @@ export function createApiManager(appContext) {
             temperature: 1,
             isFavorite: false,
             customParams: '',
+            customSystemPrompt: '',
             maxChatHistory: 500, // 添加默认值
             ...config // 允许传入部分或完整配置覆盖默认值
         };
