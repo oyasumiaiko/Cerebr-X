@@ -1165,14 +1165,14 @@ input:checked + .slider:before {
     justify-content: center;
     z-index: 10000;
     opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.3s ease;
+    pointer-events: none;
+    transition: opacity 0.2s cubic-bezier(0, 0, 0.2, 1);
     backdrop-filter: blur(20px);
 }
 
 .image-preview-modal.visible {
     opacity: 1;
-    visibility: visible;
+    pointer-events: all;
 }
 
 .image-preview-content {
