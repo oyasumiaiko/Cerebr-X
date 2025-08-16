@@ -623,10 +623,31 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             if (e.altKey) {
                 if (appContext.state.isComposing) return;
-                appContext.utils.requestScreenshot();
-                appContext.utils.waitForScreenshot().then(() => {
-                    appContext.services.messageSender.sendMessage();
-                });
+                const text = (this.textContent || '').trim();
+                const imagesHTML = appContext.dom.imageContainer?.innerHTML || '';
+                const hasImages = !!appContext.dom.imageContainer?.querySelector('.image-tag');
+                if (!text && !hasImages) return;
+
+                // 加入到消息列表与历史，但不发送
+                appContext.services.messageProcessor.appendMessage(
+                    text,
+                    'user',
+                    false,
+                    null,
+                    imagesHTML
+                );
+
+                // 清空输入与图片，并重置高度
+                try { appContext.dom.messageInput.innerHTML = ''; } catch (_) {}
+                try { appContext.dom.imageContainer.innerHTML = ''; } catch (_) {}
+                try { appContext.services.uiManager.resetInputHeight(); } catch (_) {}
+
+                // 立即保存当前会话
+                try { appContext.services.chatHistoryUI.saveCurrentConversation(true); } catch (_) {}
+
+                // 反馈提示并滚动
+                appContext.utils.showNotification('已添加到历史（未发送）');
+                // appContext.utils.scrollToBottom();
                 return;
             }
 
