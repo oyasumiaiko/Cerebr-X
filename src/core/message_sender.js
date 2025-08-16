@@ -47,58 +47,8 @@ export function createMessageSender(appContext) {
   let currentConversationId = null;
   let aiThoughtsRaw = '';
   let currentAiMessageId = null;
-  /** @type {Object|null} 最近一次请求使用的 API 配置 */
-  let lastUsedApiConfig = null;
-  /** @type {boolean} 失败自动重试时，下一次 regenerate 强制使用 lastUsedApiConfig */
-  let shouldForceLastApiOnNextRegenerate = false;
 
-  // 自动重试节流（前沿触发 + 尾随调用）配置
-  /**
-   * 自动重试的最小冷却间隔（毫秒）
-   * @type {number}
-   */
-  const MIN_RETRY_INTERVAL_MS = 3000;
-
-  /**
-   * 创建“前沿触发 + 尾随调用”的节流函数。
-   * 冷却外立即执行；冷却内只记录一次，冷却结束若有记录则再执行一次并继续冷却。
-   * @param {() => void} fn 要节流的函数
-   * @param {number} wait 冷却时长（毫秒）
-   * @returns {() => void} 节流后的函数
-   * @since 1.0.0
-   */
-  function createTrailingThrottle(fn, wait) {
-    /** @type {number | null} */
-    let timer = null;
-    /** @type {boolean} */
-    let pending = false;
-
-    const fire = () => {
-      try { fn(); } catch (e) { console.error('节流函数执行失败:', e); }
-      timer = setTimeout(() => {
-        if (pending) {
-          pending = false;
-          fire();
-        } else {
-          timer = null;
-        }
-      }, wait);
-    };
-
-    return () => {
-      if (timer === null) fire();
-      else pending = true;
-    };
-  }
-
-  /**
-   * 触发一次自动重新生成（带节流与尾随）
-   * @returns {void}
-   */
-  const requestAutoRegenerate = createTrailingThrottle(() => {
-    const btn = document.getElementById('regenerate-message');
-    if (btn) btn.click();
-  }, MIN_RETRY_INTERVAL_MS);
+  // 取消内部自动重试和定时器逻辑：由外部消费返回值并决定是否重试
 
   /**
    * 获取是否应该自动滚动
@@ -213,7 +163,7 @@ export function createMessageSender(appContext) {
    * @param {Object|string} [options.api] - API 选择参数：可为完整配置对象、配置 id/displayName/modelName、'selected'、或 {favoriteIndex}
    * @param {Object} [options.resolvedApiConfig] - 已解析好的 API 配置（优先于 api 参数，完全绕过内部选择策略）
    * @param {boolean} [options.forceSendFullHistory] - 是否强制发送完整历史
-   * @returns {Promise<void>}
+   * @returns {Promise<{ ok: true, apiConfig: Object } | { ok: false, error: Error, apiConfig: Object, retryHint: Object }>} 结果对象（供外部无状态重试）
    */
   async function sendMessage(options = {}) {
     // 验证API配置
@@ -326,13 +276,13 @@ export function createMessageSender(appContext) {
 
       // 构建消息数组（改为纯函数 composer）
       const conversationChain = getCurrentConversationChain();
-      // 解析 api 参数（若提供）
+      // 解析 api 参数（若提供）。发送层不再做任何策略推断
       let preferredApiConfig = null;
       if (api != null && typeof apiManager.resolveApiParam === 'function') {
         try { preferredApiConfig = apiManager.resolveApiParam(api); } catch (_) { preferredApiConfig = null; }
       }
 
-      const configForMaxHistory = preferredApiConfig || ((regenerateMode && shouldForceLastApiOnNextRegenerate && lastUsedApiConfig) ? lastUsedApiConfig : apiManager.getSelectedConfig());
+      const configForMaxHistory = preferredApiConfig || apiManager.getSelectedConfig();
       const sendChatHistoryFlag = (shouldSendChatHistory && currentPromptType !== 'image') || forceSendFullHistory;
       const messages = composeMessages({
         prompts: promptsConfig,
@@ -349,22 +299,16 @@ export function createMessageSender(appContext) {
 
       const messagesCount = messages.length;
 
-      // 获取API配置
-      // 优先使用外部提供的 resolvedApiConfig；其后使用 preferredApiConfig；
-      // 再在自动重试的首次 regenerate 使用 lastUsedApiConfig；随后按提示词类型选择；最后跟随当前选中
+      // 获取API配置：仅使用外部提供（resolvedApiConfig / api 解析）或当前选中。不再做任何内部推断
       let config;
       if (resolvedApiConfig) {
         config = resolvedApiConfig;
       } else if (preferredApiConfig) {
         config = preferredApiConfig;
-      } else if (regenerateMode && shouldForceLastApiOnNextRegenerate && lastUsedApiConfig) {
-        config = lastUsedApiConfig;
-        shouldForceLastApiOnNextRegenerate = false; // consume once
       } else {
-        config = apiManager.getModelConfig(currentPromptType, promptsConfig, messagesCount);
+        config = apiManager.getSelectedConfig();
       }
-      // 记录本次使用的配置，供失败自动重试时复用
-      lastUsedApiConfig = config;
+      const effectiveApiConfig = config;
 
       // 添加字数统计元素
       if (!regenerateMode) {
@@ -398,7 +342,7 @@ export function createMessageSender(appContext) {
       // 发送API请求
       const response = await apiManager.sendRequest({
         requestBody: requestBody,
-        config: config,
+        config: effectiveApiConfig,
         signal: signal
       });
       
@@ -434,10 +378,19 @@ export function createMessageSender(appContext) {
         loadingMessage.classList.add('error-message');
       }
 
-      // 如果发送失败，按“节流（冷却）+ 尾随调用”策略触发自动重试
-      // 标记下次 regenerate 强制沿用本次使用的 API 配置
-      shouldForceLastApiOnNextRegenerate = !!lastUsedApiConfig;
-      requestAutoRegenerate();
+      // 返回一个可供外部使用的“无状态重试提示”对象
+      const retryHint = {
+        injectedSystemMessages: existingInjectedSystemMessages,
+        specificPromptType,
+        originalMessageText: messageText,
+        regenerateMode: true,
+        messageId,
+        forceSendFullHistory,
+        // 透传外部策略决定的API（若有）
+        resolvedApiConfig,
+        api
+      };
+      return { ok: false, error, apiConfig: (resolvedApiConfig || preferredApiConfig || apiManager.getSelectedConfig()), retryHint };
     } finally {
       // 无论成功还是失败，都重置处理状态
       isProcessingMessage = false;
@@ -451,6 +404,8 @@ export function createMessageSender(appContext) {
         lastMessage.classList.remove('updating');
       }
     }
+    // 成功：返回 ok 与实际使用的 api 配置（供外部记录/重试）
+    return { ok: true, apiConfig: (resolvedApiConfig || preferredApiConfig || apiManager.getSelectedConfig()) };
   }
 
   /**
