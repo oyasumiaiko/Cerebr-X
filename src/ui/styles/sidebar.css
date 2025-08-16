@@ -1003,6 +1003,10 @@ input:checked + .slider:before {
     margin: 0.5em 0;
 }
 
+.message hr {
+    border: solid 1px var(--cerebr-text-color);
+}
+
 /* LaTeX 式样式调整 */
 .katex-display {
     margin: 0.5em 0;
