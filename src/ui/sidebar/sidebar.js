@@ -170,15 +170,47 @@ document.addEventListener('DOMContentLoaded', async () => {
             contextMenuManager?.hideContextMenu();
         };
         
+        /**
+         * 显示主题化的优雅通知（支持堆叠、进度条与关闭按钮）
+         * @param {string} message - 通知文本
+         * @param {number} [duration=2000] - 显示时长（毫秒）
+         * @returns {void}
+         * @since 1.0.0
+         */
         appContext.utils.showNotification = (message, duration = 2000) => {
-            const notification = document.createElement('div');
-            notification.className = 'notification';
-            notification.textContent = message;
-            document.body.appendChild(notification);
-            setTimeout(() => {
-                notification.classList.add('fade-out');
-                setTimeout(() => notification.remove(), 500);
-            }, duration);
+            // 确保容器存在（底部中间堆叠）
+            let container = document.querySelector('.toast-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.className = 'toast-container';
+                document.body.appendChild(container);
+            }
+
+            // 构建通知元素
+            const toast = document.createElement('div');
+            toast.className = 'notification';
+            toast.setAttribute('role', 'status');
+            toast.setAttribute('aria-live', 'polite');
+
+            const content = document.createElement('div');
+            content.className = 'notification__content';
+            content.textContent = message;
+
+            const progress = document.createElement('div');
+            progress.className = 'notification__progress';
+            // 使用 CSS 变量传递时长供动画使用
+            toast.style.setProperty('--toast-duration', `${duration}ms`);
+
+            toast.appendChild(content);
+            toast.appendChild(progress);
+            container.appendChild(toast);
+
+            const removeToast = () => {
+                if (!toast) return;
+                toast.classList.add('fade-out');
+                setTimeout(() => toast.remove(), 500);
+            };
+            const timer = setTimeout(removeToast, duration);
         };
 
         appContext.utils.requestScreenshot = () => {
