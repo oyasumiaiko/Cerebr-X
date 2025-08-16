@@ -11,6 +11,7 @@ import { createContextMenuManager } from '../context_menu_manager.js'; // 导入
 import { createUIManager } from '../ui_manager.js'; // 导入UI管理模块
 import { getAllConversationMetadata } from '../../storage/indexeddb_helper.js';
 import { packRemoteRepoViaApiExtension } from '../../utils/repomix.js';
+import { createInputController } from '../input_controller.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
     const appContext = {
@@ -271,6 +272,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     appContext.services.messageProcessor = createMessageProcessor(appContext);
     appContext.services.chatHistoryUI = createChatHistoryUI(appContext);
 
+    // 新增：输入控制器，供消息发送等逻辑层统一读取/清理输入
+    appContext.services.inputController = createInputController(appContext);
+
     appContext.services.messageSender = createMessageSender(appContext);
     appContext.services.messageSender.setCurrentConversationId(appContext.services.chatHistoryUI.getCurrentConversationId());
     window.cerebr.messageSender = appContext.services.messageSender;
@@ -489,7 +493,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                             if (messageElement) {
                                 // 用户添加的DOM操作：先设置输入框内容并聚焦
-                                appContext.dom.messageInput.textContent = '全面分析介绍总结当前仓库的结构、内容、原理、核心逻辑的实现';
+                                appContext.services.inputController.setInputText('全面分析介绍总结当前仓库的结构、内容、原理、核心逻辑的实现');
                                 appContext.dom.messageInput.focus();
                                 
                                 appContext.utils.showNotification('仓库内容已添加到当前对话。', 2000);

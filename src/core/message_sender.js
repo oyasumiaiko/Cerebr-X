@@ -25,10 +25,11 @@ export function createMessageSender(appContext) {
   const imageHandler = services.imageHandler;
   const chatHistoryUI = services.chatHistoryUI;
   const chatHistoryManager = services.chatHistoryManager;
+  const inputController = services.inputController;
   const getCurrentConversationChain = chatHistoryManager.getCurrentConversationChain;
   const chatContainer = dom.chatContainer;
-  const messageInput = dom.messageInput;
-  const imageContainer = dom.imageContainer;
+  const messageInput = dom.messageInput; // 保持兼容：占位符/样式仍可直接操作
+  const imageContainer = dom.imageContainer; // 将逐步迁移到 inputController
   const scrollToBottom = utils.scrollToBottom;
   const settingsManager = services.settingsManager;
   const promptSettingsManager = services.promptSettingsManager;
@@ -116,11 +117,13 @@ export function createMessageSender(appContext) {
    */
   function clearInputs() {
     try {
-      messageInput.innerHTML = '';
-      imageContainer.innerHTML = '';
-      // 重置输入框高度
-      // 直接从 appContext.services 获取最新的 uiManager 实例
-      appContext.services.uiManager.resetInputHeight();
+      if (inputController) {
+        inputController.clear();
+      } else {
+        messageInput.innerHTML = '';
+        imageContainer.innerHTML = '';
+        appContext.services.uiManager.resetInputHeight();
+      }
     } catch (error) {
       console.error('清空消息输入框和图片容器失败:', error);
     }
@@ -222,13 +225,15 @@ export function createMessageSender(appContext) {
       forceSendFullHistory = false
     } = options;
 
-    const imageTags = imageContainer.querySelectorAll('.image-tag');
+    const hasImagesInInput = inputController ? inputController.hasImages() : !!imageContainer.querySelector('.image-tag');
     // 如果是重新生成，使用原始消息文本；否则从输入框获取
-    let messageText = originalMessageText || messageInput.textContent;
-    const imageContainsScreenshot = imageContainer.querySelector('img[alt="page-screenshot.png"]');
+    let messageText = (originalMessageText !== null && originalMessageText !== undefined)
+      ? originalMessageText
+      : (inputController ? inputController.getInputText() : messageInput.textContent);
+    const imageContainsScreenshot = inputController ? inputController.hasScreenshot() : !!imageContainer.querySelector('img[alt="page-screenshot.png"]');
 
     // 如果消息为空且没有图片标签，则不发送消息
-    const isEmptyMessage = !messageText && imageTags.length === 0;
+    const isEmptyMessage = !messageText && !hasImagesInInput;
     // 允许在“强制发送完整历史”或“重新生成模式”下继续执行（不新增用户消息）
     if (isEmptyMessage && !regenerateMode && !forceSendFullHistory) return;
 
@@ -276,11 +281,11 @@ export function createMessageSender(appContext) {
       let userMessageDiv;
       if (!isEmptyMessage && !regenerateMode) {
         userMessageDiv = messageProcessor.appendMessage(
-          messageText, 
-          'user', 
-          false, 
-          null, 
-          imageContainer.innerHTML
+          messageText,
+          'user',
+          false,
+          null,
+          inputController ? inputController.getImagesHTML() : imageContainer.innerHTML
         );
       }
 
