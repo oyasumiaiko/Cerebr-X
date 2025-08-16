@@ -221,11 +221,21 @@ export function createContextMenuManager(appContext) {
           }
 
           // 使用regenerateMode标志告诉message_sender这是重新生成操作
+          // 优先使用该提示词类型的偏好模型（若设置）
+          const prompts = appContext.services.promptSettingsManager.getPrompts();
+          let apiParam = 'follow_current';
+          try {
+            const promptType = appContext.services.messageProcessor.getPromptTypeFromContent(originalMessageText, prompts) || 'none';
+            const modelPref = (prompts[promptType]?.model || '').trim();
+            apiParam = modelPref || 'follow_current';
+          } catch (_) { apiParam = 'follow_current'; }
+
           messageSender.sendMessage({
             originalMessageText,
             imageHTML, // Pass image HTML if it should be part of regeneration
             regenerateMode: true,
-            messageId
+            messageId,
+            api: apiParam
           });
         } catch (err) {
           console.error('准备重新生成消息时出错:', err);

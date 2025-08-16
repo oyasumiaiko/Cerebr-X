@@ -1024,7 +1024,7 @@ export function createApiManager(appContext) {
     // 字符串：特殊值或 id/displayName/modelName
     if (typeof apiParam === 'string') {
       const key = apiParam.trim();
-      if (key.toLowerCase() === 'selected') {
+      if (key.toLowerCase() === 'selected' || key.toLowerCase() === 'follow_current') {
         return apiConfigs[selectedConfigIndex] || apiConfigs[0] || null;
       }
       let config = apiConfigs.find(c => c.id && c.id === key);

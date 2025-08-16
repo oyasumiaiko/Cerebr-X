@@ -728,8 +728,7 @@ export function createMessageSender(appContext) {
         const promptType = forceQuery ? 'query' : 'selection';
         const prompt = prompts[promptType].prompt.replace('<SELECTION>', selectedText);
 
-        // 发送消息
-        await sendMessage({ originalMessageText: prompt, specificPromptType: promptType });
+        await sendMessage({ originalMessageText: prompt, specificPromptType: promptType, api: prompts[promptType]?.model });
       } else {
         if (wasTemporaryMode) {
           exitTemporaryMode();
@@ -739,8 +738,8 @@ export function createMessageSender(appContext) {
         // 为PDF文件使用自定义的PDF提示词
         const promptType = isPDF ? 'pdf' : 'summary';
         messageInput.textContent = prompts[promptType].prompt;
-        // 发送消息时指定提示词类型
-        await sendMessage({ specificPromptType: promptType });
+        // 发送消息时指定提示词类型并传入 API 偏好
+        await sendMessage({ specificPromptType: promptType, api: prompts[promptType]?.model });
       }
     } catch (error) {
       console.error('获取选中文本失败:', error);

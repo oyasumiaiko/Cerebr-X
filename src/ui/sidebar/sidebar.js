@@ -453,7 +453,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             appContext.utils.requestScreenshot();
             appContext.utils.waitForScreenshot().then(() => {
                 appContext.dom.messageInput.textContent = prompts.screenshot.prompt;
-                appContext.services.messageSender.sendMessage();
+                appContext.services.messageSender.sendMessage({ api: prompts.screenshot?.model });
             });
         });
     }
@@ -462,7 +462,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         appContext.dom.emptyStateExtract.addEventListener('click', async () => {
             const prompts = appContext.services.promptSettingsManager.getPrompts();
             appContext.dom.messageInput.textContent = prompts.extract.prompt;
-            appContext.services.messageSender.sendMessage();
+            appContext.services.messageSender.sendMessage({ api: prompts.extract?.model });
         });
     }
 
@@ -700,7 +700,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const selectionPromptText = prompts.selection.prompt;
                 if (selectionPromptText) {
                     const userMessageText = selectionPromptText.replace('<SELECTION>', text);
-                    appContext.services.messageSender.sendMessage({ originalMessageText: userMessageText, specificPromptType: 'selection' });
+                    const apiPref = (prompts.selection?.model || '').trim();
+                    const apiParam = apiPref || 'follow_current';
+                    appContext.services.messageSender.sendMessage({ originalMessageText: userMessageText, specificPromptType: 'selection', api: apiParam });
                     return;
                 }
             }

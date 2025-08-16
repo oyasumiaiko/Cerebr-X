@@ -577,7 +577,7 @@ class PromptSettings {
             
             prompts[type] = {
                 prompt: promptValue,
-                // 将 model 字段存储为“选择值”（displayName 或 modelName），由 apiManager 在 getModelConfig 中解析
+                // 直接存储选择值；解析在 apiManager.resolveApiParam 中完成
                 model: this.modelSelects[type]?.value || this.savedPrompts?.[type]?.model || DEFAULT_PROMPTS[type].model
             };
         });
