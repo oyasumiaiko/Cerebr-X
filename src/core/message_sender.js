@@ -163,7 +163,9 @@ export function createMessageSender(appContext) {
    * @param {Object|string} [options.api] - API 选择参数：可为完整配置对象、配置 id/displayName/modelName、'selected'、或 {favoriteIndex}
    * @param {Object} [options.resolvedApiConfig] - 已解析好的 API 配置（优先于 api 参数，完全绕过内部选择策略）
    * @param {boolean} [options.forceSendFullHistory] - 是否强制发送完整历史
-   * @returns {Promise<{ ok: true, apiConfig: Object } | { ok: false, error: Error, apiConfig: Object, retryHint: Object }>} 结果对象（供外部无状态重试）
+   * @param {Object|null} [options.pageContentSnapshot] - 若提供则使用该网页内容快照，避免再次获取
+   * @param {Array<Object>|null} [options.conversationSnapshot] - 若提供则使用该会话历史快照（数组 of nodes）构建消息
+   * @returns {Promise<{ ok: true, apiConfig: Object } | { ok: false, error: Error, apiConfig: Object, retryHint: Object, retry: (delayMs?: number, override?: Object) => Promise<any> }>} 结果对象（供外部无状态重试）
    */
   async function sendMessage(options = {}) {
     // 验证API配置
@@ -182,7 +184,9 @@ export function createMessageSender(appContext) {
       messageId = null,
       forceSendFullHistory = false,
       api = null,
-      resolvedApiConfig = null
+      resolvedApiConfig = null,
+      pageContentSnapshot = null,
+      conversationSnapshot = null
     } = options;
 
     const hasImagesInInput = inputController ? inputController.hasImages() : !!imageContainer.querySelector('.image-tag');
@@ -262,8 +266,12 @@ export function createMessageSender(appContext) {
 
       // 如果不是临时模式，获取网页内容
       if (!isTemporaryMode) {
-        loadingMessage.textContent = '正在获取网页内容...';
-        pageContentResponse = await getPageContent();
+        if (pageContentSnapshot) {
+          pageContentResponse = pageContentSnapshot;
+        } else {
+          loadingMessage.textContent = '正在获取网页内容...';
+          pageContentResponse = await getPageContent();
+        }
         if (pageContentResponse) {
           pageContentLength = state.pageInfo?.content?.length || 0;
         } else {
@@ -275,7 +283,9 @@ export function createMessageSender(appContext) {
       loadingMessage.textContent = '正在构建消息...';
 
       // 构建消息数组（改为纯函数 composer）
-      const conversationChain = getCurrentConversationChain();
+      const conversationChain = Array.isArray(conversationSnapshot) && conversationSnapshot.length > 0
+        ? conversationSnapshot
+        : getCurrentConversationChain();
       // 解析 api 参数（若提供）。发送层不再做任何策略推断
       let preferredApiConfig = null;
       if (api != null && typeof apiManager.resolveApiParam === 'function') {
@@ -296,8 +306,6 @@ export function createMessageSender(appContext) {
         sendChatHistory: sendChatHistoryFlag,
         maxHistory: configForMaxHistory?.maxChatHistory || 500
       });
-
-      const messagesCount = messages.length;
 
       // 获取API配置：仅使用外部提供（resolvedApiConfig / api 解析）或当前选中。不再做任何内部推断
       let config;
@@ -386,11 +394,18 @@ export function createMessageSender(appContext) {
         regenerateMode: true,
         messageId,
         forceSendFullHistory,
+        pageContentSnapshot: pageContentResponse || null,
+        conversationSnapshot: Array.isArray(conversationChain) ? conversationChain : null,
         // 透传外部策略决定的API（若有）
         resolvedApiConfig,
         api
       };
-      return { ok: false, error, apiConfig: (resolvedApiConfig || preferredApiConfig || apiManager.getSelectedConfig()), retryHint };
+      const retry = (delayMs = 0, override = {}) => new Promise((resolve) => {
+        setTimeout(async () => {
+          resolve(await sendMessage({ ...retryHint, ...override }));
+        }, Math.max(0, delayMs));
+      });
+      return { ok: false, error, apiConfig: (resolvedApiConfig || preferredApiConfig || apiManager.getSelectedConfig()), retryHint, retry };
     } finally {
       // 无论成功还是失败，都重置处理状态
       isProcessingMessage = false;
