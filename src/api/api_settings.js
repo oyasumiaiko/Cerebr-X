@@ -605,26 +605,30 @@ export function createApiManager(appContext) {
   }
 
   /**
-   * 渲染收藏的API列表
+   * 渲染收藏的API列表至设置菜单。
+   * - 无收藏时隐藏整个收藏区域，保持菜单简洁
+   * - 有收藏时显示区域并高亮当前选中项
+   * - 点击收藏项后切换当前 API 并关闭设置菜单
+   * @since 1.3.0
    */
   function renderFavoriteApis() {
-    const favoriteApisList = document.querySelector('.favorite-apis-list');
+    const favoriteApisSection = document.getElementById('favorite-apis');
+    const favoriteApisList = favoriteApisSection ? favoriteApisSection.querySelector('.favorite-apis-list') : null;
     if (!favoriteApisList) return;
-
-    favoriteApisList.innerHTML = '';
 
     // 过滤出收藏的API
     const favoriteConfigs = apiConfigs.filter(config => config.isFavorite);
 
+    // 无收藏：隐藏区域并清空列表
     if (favoriteConfigs.length === 0) {
-      const emptyMessage = document.createElement('div');
-      emptyMessage.style.padding = '4px 8px';
-      emptyMessage.style.opacity = '0.7';
-      emptyMessage.style.fontSize = '12px';
-      emptyMessage.textContent = '暂无收藏的API';
-      favoriteApisList.appendChild(emptyMessage);
+      favoriteApisList.innerHTML = '';
+      if (favoriteApisSection) favoriteApisSection.style.display = 'none';
       return;
     }
+
+    // 有收藏：展示区域并渲染
+    if (favoriteApisSection) favoriteApisSection.style.display = 'block';
+    favoriteApisList.innerHTML = '';
 
     // 获取当前使用的API配置
     const currentConfig = apiConfigs[selectedConfigIndex];
@@ -637,28 +641,25 @@ export function createApiManager(appContext) {
       if (currentConfig && currentConfig.id && config.id && currentConfig.id === config.id) {
         item.classList.add('current');
       }
-      // ----------------------------------------------------------
 
       const apiName = document.createElement('span');
       apiName.className = 'api-name';
       apiName.textContent = config.displayName || config.modelName || config.baseUrl;
+      apiName.title = apiName.textContent;
 
       item.appendChild(apiName);
 
-      // 点击切换到该API配置
+      // 点击切换到该API配置（不关闭设置菜单）
       item.addEventListener('click', () => {
-        // --- 按 id 查找索引 ---
+        // 按 id 查找索引
         const configIndex = apiConfigs.findIndex(c => c.id && c.id === config.id);
 
         if (configIndex !== -1 && configIndex !== selectedConfigIndex) {
           selectedConfigIndex = configIndex;
           saveAPIConfigs();
           renderAPICards(); // 重新渲染卡片以更新选中状态
-          // 更新收藏列表状态
-          renderFavoriteApis();
+          renderFavoriteApis(); // 更新收藏列表状态
         }
-         // 关闭设置菜单
-        apiSettingsPanel.classList.remove('visible');
       });
 
       favoriteApisList.appendChild(item);

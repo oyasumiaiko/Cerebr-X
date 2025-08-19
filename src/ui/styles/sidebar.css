@@ -423,22 +423,22 @@ body {
     display: flex;
     align-items: center;
     padding: 6px 8px;
-    background: var(--cerebr-message-ai-bg);
-    border-radius: 4px;
-    font-size: calc(var(--cerebr-ui-font-size) - 1px);
-    transition: all 0.2s ease;
+    background: transparent; /* 与 .menu-item 视觉层级一致 */
+    border-radius: 6px;       /* 与 .menu-item 保持一致 */
+    font-size: var(--cerebr-ui-font-size);
+    transition: background-color 0.15s ease; /* 减少动效，只保留轻微背景色变化 */
     cursor: pointer;
     border: 1px solid transparent;
 }
 
 .favorite-api-item:hover {
-    background: var(--cerebr-message-user-bg);
-    transform: translateX(2px);
+    background-color: var(--cerebr-message-user-bg); /* 与 .menu-item:hover 一致 */
 }
 
 .favorite-api-item.current {
-    border-color: rgba(0, 122, 255, 0.5);
-    box-shadow: 0 0 0 1px rgba(0, 122, 255, 0.5);
+    border-color: color-mix(in srgb, var(--cerebr-highlight) 60%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--cerebr-highlight) 60%, transparent),
+                0 0 8px 0 color-mix(in srgb, var(--cerebr-highlight) 35%, transparent);
 }
 
 .favorite-api-item .api-name {
