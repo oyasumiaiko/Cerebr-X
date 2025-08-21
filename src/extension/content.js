@@ -761,8 +761,7 @@ let iframe = (_iframe || (_iframe = sidebar.sidebar?.querySelector('.cerebr-side
 
 // 修改消息监听器
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type != 'REQUEST_STARTED' && message.type != 'REQUEST_COMPLETED' &&
-    message.type != 'REQUEST_FAILED' && message.type != 'PING') {
+  if (message.type != 'PING') {
     // console.log('content.js 收到消息:', message.type);
   }
 
@@ -923,115 +922,8 @@ window.addEventListener('unhandledrejection', (event) => {
   console.error('未处理的 Promise 拒绝:', event.reason);
 });
 
-// 网络请求状态管理
-class RequestManager {
-  constructor() {
-    this.pendingRequests = new Set();
-    this.isInitialRequestsCompleted = false;
-    this.lastRequestCompletedTime = null;
-    this.requestCompletionTimer = null;
-    this.relayRequestCompletedTime = 300;
-  }
-
-  checkRequestsCompletion() {
-    const now = Date.now();
-    if (this.lastRequestCompletedTime && (now - this.lastRequestCompletedTime) >= this.relayRequestCompletedTime) {
-      this.isInitialRequestsCompleted = true;
-    }
-  }
-
-  resetCompletionTimer() {
-    if (this.requestCompletionTimer) {
-      clearTimeout(this.requestCompletionTimer);
-    }
-    this.lastRequestCompletedTime = Date.now();
-    this.requestCompletionTimer = setTimeout(() => this.checkRequestsCompletion(), this.relayRequestCompletedTime);
-  }
-
-  handleRequestStarted(requestId) {
-    this.pendingRequests.add(requestId);
-  }
-
-  handleRequestCompleted(requestId, isInitialRequestsCompleted) {
-    this.pendingRequests.delete(requestId);
-    this.resetCompletionTimer();
-
-    if (isInitialRequestsCompleted) {
-      this.isInitialRequestsCompleted = true;
-    }
-  }
-
-  handleRequestFailed(requestId) {
-    this.pendingRequests.delete(requestId);
-    this.resetCompletionTimer();
-  }
-
-  isRequestsCompleted() {
-    return this.lastRequestCompletedTime &&
-      (Date.now() - this.lastRequestCompletedTime) >= this.relayRequestCompletedTime;
-  }
-
-  getPendingRequestsCount() {
-    return this.pendingRequests.size;
-  }
-
-  getWaitTimeInSeconds() {
-    if (!this.lastRequestCompletedTime) return 0;
-    return Math.floor((this.relayRequestCompletedTime - (Date.now() - this.lastRequestCompletedTime)) / 1000);
-  }
-}
-
-const requestManager = new RequestManager();
-
-// 监听来自 background.js 的网络请求状态更新
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // 处理网络请求状态更新
-  if (message.type === 'REQUEST_STARTED') {
-    requestManager.handleRequestStarted(message.requestId);
-  }
-  else if (message.type === 'REQUEST_COMPLETED') {
-    requestManager.handleRequestCompleted(message.requestId, message.isInitialRequestsCompleted);
-  }
-  else if (message.type === 'REQUEST_FAILED') {
-    requestManager.handleRequestFailed(message.requestId);
-    // console.log('请求失败，待处理请求数:', requestManager.getPendingRequestsCount());
-  }
-  return true;
-});
-
 // PDF 内容缓存
 const pdfContentCache = new Map();
-
-async function waitForContent() {
-  return new Promise((resolve) => {
-    const checkContent = () => {
-      // 检查网络请求是否都已完成
-      const requestsCompleted = requestManager.isRequestsCompleted();
-
-      if (requestsCompleted) {
-        console.log(`网络请求已完成（已稳定${requestManager.relayRequestCompletedTime}秒无新请求）`);
-        resolve();
-      } else {
-        const reason = [];
-        const pendingCount = requestManager.getPendingRequestsCount();
-        if (pendingCount > 0) {
-          reason.push(`还有 ${pendingCount} 个网络请求未完成`);
-        }
-        const waitTime = requestManager.getWaitTimeInSeconds();
-        if (waitTime > 0) {
-          reason.push(`等待请求稳定，剩余 ${waitTime} 秒`);
-        } else if (!requestManager.lastRequestCompletedTime) {
-          reason.push('等待首个请求完成');
-        }
-        console.log('等待网络请求完成...', reason.join(', '));
-        setTimeout(checkContent, 1000);
-      }
-    };
-
-    // 开始检查
-    setTimeout(checkContent, 1000);
-  });
-}
 
 /**
  * 提取重要的DOM结构（移除不需要的元素），仅保留对内容有意义的部分
@@ -1129,9 +1021,9 @@ async function extractPageContent() {
     }
   }
 
-  // 等待内容加载和网络请求完成
+  // 执行HTML页面内容提取逻辑
   console.log('非PDF，执行HTML页面内容提取逻辑（包含Shadow DOM支持）');
-  // await waitForContent();
+
 
   const texts = [];
   // 选择器，用于跳过不应提取文本的元素
