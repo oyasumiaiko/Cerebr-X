@@ -99,13 +99,36 @@ export function composeMessages(args) {
   }
 
   if (sendChatHistory) {
-    const limited = maxHistory && maxHistory > 0 ? effectiveChain.slice(-maxHistory) : effectiveChain;
-    messages.push(...limited.map(node => ({ role: mapRole(node.role), content: node.content })));
+    // 当 maxHistory 为 0 时，不发送任何历史消息
+    if (maxHistory === 0) {
+      // 不添加任何历史消息
+    } else if (maxHistory && maxHistory > 0) {
+      // 限制历史消息数量
+      const limited = effectiveChain.slice(-maxHistory);
+      messages.push(...limited.map(node => ({ role: mapRole(node.role), content: node.content })));
+    } else {
+      // 发送全部历史消息
+      messages.push(...effectiveChain.map(node => ({ role: mapRole(node.role), content: node.content })));
+    }
   } else {
     // 只发送最后一条
     if (effectiveChain.length > 0) {
       const last = effectiveChain[effectiveChain.length - 1];
       messages.push({ role: mapRole(last.role), content: last.content });
+    }
+  }
+
+  // 3) 确保当前用户消息被包含
+  // 当 maxHistory 为 0 时，我们需要确保至少包含当前用户的消息
+  // 这样 AI 才能知道用户问了什么问题
+  if (maxHistory === 0 && effectiveChain.length > 0) {
+    // 查找最后一条用户消息
+    for (let i = effectiveChain.length - 1; i >= 0; i--) {
+      const message = effectiveChain[i];
+      if (message.role === 'user') {
+        messages.push({ role: 'user', content: message.content });
+        break; // 只添加最后一条用户消息
+      }
     }
   }
 

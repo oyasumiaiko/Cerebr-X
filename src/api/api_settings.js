@@ -325,16 +325,16 @@ export function createApiManager(appContext) {
     const maxHistoryInput = document.createElement('input');
     maxHistoryInput.type = 'range';
     maxHistoryInput.className = 'max-chat-history temperature';
-    maxHistoryInput.min = '10';
+    maxHistoryInput.min = '0';
     maxHistoryInput.max = '500';
     maxHistoryInput.step = '5';
 
-    // 初始化值与显示：500 => 无限制；其余按条数显示
+    // 初始化值与显示：500 => 无限制；0 => 不发送；其余按条数显示
     const currentMax = Number.isFinite(config.maxChatHistory) ? config.maxChatHistory : 500;
     const isUnlimited = currentMax >= 500;
-    const clamped = Math.min(499, Math.max(10, isUnlimited ? 499 : currentMax));
+    const clamped = Math.min(499, Math.max(0, isUnlimited ? 499 : currentMax));
     maxHistoryInput.value = isUnlimited ? '500' : String(clamped);
-    maxHistoryValue.textContent = isUnlimited ? '无限制' : `${clamped}条`;
+    maxHistoryValue.textContent = isUnlimited ? '无限制' : (clamped === 0 ? '不发送' : `${clamped}条`);
     
     maxHistoryGroup.appendChild(maxHistoryHeader);
     maxHistoryGroup.appendChild(maxHistoryInput);
@@ -353,6 +353,8 @@ export function createApiManager(appContext) {
       const v = parseInt(maxHistoryInput.value, 10);
       if (v >= 500) {
         maxHistoryValue.textContent = '无限制';
+      } else if (v === 0) {
+        maxHistoryValue.textContent = '不发送';
       } else {
         maxHistoryValue.textContent = `${v}条`;
       }

@@ -304,7 +304,7 @@ export function createMessageSender(appContext) {
         messageId,
         conversationChain,
         sendChatHistory: sendChatHistoryFlag,
-        maxHistory: configForMaxHistory?.maxChatHistory || 500
+        maxHistory: configForMaxHistory?.maxChatHistory ?? 500
       });
 
       // 获取API配置：仅使用外部提供（resolvedApiConfig / api 解析）或当前选中。不再做任何内部推断
