@@ -564,6 +564,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     appContext.dom.fullscreenToggle.addEventListener('click', async () => {
         appContext.state.isFullscreen = !appContext.state.isFullscreen;
+        
+        // 根据全屏状态添加或移除CSS类
+        if (appContext.state.isFullscreen) {
+            document.documentElement.classList.add('fullscreen-mode');
+        } else {
+            document.documentElement.classList.remove('fullscreen-mode');
+        }
+        
         window.parent.postMessage({ type: 'TOGGLE_FULLSCREEN_FROM_IFRAME' }, '*');
     });
     
@@ -618,6 +626,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                         const isOn = appContext.services.messageSender.getTemporaryModeState?.();
                         appContext.dom.modeIndicator.style.display = isOn ? 'inline-flex' : 'none';
                     }, 0);
+                }
+                break;
+            case 'FULLSCREEN_STATE_CHANGED':
+                // 同步全屏状态
+                appContext.state.isFullscreen = data.isFullscreen;
+                
+                // 根据全屏状态添加或移除CSS类
+                if (data.isFullscreen) {
+                    document.documentElement.classList.add('fullscreen-mode');
+                } else {
+                    document.documentElement.classList.remove('fullscreen-mode');
                 }
                 break;
         }
@@ -785,5 +804,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(() => {
         //console.log('初始化完成，主动请求当前页面信息');
         window.parent.postMessage({ type: 'REQUEST_PAGE_INFO' }, '*');
+        
+        // 检查是否已经在全屏模式
+        if (appContext.state.isFullscreen) {
+            document.documentElement.classList.add('fullscreen-mode');
+        }
     }, 500);
 });

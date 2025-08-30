@@ -3781,3 +3781,81 @@ body.hide-references .reference-number.superscript {
   }
   
   /* 滚动条样式统一至全局 */
+
+/* --- 全屏模式样式 --- */
+
+/* 全屏模式下的内容宽度限制 */
+html.fullscreen-mode {
+  --cerebr-opacity: 1 !important;
+  max-width: var(--cerebr-sidebar-width);
+  margin: 0 auto;
+  /* --cerebr-bg-color: rgba(255, 255, 255, 1) !important;
+  --cerebr-message-user-bg: rgba(227, 242, 253, 1) !important;
+  --cerebr-message-ai-bg: rgba(245, 245, 245, 1) !important;
+  --cerebr-input-bg: rgba(248, 248, 248, 1) !important; */
+}
+
+/* 深色主题全屏模式 */
+.dark-theme.fullscreen-mode {
+  /* --cerebr-bg-color: rgba(38, 43, 51, 1) !important;
+  --cerebr-message-user-bg: rgba(62, 68, 81, 1) !important;
+  --cerebr-message-ai-bg: rgba(44, 49, 60, 1) !important;
+  --cerebr-input-bg: rgba(33, 37, 43, 1) !important; */
+}
+
+/* 全屏模式下的内容容器宽度限制 */
+.fullscreen-mode .chat-container {
+  /* max-width: 1200px; */
+  /* margin: 0 auto; */
+  /* padding: 0 20px; */
+}
+
+/* 全屏模式下的消息内容宽度限制 */
+.fullscreen-mode .message {
+  /* max-width: 1000px; */
+  /* margin: 0 auto; */
+}
+
+/* 全屏模式下的输入框宽度限制 */
+.fullscreen-mode #input-container {
+  /* max-width: 1000px; */
+  /* margin: 0 auto; */
+}
+
+/* 全屏模式下的空状态内容宽度限制 */
+.fullscreen-mode .empty-state-content {
+  /* max-width: 800px; */
+  /* margin: 0 auto; */
+}
+
+/* 全屏模式下的设置面板宽度限制 */
+.fullscreen-mode #settings-menu,
+.fullscreen-mode #prompt-settings,
+.fullscreen-mode #api-settings {
+  /* max-width: 1000px; */
+  /* margin: 0 auto; */
+}
+
+/* 全屏模式下的聊天历史宽度限制 */
+.fullscreen-mode .chat-history-item {
+  /* max-width: 1000px; */
+  /* margin: auto; */
+}
+
+/* 全屏模式下的上下文菜单宽度限制 */
+.fullscreen-mode #context-menu {
+  /* max-width: 300px; */
+}
+
+/* 全屏模式下的图片预览模态框宽度限制 */
+.fullscreen-mode .image-preview-modal {
+  /* max-width: 90vw; */
+  /* max-height: 90vh; */
+}
+
+/* 全屏模式下的图片预览模态框内容宽度限制 */
+.fullscreen-mode .image-preview-modal img {
+  /* max-width: 100%; */
+  /* max-height: 100%; */
+  /* object-fit: contain; */
+}

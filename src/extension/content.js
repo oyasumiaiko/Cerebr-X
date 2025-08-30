@@ -721,6 +721,9 @@ class CerebrSidebar {
       if (!this.isVisible) {
         this.toggle(true);
       }
+      
+      // 通知iframe进入全屏模式
+      this.notifyIframeFullscreenState(true);
     } else {
       // 退出全屏模式
       this.sidebar.classList.remove('fullscreen');
@@ -733,12 +736,30 @@ class CerebrSidebar {
 
       // 如果侧边栏在全屏时是打开的，此时并不会自动关闭，
       // 只有在用户显式调用 toggle(false) 时才会关闭。
+      
+      // 通知iframe退出全屏模式
+      this.notifyIframeFullscreenState(false);
     }
 
     // 如果是全屏模式，确保侧边栏可见
     if (this.isFullscreen && !this.sidebar.classList.contains('visible')) {
       this.sidebar.classList.add('visible');
       this.isVisible = true;
+    }
+  }
+  
+  // 通知iframe全屏状态变化
+  notifyIframeFullscreenState(isFullscreen) {
+    const iframe = this.sidebar.querySelector('.cerebr-sidebar__iframe');
+    if (iframe && iframe.contentWindow) {
+      try {
+        iframe.contentWindow.postMessage({
+          type: 'FULLSCREEN_STATE_CHANGED',
+          isFullscreen: isFullscreen
+        }, '*');
+      } catch (error) {
+        console.log('通知iframe全屏状态失败:', error);
+      }
     }
   }
 }
