@@ -35,12 +35,24 @@ function escapeHtml(input) {
 }
 
 /**
- * 预处理：修正粗体解析（与现有逻辑一致）。
+ * 预处理：修正粗体解析（与现有逻辑一致），但避免在代码块内添加零宽空格。
  * @param {string} text - 原始文本
  * @returns {string}
  */
 function fixBoldParsingIssue(text) {
-  return (text || '').replace(/\*\*/g, '\u200B**\u200B');
+  if (!text) return '';
+  
+  // 按代码块分割文本，只在非代码块部分添加零宽空格
+  const segments = splitByCodeFences(text);
+  return segments.map((segment, index) => {
+    if (segment.type === 'code') {
+      // 代码块内部保持原样，不添加零宽空格
+      return segment.content;
+    } else {
+      // 普通文本部分添加零宽空格来修正粗体解析
+      return segment.content.replace(/\*\*/g, '\u200B**\u200B');
+    }
+  }).join('```');
 }
 
 /**
