@@ -3787,12 +3787,26 @@ body.hide-references .reference-number.superscript {
 /* 全屏模式下的内容宽度限制 */
 html.fullscreen-mode {
   --cerebr-opacity: 1 !important;
-  max-width: var(--cerebr-sidebar-width);
-  margin: 0 auto;
+  /* 不在 html 上限制宽度，避免两侧区域无法接收滚轮事件 */
   /* --cerebr-bg-color: rgba(255, 255, 255, 1) !important;
   --cerebr-message-user-bg: rgba(227, 242, 253, 1) !important;
   --cerebr-message-ai-bg: rgba(245, 245, 245, 1) !important;
   --cerebr-input-bg: rgba(248, 248, 248, 1) !important; */
+}
+
+/* 全屏下：让容器占满宽度，但用内边距把视觉内容限制在中心列。
+   这样鼠标在任意位置滚动，都能滚动 #chat-container */
+.fullscreen-mode #chat-container,
+.fullscreen-mode #input-container,
+.fullscreen-mode .empty-state-content {
+  padding-left: max(15px, calc((100vw - var(--cerebr-sidebar-width)) / 2));
+  padding-right: max(15px, calc((100vw - var(--cerebr-sidebar-width)) / 2));
+}
+
+/* 全屏下：AI 消息不再强制充满整行，避免超宽 */
+.fullscreen-mode .ai-message {
+  width: auto;
+  max-width: var(--cerebr-sidebar-width);
 }
 
 /* 深色主题全屏模式 */
