@@ -321,6 +321,8 @@ class CerebrSidebar {
           position: relative;
           transform-origin: top left;
           box-sizing: border-box;
+          /* 避免在深色宿主页面被强制套白底（Chrome 的“可读性”行为） */
+          color-scheme: auto;
         }
       `;
 
