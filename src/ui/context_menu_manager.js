@@ -554,10 +554,23 @@ export function createContextMenuManager(appContext) {
       } catch (_) {}
     }, 0);
 
-    // 快捷键：Ctrl+S 保存，Esc 取消
-    textarea.addEventListener('keydown', (e) => {
+    // 快捷键：Enter 保存，Shift+Enter 换行，Ctrl+Enter 保存并重新生成，Ctrl+S 保存，Ctrl+Q 取消
+    textarea.addEventListener('keydown', async (e) => {
       const key = (e.key || '').toLowerCase();
-      if ((e.ctrlKey || e.metaKey) && key === 's') {
+      if (key === 'enter') {
+        if (e.shiftKey) {
+          return;
+        }
+        e.preventDefault();
+        if (e.ctrlKey || e.metaKey) {
+          const newText = textarea.value;
+          await applyInlineEdit(messageElement, messageId, newText);
+          cleanup();
+          await regenerateMessage();
+        } else {
+          saveBtn.click();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && key === 's') {
         e.preventDefault();
         saveBtn.click();
       } else if ((e.ctrlKey || e.metaKey) && key === 'q') {
