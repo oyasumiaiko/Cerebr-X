@@ -148,9 +148,15 @@ body {
     box-sizing: border-box;
 }
 
+html.standalone-mode,
+body.standalone-mode {
+    background-color: var(--cerebr-bg-color);
+}
+
 body.standalone-mode {
     width: 100vw;
     height: 100vh;
+    --cerebr-opacity: 1;
 }
 
 body.standalone-mode .standalone-hidden,

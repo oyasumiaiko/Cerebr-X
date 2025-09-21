@@ -35,6 +35,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (document?.body) {
         document.body.classList.toggle('standalone-mode', isStandalone);
     }
+    if (document?.documentElement) {
+        document.documentElement.classList.toggle('standalone-mode', isStandalone);
+    }
 
     const appContext = {
         dom: {
@@ -295,12 +298,23 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
+        document.body.classList.add('standalone-mode');
+        document.documentElement.classList.add('standalone-mode');
+
         // 让独立页面默认使用接近全屏的宽度
         document.documentElement.style.setProperty('--cerebr-sidebar-width', 'calc(100vw - 40px)');
 
         const standaloneInfo = { url: '', title: '独立聊天', standalone: true };
         appContext.state.pageInfo = standaloneInfo;
         window.cerebr.pageInfo = standaloneInfo;
+
+        try {
+            const bodyBg = getComputedStyle(document.body).backgroundColor;
+            document.documentElement.style.backgroundColor = bodyBg;
+            document.body.style.backgroundColor = bodyBg;
+        } catch (error) {
+            console.warn('无法同步独立页面背景色:', error);
+        }
 
         const elementsToHide = [
             appContext.dom.collapseButton,
