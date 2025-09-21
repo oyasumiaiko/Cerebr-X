@@ -308,14 +308,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         appContext.state.pageInfo = standaloneInfo;
         window.cerebr.pageInfo = standaloneInfo;
 
-        try {
-            const bodyBg = getComputedStyle(document.body).backgroundColor;
-            document.documentElement.style.backgroundColor = bodyBg;
-            document.body.style.backgroundColor = bodyBg;
-        } catch (error) {
-            console.warn('无法同步独立页面背景色:', error);
-        }
-
         const elementsToHide = [
             appContext.dom.collapseButton,
             appContext.dom.statusDot,

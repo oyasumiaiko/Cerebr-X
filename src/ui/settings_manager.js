@@ -86,7 +86,10 @@ export function createSettingsManager(appContext) {
     showReference: true,
     sidebarPosition: 'right', // 'left' 或 'right'
     stopAtTop: true, // 滚动到顶部时停止
-    scaleFactor: 1 // Added default scaleFactor
+    scaleFactor: 1, // Added default scaleFactor
+    backgroundImageUrl: '',
+    backgroundImageIntensity: 0.6,
+    backgroundOverallOpacity: 1
   };
 
   // 当前设置
@@ -104,6 +107,39 @@ export function createSettingsManager(appContext) {
       options: () => (themeManager.getAvailableThemes?.() || []).map(t => ({ label: t.name, value: t.id })),
       defaultValue: DEFAULT_SETTINGS.theme,
       apply: (v) => applyTheme(v)
+    },
+    {
+      key: 'backgroundImageUrl',
+      type: 'text',
+      id: 'background-image-url',
+      label: '背景图片链接',
+      placeholder: '输入图片 URL 或 data URI',
+      defaultValue: DEFAULT_SETTINGS.backgroundImageUrl,
+      apply: (v) => applyBackgroundImage(v)
+    },
+    {
+      key: 'backgroundImageIntensity',
+      type: 'range',
+      id: 'background-image-intensity',
+      label: '图片浓度',
+      min: 0,
+      max: 1,
+      step: 0.05,
+      defaultValue: DEFAULT_SETTINGS.backgroundImageIntensity,
+      apply: (v) => applyBackgroundImageIntensity(v),
+      formatValue: (value) => `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`
+    },
+    {
+      key: 'backgroundOverallOpacity',
+      type: 'range',
+      id: 'background-overall-opacity',
+      label: '背景透明度',
+      min: 0,
+      max: 1,
+      step: 0.05,
+      defaultValue: DEFAULT_SETTINGS.backgroundOverallOpacity,
+      apply: (v) => applyBackgroundOverallOpacity(v),
+      formatValue: (value) => `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`
     },
     // 自动滚动
     {
@@ -389,6 +425,32 @@ export function createSettingsManager(appContext) {
         item.appendChild(valueSpan);
         autoSection.appendChild(item);
         dynamicElements.set(def.key, input);
+      } else if (def.type === 'text') {
+        item.classList.add('menu-item--stack');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.id = def.id || `setting-${def.key}`;
+        input.placeholder = def.placeholder || '';
+        input.className = 'settings-text-input';
+        item.appendChild(input);
+
+        const actionBar = document.createElement('div');
+        actionBar.className = 'settings-input-actions';
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.className = 'settings-input-clear';
+        clearBtn.textContent = '清除';
+        clearBtn.addEventListener('click', (evt) => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          input.value = '';
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        actionBar.appendChild(clearBtn);
+        item.appendChild(actionBar);
+
+        autoSection.appendChild(item);
+        dynamicElements.set(def.key, input);
       } else if (def.type === 'select') {
         const select = document.createElement('select');
         select.id = def.id || `setting-${def.key}`;
@@ -410,6 +472,13 @@ export function createSettingsManager(appContext) {
   }
 
   function formatDisplayValue(def, value) {
+    if (typeof def.formatValue === 'function') {
+      try {
+        return def.formatValue(value);
+      } catch (error) {
+        console.error('格式化设置值失败', def.key, error);
+      }
+    }
     if (def.unit === 'px') return `${value}px`;
     if (def.unit === 'x') return `${Number(value).toFixed(1)}x`;
     if (def.unit) return `${value}${def.unit}`;
@@ -542,7 +611,47 @@ export function createSettingsManager(appContext) {
     // 通知父窗口缩放比例变化
     notifyScaleFactorChange(value);
   }
-  
+
+  function applyBackgroundImage(url) {
+    const normalized = typeof url === 'string' ? url.trim() : '';
+    let cssValue = 'none';
+    if (normalized) {
+      if (/^\s*url\(/i.test(normalized)) {
+        cssValue = normalized;
+      } else {
+        const escaped = normalized.replace(/['"\\]/g, '\\$&');
+        cssValue = `url("${escaped}")`;
+      }
+    }
+    document.documentElement.style.setProperty('--cerebr-background-image', cssValue);
+
+    const targets = [document.documentElement, document.body];
+    targets.forEach((node) => {
+      if (!node) return;
+      if (normalized) {
+        node.classList.add('has-custom-background-image');
+      } else {
+        node.classList.remove('has-custom-background-image');
+      }
+    });
+  }
+
+  function applyBackgroundImageIntensity(value) {
+    const numeric = clamp01(value, DEFAULT_SETTINGS.backgroundImageIntensity);
+    document.documentElement.style.setProperty('--cerebr-background-image-intensity', numeric);
+  }
+
+  function applyBackgroundOverallOpacity(value) {
+    const numeric = clamp01(value, DEFAULT_SETTINGS.backgroundOverallOpacity);
+    document.documentElement.style.setProperty('--cerebr-background-total-opacity', numeric);
+  }
+
+  function clamp01(input, fallback = 0) {
+    const n = Number(input);
+    if (Number.isNaN(n)) return fallback;
+    return Math.min(1, Math.max(0, n));
+  }
+
   // 应用自动滚动设置
   function applyAutoScroll(enabled) {
     // 更新UI元素
