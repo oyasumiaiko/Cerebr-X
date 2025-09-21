@@ -524,7 +524,7 @@ body.standalone-mode #empty-state-repomix {
 }
 
 .background-image-button--set {
-    border-color: color-mix(in srgb, var(--cerebr-highlight) 40%, transparent);
+    /* border-color: color-mix(in srgb, var(--cerebr-highlight) 40%, transparent); */
 }
 
 .background-image-button--set:hover {
