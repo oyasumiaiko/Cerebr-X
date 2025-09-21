@@ -616,36 +616,26 @@ body.standalone-mode #empty-state-repomix {
 }
 
 /* 收藏的API列表样式 */
-.favorite-apis-sublist {
-    display: none;
+#favorite-apis {
     flex-direction: column;
-    gap: 4px;
-    /* width: 100%; */
-    padding-left: 34px;
-    padding-right: 12px;
-    margin-top: -4px;
-    margin-bottom: 6px;
-}
-
-.favorite-apis-sublist.visible {
-    display: flex;
+    align-items: stretch;
 }
 
 .favorite-apis-list {
+    margin-top: 8px;
     display: flex;
     flex-direction: column;
     gap: 4px;
     width: 100%;
-    margin-top: 2px;
 }
 
 .favorite-api-item {
     display: flex;
     align-items: center;
-    padding: 4px 8px;
+    padding: 6px 8px;
     background: transparent; /* 与 .menu-item 视觉层级一致 */
     border-radius: 6px;       /* 与 .menu-item 保持一致 */
-    font-size: calc(var(--cerebr-ui-font-size) - 1px);
+    font-size: var(--cerebr-ui-font-size);
     transition: background-color 0.15s ease; /* 减少动效，只保留轻微背景色变化 */
     cursor: pointer;
     border: 1px solid transparent;
@@ -656,9 +646,9 @@ body.standalone-mode #empty-state-repomix {
 }
 
 .favorite-api-item.current {
-    border-color: color-mix(in srgb, var(--cerebr-highlight) 30%, transparent);
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--cerebr-highlight) 30%, transparent),
-                0 0 8px 0 color-mix(in srgb, var(--cerebr-highlight) 15%, transparent);
+    border-color: color-mix(in srgb, var(--cerebr-highlight) 60%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--cerebr-highlight) 60%, transparent),
+                0 0 8px 0 color-mix(in srgb, var(--cerebr-highlight) 35%, transparent);
 }
 
 .favorite-api-item .api-name {

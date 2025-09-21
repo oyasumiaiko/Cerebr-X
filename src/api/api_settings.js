@@ -622,23 +622,15 @@ export function createApiManager(appContext) {
     const favoriteConfigs = apiConfigs.filter(config => config.isFavorite);
 
     // 无收藏：隐藏区域并清空列表
-    if (favoriteApisSection) {
-      favoriteApisSection.classList.remove('visible');
-      favoriteApisSection.hidden = true;
-      favoriteApisSection.style.removeProperty('display');
-    }
-    favoriteApisList.innerHTML = '';
-
     if (favoriteConfigs.length === 0) {
+      favoriteApisList.innerHTML = '';
+      if (favoriteApisSection) favoriteApisSection.style.display = 'none';
       return;
     }
 
     // 有收藏：展示区域并渲染
-    if (favoriteApisSection) {
-      favoriteApisSection.classList.add('visible');
-      favoriteApisSection.hidden = false;
-      favoriteApisSection.style.removeProperty('display');
-    }
+    if (favoriteApisSection) favoriteApisSection.style.display = 'block';
+    favoriteApisList.innerHTML = '';
 
     // 获取当前使用的API配置
     const currentConfig = apiConfigs[selectedConfigIndex];
@@ -660,8 +652,7 @@ export function createApiManager(appContext) {
       item.appendChild(apiName);
 
       // 点击切换到该API配置（不关闭设置菜单）
-      item.addEventListener('click', (evt) => {
-        evt.stopPropagation();
+      item.addEventListener('click', () => {
         // 按 id 查找索引
         const configIndex = apiConfigs.findIndex(c => c.id && c.id === config.id);
 
