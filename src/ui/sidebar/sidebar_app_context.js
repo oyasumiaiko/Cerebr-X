@@ -171,7 +171,7 @@ export function registerSidebarUtilities(appContext) {
     const chatHistoryUI = appContext.services.chatHistoryUI;
 
     if (!messageId) {
-      console.error('未找到消息ID');
+      console.warn('删除消息：占位或临时消息缺少ID，已直接移除');
       contextMenuManager?.hideContextMenu();
       return;
     }

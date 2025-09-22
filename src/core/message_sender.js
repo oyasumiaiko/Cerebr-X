@@ -219,6 +219,7 @@ export function createMessageSender(appContext) {
     let loadingMessage;
     let pageContentResponse = null;
     let pageContentLength = 0;
+    let conversationChain = null;
 
     try {
       // 开始处理消息
@@ -296,7 +297,7 @@ export function createMessageSender(appContext) {
       loadingMessage.textContent = '正在构建消息...';
 
       // 构建消息数组（改为纯函数 composer）
-      const conversationChain = Array.isArray(conversationSnapshot) && conversationSnapshot.length > 0
+      conversationChain = Array.isArray(conversationSnapshot) && conversationSnapshot.length > 0
         ? conversationSnapshot
         : getCurrentConversationChain();
       // 解析 api 参数（若提供）。发送层不再做任何策略推断
