@@ -392,6 +392,9 @@ export function createMessageSender(appContext) {
       const wasManualAbort = isAbortError && attemptController && manuallyAbortedControllers.has(attemptController);
 
       if (wasManualAbort) {
+        if (loadingMessage && loadingMessage.parentNode) {
+          loadingMessage.remove();
+        }
         console.log('用户手动停止更新');
         return;
       }
@@ -461,16 +464,22 @@ export function createMessageSender(appContext) {
 
       return { ok: false, error, apiConfig: (resolvedApiConfig || preferredApiConfig || apiManager.getSelectedConfig()), retryHint, retry };
     } finally {
-      // 无论成功还是失败，都重置处理状态
-      isProcessingMessage = false;
-      shouldAutoScroll = false;
-      // 当生成结束时，移除 glow 效果
-      GetInputContainer().classList.remove('auto-scroll-glow');
-      GetInputContainer().classList.remove('auto-scroll-glow-active');
-      // 当生成结束时，移除 loading 效果
-      const lastMessage = chatContainer.querySelector('.ai-message:last-child');
-      if (lastMessage) {
-        lastMessage.classList.remove('updating');
+      const shouldCleanupUi = currentController === attemptController || currentController === null;
+      if (shouldCleanupUi) {
+        if (currentController === attemptController) {
+          currentController = null;
+        }
+        // 无论成功还是失败，都重置处理状态
+        isProcessingMessage = false;
+        shouldAutoScroll = false;
+        // 当生成结束时，移除 glow 效果
+        GetInputContainer().classList.remove('auto-scroll-glow');
+        GetInputContainer().classList.remove('auto-scroll-glow-active');
+        // 当生成结束时，移除 loading 效果
+        const lastMessage = chatContainer.querySelector('.ai-message:last-child');
+        if (lastMessage) {
+          lastMessage.classList.remove('updating');
+        }
       }
     }
     // 成功：返回 ok 与实际使用的 api 配置（供外部记录/重试）
