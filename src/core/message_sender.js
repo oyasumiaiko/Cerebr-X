@@ -192,6 +192,11 @@ export function createMessageSender(appContext) {
       conversationSnapshot = null
     } = options;
 
+    const autoRetrySetting = settingsManager?.getSetting?.('autoRetry');
+    if (typeof autoRetrySetting === 'boolean') {
+      autoRetryEnabled = autoRetrySetting;
+    }
+
     const autoRetryAttempt = (typeof options.__autoRetryAttempt === 'number' && options.__autoRetryAttempt >= 0)
       ? options.__autoRetryAttempt
       : 0;
@@ -216,6 +221,8 @@ export function createMessageSender(appContext) {
     let pageContentResponse = null;
     let pageContentLength = 0;
     let conversationChain = null;
+    let preferredApiConfig = null;
+    let effectiveApiConfig = null;
 
     const beginAttempt = () => {
       if (activeAttempt) {
@@ -326,7 +333,6 @@ export function createMessageSender(appContext) {
         ? conversationSnapshot
         : getCurrentConversationChain();
       // 解析 api 参数（若提供）。发送层不再做任何策略推断
-      let preferredApiConfig = null;
       if (api != null && typeof apiManager.resolveApiParam === 'function') {
         try { preferredApiConfig = apiManager.resolveApiParam(api); } catch (_) { preferredApiConfig = null; }
       }
@@ -355,7 +361,7 @@ export function createMessageSender(appContext) {
       } else {
         config = apiManager.getSelectedConfig();
       }
-      const effectiveApiConfig = config;
+      effectiveApiConfig = config;
 
       // 添加字数统计元素
       if (!regenerateMode) {
