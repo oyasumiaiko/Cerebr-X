@@ -4,7 +4,9 @@ import { packRemoteRepoViaApiExtension } from '../../utils/repomix.js';
 
 /**
  * 注册侧边栏所需的事件绑定与交互逻辑。
- * @param {Object} appContext - 侧边栏上下文对象。
+ * 以 setup* 函数形式拆分，便于后续在个别功能上做替换或测试。
+ *
+ * @param {ReturnType<import('./sidebar_app_context.js').createSidebarAppContext>} appContext - 侧边栏上下文对象。
  */
 export function registerSidebarEventHandlers(appContext) {
   setupOpenStandaloneHandler(appContext);
@@ -25,6 +27,10 @@ export function registerSidebarEventHandlers(appContext) {
   scheduleInitialRequests(appContext);
 }
 
+/**
+ * 处理“打开独立页面”入口按钮。
+ * @param {ReturnType<import('./sidebar_app_context.js').createSidebarAppContext>} appContext
+ */
 function setupOpenStandaloneHandler(appContext) {
   if (appContext.dom.openStandalonePage && !appContext.state.isStandalone) {
     appContext.dom.openStandalonePage.addEventListener('click', async () => {
@@ -57,6 +63,10 @@ function setupOpenStandaloneHandler(appContext) {
   }
 }
 
+/**
+ * 管理左上角状态点（网页内容模式/临时模式）的展示与交互。
+ * @param {ReturnType<import('./sidebar_app_context.js').createSidebarAppContext>} appContext
+ */
 function setupStatusDot(appContext) {
   const dot = appContext.dom.statusDot;
   if (!dot) return;
@@ -105,6 +115,10 @@ function setupApiMenuWatcher(appContext) {
   window.addEventListener('apiConfigsUpdated', updateApiMenuText);
 }
 
+/**
+ * 空态入口相关的按钮交互（历史、总结、加载会话等）。
+ * @param {ReturnType<import('./sidebar_app_context.js').createSidebarAppContext>} appContext
+ */
 function setupEmptyStateHandlers(appContext) {
   if (appContext.dom.emptyStateHistory) {
     appContext.dom.emptyStateHistory.addEventListener('click', () => {
@@ -221,6 +235,10 @@ function setupEmptyStateHandlers(appContext) {
   }
 }
 
+/**
+ * GitHub 仓库总结按钮：调用远端打包接口并把内容插入对话。
+ * @param {ReturnType<import('./sidebar_app_context.js').createSidebarAppContext>} appContext
+ */
 function setupRepomixButton(appContext) {
   if (appContext.dom.repomixButton && !appContext.state.isStandalone) {
     appContext.dom.repomixButton.addEventListener('click', async () => {
@@ -345,6 +363,10 @@ function setupScreenshotButton(appContext) {
   });
 }
 
+/**
+ * 监听来自 content script / background 的消息，完成状态同步与快捷操作。
+ * @param {ReturnType<import('./sidebar_app_context.js').createSidebarAppContext>} appContext
+ */
 function setupWindowMessageHandlers(appContext) {
   window.addEventListener('message', (event) => {
     const { data } = event;
@@ -469,6 +491,10 @@ function setupTempModeIndicator(appContext) {
   });
 }
 
+/**
+ * 统一处理输入框的组合键、重新生成等逻辑。
+ * @param {ReturnType<import('./sidebar_app_context.js').createSidebarAppContext>} appContext
+ */
 function setupMessageInputHandlers(appContext) {
   const input = appContext.dom.messageInput;
   if (!input) return;
@@ -580,6 +606,10 @@ function setupDebugButton(appContext) {
   });
 }
 
+/**
+ * 启动前端内存管理逻辑：统计用户活跃度并定期清理缓存。
+ * @param {ReturnType<import('./sidebar_app_context.js').createSidebarAppContext>} appContext
+ */
 function setupMemoryManagement(appContext) {
   const mmConfig = appContext.state.memoryManagement;
 
@@ -639,4 +669,3 @@ function scheduleInitialRequests(appContext) {
     }
   }, 500);
 }
-

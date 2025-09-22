@@ -13,7 +13,9 @@ import { applyStandaloneAdjustments } from './sidebar_app_context.js';
 
 /**
  * 初始化侧边栏依赖的各类服务，并将实例挂载到 appContext。
- * @param {Object} appContext - 侧边栏上下文对象。
+ * 该流程维持原始初始化顺序，以确保服务之间的依赖关系不变。
+ *
+ * @param {ReturnType<import('./sidebar_app_context.js').createSidebarAppContext>} appContext - 侧边栏上下文对象。
  * @returns {Promise<void>} 初始化完成。
  */
 export async function initializeSidebarServices(appContext) {
@@ -44,6 +46,7 @@ export async function initializeSidebarServices(appContext) {
   appContext.services.uiManager = createUIManager(appContext);
   appContext.services.contextMenuManager = createContextMenuManager(appContext);
 
+  // 初始化 UI/上下文菜单管理器，确保后续事件注册时可立即使用。
   appContext.services.contextMenuManager.init();
   appContext.services.uiManager.init();
 
@@ -53,4 +56,3 @@ export async function initializeSidebarServices(appContext) {
   appContext.services.apiManager.setupUIEventHandlers(appContext);
   await appContext.services.apiManager.init();
 }
-

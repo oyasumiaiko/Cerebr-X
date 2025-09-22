@@ -112,6 +112,10 @@ export function createSidebarAppContext(isStandalone) {
  * 向 appContext 注入常用工具函数。
  * @param {Object} appContext - 侧边栏上下文对象。
  */
+/**
+ * 将常用的工具/便捷函数挂载到 appContext.utils，供其他模块复用。
+ * @param {ReturnType<typeof createSidebarAppContext>} appContext - 已初始化的上下文。
+ */
 export function registerSidebarUtilities(appContext) {
   function updateInputContainerHeightVar() {
     const input = appContext.dom.inputContainer || document.getElementById('input-container');
@@ -180,6 +184,11 @@ export function registerSidebarUtilities(appContext) {
     contextMenuManager?.hideContextMenu();
   };
 
+  /**
+   * 在页面底部展示轻量提示，同时支持自动消失动画。
+   * @param {string} message - 展示文案。
+   * @param {number} [duration=2000] - 持续毫秒数。
+   */
   appContext.utils.showNotification = (message, duration = 2000) => {
     let container = document.querySelector('.toast-container');
     if (!container) {
@@ -249,6 +258,10 @@ export function registerSidebarUtilities(appContext) {
  * 根据独立页面模式对界面进行调整。
  * @param {Object} appContext - 侧边栏上下文对象。
  */
+/**
+ * 根据是否处于独立页面模式，调整界面元素的显隐与样式。
+ * @param {ReturnType<typeof createSidebarAppContext>} appContext - 侧边栏上下文。
+ */
 export function applyStandaloneAdjustments(appContext) {
   if (!appContext.state.isStandalone) {
     return;
@@ -293,4 +306,3 @@ export function applyStandaloneAdjustments(appContext) {
   const positionToggle = document.getElementById('sidebar-position-switch');
   positionToggle?.closest('.menu-item')?.classList.add('standalone-hidden');
 }
-

@@ -2,6 +2,9 @@ import { createSidebarAppContext, registerSidebarUtilities } from './sidebar_app
 import { initializeSidebarServices } from './sidebar_bootstrap.js';
 import { registerSidebarEventHandlers } from './sidebar_events.js';
 
+/**
+ * 页面 DOM 就绪后执行整体启动流程：检测模式 -> 构建上下文 -> 初始化服务 -> 注册事件。
+ */
 document.addEventListener('DOMContentLoaded', async () => {
   const isStandalone = detectStandaloneMode();
   applyStandaloneClasses(isStandalone);
@@ -15,6 +18,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   registerSidebarEventHandlers(appContext);
 });
 
+/**
+ * 识别当前页面是否运行在独立聊天模式下。
+ * @returns {boolean} 是否独立模式。
+ */
 function detectStandaloneMode() {
   const currentUrl = new URL(window.location.href);
   const hashQuery = currentUrl.hash.startsWith('#') ? currentUrl.hash.substring(1) : '';
@@ -38,6 +45,10 @@ function detectStandaloneMode() {
   return isStandalone;
 }
 
+/**
+ * 根据模式为根节点 / body 添加或移除独立模式样式类。
+ * @param {boolean} isStandalone - 独立模式标记。
+ */
 function applyStandaloneClasses(isStandalone) {
   if (document?.body) {
     document.body.classList.toggle('standalone-mode', isStandalone);
@@ -47,6 +58,10 @@ function applyStandaloneClasses(isStandalone) {
   }
 }
 
+/**
+ * 建立输入容器高度的观察者，保持 CSS 变量与布局同步。
+ * @param {ReturnType<import('./sidebar_app_context.js').createSidebarAppContext>} appContext
+ */
 function setupLayoutObservers(appContext) {
   appContext.utils.updateInputContainerHeightVar();
   window.addEventListener('resize', appContext.utils.updateInputContainerHeightVar);
@@ -55,6 +70,11 @@ function setupLayoutObservers(appContext) {
   if (inputEl) resizeObserver.observe(inputEl);
 }
 
+/**
+ * 暴露简化后的全局对象，供外部调试或内容脚本访问。
+ * @param {ReturnType<import('./sidebar_app_context.js').createSidebarAppContext>} appContext
+ * @param {boolean} isStandalone - 当前环境标记。
+ */
 function exposeGlobals(appContext, isStandalone) {
   window.cerebr = window.cerebr || {};
   window.cerebr.environment = isStandalone ? 'standalone' : 'embedded';
@@ -69,4 +89,3 @@ function exposeGlobals(appContext, isStandalone) {
     }
   });
 }
-
