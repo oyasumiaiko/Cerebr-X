@@ -1,115 +1,208 @@
-// 监听来自content script的消息
-window.addEventListener('message', (event) => {
-    // 处理 URL 变化消息
-    if (event.data && event.data.type === 'URL_CHANGED') {
+// Lightweight handler for sidebar keyboard history navigation and injected commands
+(() => {
+  let clearChatButtonRef = null;
 
-    } else if (event.data && event.data.type === 'CLEAR_CHAT_COMMAND') {
-        console.log('收到清空聊天记录命令');
-        const clearChatButton = document.querySelector('#clear-chat');
-        if (clearChatButton) {
-            clearChatButton.click();
-        }
+  function handleWindowMessage(event) {
+    const message = event?.data;
+    if (!message || typeof message.type !== 'string') return;
+
+    if (message.type === 'CLEAR_CHAT_COMMAND') {
+      if (!clearChatButtonRef) {
+        clearChatButtonRef = document.getElementById('clear-chat');
+      }
+      clearChatButtonRef?.click();
     }
-});
+  }
 
-// 存储用户的问题历史
-let userQuestions = [];
+  window.addEventListener('message', handleWindowMessage);
 
-// 添加全局变量
-let clearChat;
+  function init() {
+    const chatContainer = document.getElementById('chat-container');
+    const input = document.getElementById('message-input');
+    clearChatButtonRef = document.getElementById('clear-chat');
 
-// 初始化历史消息
-function initializeUserQuestions() {
-    const userMessages = document.querySelectorAll('.user-message');
-    userQuestions = Array.from(userMessages).map(msg => msg.textContent.trim());
-    // console.log('初始化历史问题:', userQuestions);
-}
+    if (!chatContainer || !input) return;
 
-// 等 DOM 加载完成
-document.addEventListener('DOMContentLoaded', () => {
-    const input = document.querySelector('#message-input');
-    const chatContainer = document.querySelector('#chat-container');
-    // 初始化全局变量
-    clearChat = document.querySelector('#clear-chat');
+    const historyState = {
+      items: [],
+      pointer: 0,
+      draft: '',
+      inNavigation: false,
+      applying: false
+    };
 
-    // 初始化历史消息
-    initializeUserQuestions();
+    let rebuildTimer = null;
+    let scrollbarTimer = null;
 
-    // 监听输入框的键盘事件
-    input.addEventListener('keydown', async (event) => {
-        // 处理输入框特定的键盘事件
-        // 当按下向上键且输入框为空时
-        if (event.key === 'ArrowUp' && event.target.textContent.trim() === '') {
-            event.preventDefault(); // 阻止默认行为
+    function resetNavigation(options = {}) {
+      const { preserveDraft = true } = options;
+      historyState.inNavigation = false;
+      historyState.pointer = historyState.items.length;
+      historyState.draft = preserveDraft ? (input.textContent || '') : '';
+    }
 
-            // 如果有历史记录
-            if (userQuestions.length > 0) {
-                // 如果是第一次按向上键从最后一个问题开始
-                event.target.textContent = userQuestions[userQuestions.length - 1];
-                // 触发入事件以调整高度
-                event.target.dispatchEvent(new Event('input', { bubbles: true }));
-                // 移动光标到末尾
-                const range = document.createRange();
-                range.selectNodeContents(event.target);
-                range.collapse(false);
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(range);
-            }
-        }
+    function rebuildHistory() {
+      const nodes = chatContainer.querySelectorAll('.message.user-message');
+      historyState.items = Array.from(nodes, (node) => {
+        const text = node.getAttribute('data-original-text') || node.textContent || '';
+        return {
+          id: node.getAttribute('data-message-id') || '',
+          text
+        };
+      }).filter((item) => item.text.trim().length > 0);
+      resetNavigation();
+    }
+
+    function scheduleHistoryRebuild() {
+      if (rebuildTimer) return;
+      rebuildTimer = setTimeout(() => {
+        rebuildTimer = null;
+        rebuildHistory();
+      }, 0);
+    }
+
+    function updateScrollbarPadding() {
+      const needsScrollbar = chatContainer.scrollHeight > chatContainer.clientHeight;
+      if (!needsScrollbar) {
+        chatContainer.classList.remove('has-scrollbar');
+        chatContainer.style.removeProperty('--scrollbar-width');
+        return;
+      }
+      const scrollbarWidth = chatContainer.offsetWidth - chatContainer.clientWidth;
+      chatContainer.style.setProperty('--scrollbar-width', `${scrollbarWidth}px`);
+      chatContainer.classList.add('has-scrollbar');
+    }
+
+    function scheduleScrollbarUpdate() {
+      if (scrollbarTimer) return;
+      scrollbarTimer = setTimeout(() => {
+        scrollbarTimer = null;
+        updateScrollbarPadding();
+      }, 0);
+    }
+
+    function placeCaretAtEnd(element) {
+      const selection = window.getSelection();
+      if (!selection) return;
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+
+    function applyInputValue(value) {
+      historyState.applying = true;
+      input.textContent = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      placeCaretAtEnd(input);
+      historyState.applying = false;
+    }
+
+    function ensureNavigationSession() {
+      if (historyState.inNavigation) return;
+      historyState.draft = input.textContent || '';
+      historyState.pointer = historyState.items.length;
+      historyState.inNavigation = true;
+    }
+
+    function navigateHistory(direction) {
+      if (!historyState.items.length) return;
+
+      ensureNavigationSession();
+
+      if (direction < 0 && historyState.pointer === 0) return;
+      if (direction > 0 && historyState.pointer === historyState.items.length) {
+        historyState.inNavigation = false;
+        return;
+      }
+
+      const nextIndex = Math.min(
+        Math.max(historyState.pointer + direction, 0),
+        historyState.items.length
+      );
+      historyState.pointer = nextIndex;
+
+      if (historyState.pointer === historyState.items.length) {
+        applyInputValue(historyState.draft);
+        historyState.inNavigation = false;
+        return;
+      }
+
+      const entry = historyState.items[historyState.pointer];
+      applyInputValue(entry.text);
+    }
+
+    input.addEventListener('keydown', (event) => {
+      if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
+
+      if (event.key === 'ArrowUp') {
+        if (!historyState.items.length) return;
+        if (!historyState.inNavigation && input.textContent.trim().length > 0) return;
+        event.preventDefault();
+        navigateHistory(-1);
+      } else if (event.key === 'ArrowDown') {
+        if (!historyState.inNavigation) return;
+        event.preventDefault();
+        navigateHistory(1);
+      }
     });
 
-    // 检测滚动条并动态调整padding
-    function checkScrollbar() {
-        const hasScrollbar = chatContainer.scrollHeight > chatContainer.clientHeight;
-        if (hasScrollbar) {
-            // 计算滚动条实际宽度
-            const scrollbarWidth = chatContainer.offsetWidth - chatContainer.clientWidth;
-            // 设置CSS自定义属性，让CSS处理padding调整
-            chatContainer.style.setProperty('--scrollbar-width', `${scrollbarWidth}px`);
-            chatContainer.classList.add('has-scrollbar');
-        } else {
-            // 没有滚动条时移除类
-            chatContainer.classList.remove('has-scrollbar');
-        }
-    }
+    input.addEventListener('input', () => {
+      if (!historyState.applying) {
+        resetNavigation();
+      }
+    });
 
-    // 监听聊天容器的变化，检测新的用户消息
     const observer = new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-            mutation.addedNodes.forEach((node) => {
-                if (node.classList && node.classList.contains('user-message')) {
-                    const question = node.textContent.trim();
-                    // 只有当问题不在历史记录中时才添加
-                    if (question && !userQuestions.includes(question)) {
-                        userQuestions.push(question);
-                        console.log('保存新问题:', question);
-                        console.log('当前问题历史:', userQuestions);
-                    }
-                }
-            });
-        });
-        
-        // 每次DOM变化后检查滚动条状态
-        setTimeout(checkScrollbar, 0);
+      let shouldRefresh = false;
+      let shouldUpdateScrollbar = false;
+
+      for (const mutation of mutations) {
+        if (mutation.type !== 'childList') continue;
+        if (mutation.addedNodes.length || mutation.removedNodes.length) {
+          shouldRefresh = true;
+          shouldUpdateScrollbar = true;
+          break;
+        }
+      }
+
+      if (shouldRefresh) scheduleHistoryRebuild();
+      if (shouldUpdateScrollbar) scheduleScrollbarUpdate();
     });
 
-    // 开始观察聊天容器的变化
     observer.observe(chatContainer, { childList: true });
 
-    // 初始化时检查滚动条状态
-    checkScrollbar();
+    rebuildHistory();
+    updateScrollbarPadding();
 
-    // 监听窗口大小变化，重新检查滚动条状态
-    window.addEventListener('resize', checkScrollbar);
+    window.addEventListener('resize', scheduleScrollbarUpdate);
 
-    // 清空聊天记录时也清空问题历史
-    if (clearChat) {
-        clearChat.addEventListener('click', () => {
-            userQuestions = userQuestions.slice(-1);
-            console.log('清空问题历史');
-            // 清空后重新检查滚动条状态
-            setTimeout(checkScrollbar, 0);
-        });
+    if (clearChatButtonRef) {
+      clearChatButtonRef.addEventListener('click', () => {
+        historyState.items = [];
+        resetNavigation({ preserveDraft: false });
+        scheduleScrollbarUpdate();
+      });
     }
-});
+
+    window.addEventListener('beforeunload', () => {
+      observer.disconnect();
+      if (rebuildTimer) {
+        clearTimeout(rebuildTimer);
+        rebuildTimer = null;
+      }
+      if (scrollbarTimer) {
+        clearTimeout(scrollbarTimer);
+        scrollbarTimer = null;
+      }
+      window.removeEventListener('message', handleWindowMessage);
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
