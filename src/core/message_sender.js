@@ -47,6 +47,7 @@ export function createMessageSender(appContext) {
   let autoRetryEnabled = false;
   const MAX_AUTO_RETRY_ATTEMPTS = 3;
   const AUTO_RETRY_DELAY_MS = 1000;
+  const manuallyAbortedControllers = new WeakSet();
   let currentConversationId = null;
   let aiThoughtsRaw = '';
   let currentAiMessageId = null;
@@ -196,6 +197,9 @@ export function createMessageSender(appContext) {
       ? options.__autoRetryAttempt
       : 0;
 
+    let attemptController = null;
+    let attemptSignal = null;
+
     const hasImagesInInput = inputController ? inputController.hasImages() : !!imageContainer.querySelector('.image-tag');
     // 如果是重新生成，使用原始消息文本；否则从输入框获取
     let messageText = (originalMessageText !== null && originalMessageText !== undefined)
@@ -223,13 +227,15 @@ export function createMessageSender(appContext) {
 
       // 如果存在之前的请求，先中止它
       if (currentController) {
+        manuallyAbortedControllers.add(currentController);
         currentController.abort();
         currentController = null;
       }
 
       // 创建新的 AbortController
-      currentController = new AbortController();
-      const signal = currentController.signal;
+      attemptController = new AbortController();
+      currentController = attemptController;
+      attemptSignal = attemptController.signal;
 
       // 当开始生成时，给聊天容器添加 glow 效果
       GetInputContainer().classList.add('auto-scroll-glow');
@@ -358,7 +364,7 @@ export function createMessageSender(appContext) {
       const response = await apiManager.sendRequest({
         requestBody: requestBody,
         config: effectiveApiConfig,
-        signal: signal
+        signal: attemptSignal
       });
       
       // 更新加载状态：等待AI响应
@@ -382,10 +388,14 @@ export function createMessageSender(appContext) {
       }
 
     } catch (error) {
-      if (error.name === 'AbortError') {
+      const isAbortError = error?.name === 'AbortError';
+      const wasManualAbort = isAbortError && attemptController && manuallyAbortedControllers.has(attemptController);
+
+      if (wasManualAbort) {
         console.log('用户手动停止更新');
         return;
       }
+
       console.error('发送消息失败:', error);
 
       // 返回一个可供外部使用的“无状态重试提示”对象
@@ -420,10 +430,29 @@ export function createMessageSender(appContext) {
         return retry(AUTO_RETRY_DELAY_MS, { __autoRetryAttempt: autoRetryAttempt + 1 });
       }
 
-      if (loadingMessage) {
-        const prefix = autoRetryEnabled ? `自动重试失败 (${MAX_AUTO_RETRY_ATTEMPTS} 次): ` : '发送失败: ';
-        loadingMessage.textContent = `${prefix}${error.message}`;
-        loadingMessage.classList.add('error-message');
+      const detail = (typeof error?.message === 'string' && error.message.trim().length > 0)
+        ? error.message.trim()
+        : '发生未知错误';
+      const prefix = autoRetryEnabled
+        ? `自动重试失败 (${MAX_AUTO_RETRY_ATTEMPTS} 次): `
+        : isAbortError
+          ? '请求中断: '
+          : '发送失败: ';
+      const errorMessageText = `${prefix}${detail}`;
+
+      let messageElement = null;
+      if (loadingMessage && loadingMessage.parentNode) {
+        messageElement = loadingMessage;
+        messageElement.textContent = errorMessageText;
+      } else {
+        messageElement = messageProcessor.appendMessage(errorMessageText, 'ai', true);
+      }
+
+      if (messageElement) {
+        messageElement.classList.add('error-message');
+        messageElement.classList.remove('loading-message');
+        messageElement.classList.remove('updating');
+        scrollToBottom();
       }
 
       if (autoRetryEnabled && typeof showNotification === 'function') {
@@ -841,6 +870,7 @@ export function createMessageSender(appContext) {
    */
   function abortCurrentRequest() {
     if (currentController) {
+      manuallyAbortedControllers.add(currentController);
       currentController.abort();
       currentController = null;
       // UI 清理：移除“正在更新”的占位消息与状态
