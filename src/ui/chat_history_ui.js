@@ -689,28 +689,13 @@ export function createChatHistoryUI(appContext) {
             invalidateMetadataCache();
             refreshChatHistory(); // 刷新列表显示新名称
             
-            // 可选：添加成功提示
-            const notification = document.createElement('div');
-            notification.className = 'notification';
-            notification.textContent = '对话已重命名';
-            document.body.appendChild(notification);
-            setTimeout(() => {
-              notification.classList.add('fade-out');
-              setTimeout(() => notification.remove(), 500);
-            }, 1500);
+            showNotification({ message: '对话已重命名', type: 'success', duration: 1800 });
           }
         }
       } catch (error) {
         console.error('重命名对话失败:', error);
         // 可选：添加失败提示
-        const notification = document.createElement('div');
-        notification.className = 'notification error';
-        notification.textContent = '重命名失败，请重试';
-        document.body.appendChild(notification);
-        setTimeout(() => {
-          notification.classList.add('fade-out');
-          setTimeout(() => notification.remove(), 500);
-        }, 2000);
+        showNotification({ message: '重命名失败，请重试', type: 'error', duration: 2200 });
       }
     });
     menu.appendChild(renameOption); // 添加重命名选项
@@ -746,30 +731,12 @@ export function createChatHistoryUI(appContext) {
           // 复制到剪贴板
           await navigator.clipboard.writeText(jsonStr);
           
-          // 显示成功提示
-          const notification = document.createElement('div');
-          notification.className = 'notification';
-          notification.textContent = '聊天记录已复制到剪贴板';
-          document.body.appendChild(notification);
-          
-          // 2秒后删除通知
-          setTimeout(() => {
-            notification.classList.add('fade-out');
-            setTimeout(() => notification.remove(), 500);
-          }, 2000);
+          showNotification({ message: '聊天记录已复制到剪贴板', type: 'success', duration: 2000 });
         }
       } catch (error) {
         console.error('复制聊天记录失败:', error);
         // 显示错误提示
-        const notification = document.createElement('div');
-        notification.className = 'notification error';
-        notification.textContent = '复制失败，请重试';
-        document.body.appendChild(notification);
-        
-        setTimeout(() => {
-          notification.classList.add('fade-out');
-          setTimeout(() => notification.remove(), 500);
-        }, 2000);
+        showNotification({ message: '复制失败，请重试', type: 'error', duration: 2200 });
       }
       menu.remove();
     });
@@ -1952,16 +1919,7 @@ export function createChatHistoryUI(appContext) {
       console.log('成功创建分支对话:', newConversationId);
       
       // 提示用户操作成功
-      const notification = document.createElement('div');
-      notification.className = 'notification';
-      notification.textContent = '已创建分支对话';
-      document.body.appendChild(notification);
-      
-      // 2秒后删除通知
-      setTimeout(() => {
-        notification.classList.add('fade-out');
-        setTimeout(() => notification.remove(), 500);
-      }, 2000);
+      showNotification({ message: '已创建分支对话', type: 'success', duration: 2000 });
       
     } catch (error) {
       console.error('创建分支对话失败:', error);

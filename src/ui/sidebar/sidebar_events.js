@@ -248,14 +248,39 @@ function setupRepomixButton(appContext) {
       const repoUrl = appContext.state.pageInfo?.url;
       if (!repoUrl) return;
 
+      const toast = appContext.utils.showNotification({
+        message: '正在打包仓库...',
+        type: 'info',
+        showProgress: true,
+        progress: 0.12,
+        autoClose: false
+      });
+
+      let progressValue = 0.12;
+      const progressTimer = setInterval(() => {
+        progressValue = Math.min(0.6, progressValue + 0.07);
+        toast.update({ progress: progressValue });
+        if (progressValue >= 0.6) {
+          clearInterval(progressTimer);
+        }
+      }, 700);
+
       try {
-        appContext.utils.showNotification('正在打包仓库...', 3000);
         const content = await packRemoteRepoViaApiExtension(repoUrl);
+        clearInterval(progressTimer);
 
         if (!content) {
-          appContext.utils.showNotification('未能打包仓库内容或内容为空。', 3000);
+          toast.update({
+            message: '未能打包仓库内容或内容为空。',
+            type: 'warning',
+            showProgress: false,
+            autoClose: true,
+            duration: 3200
+          });
           return;
         }
+
+        toast.update({ message: '仓库打包完成，正在插入内容...', progress: 0.85, progressMode: 'determinate' });
 
         const messageElement = appContext.services.messageProcessor.appendMessage(
           content,
@@ -266,16 +291,36 @@ function setupRepomixButton(appContext) {
         );
 
         if (!messageElement) {
-          appContext.utils.showNotification('无法将仓库内容添加到对话中。', 3000);
+          toast.update({
+            message: '无法将仓库内容添加到对话中。',
+            type: 'error',
+            showProgress: false,
+            autoClose: true,
+            duration: 3200
+          });
           return;
         }
 
         appContext.services.inputController.setInputText('全面分析介绍总结当前仓库的结构、内容、原理、核心逻辑的实现');
         appContext.dom.messageInput.focus();
-        appContext.utils.showNotification('仓库内容已添加到当前对话。', 2000);
+
+        toast.update({
+          message: '仓库内容已添加到当前对话。',
+          type: 'success',
+          progress: 1,
+          autoClose: true,
+          duration: 2200
+        });
       } catch (error) {
+        clearInterval(progressTimer);
         console.error('处理 repomixButton 点击事件失败:', error);
-        appContext.utils.showNotification('打包仓库时发生错误。', 3000);
+        toast.update({
+          message: '打包仓库时发生错误。',
+          type: 'error',
+          showProgress: false,
+          autoClose: true,
+          duration: 3200
+        });
       }
     });
   }

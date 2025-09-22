@@ -3560,61 +3560,77 @@ body.hide-references .reference-number.superscript {
 .notification {
   position: relative;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 200px;
-  max-width: calc(100vw - 48px);
-  padding: 10px 14px 12px 14px;
-  border-radius: 10px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+  max-width: min(360px, calc(100vw - 48px));
+  padding: 12px 16px 14px;
+  border-radius: 12px;
   color: var(--cerebr-text-color);
-  background: color-mix(in srgb, var(--cerebr-message-user-bg) 60%, transparent);
-  border: 1px solid var(--cerebr-border-color);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
-  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--cerebr-surface, #ffffff) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(12px);
   animation: notificationFadeIn 200ms cubic-bezier(0.4, 0, 0.2, 1);
-  pointer-events: auto; /* 卡片可交互 */
+  pointer-events: auto;
+  border-left: 4px solid var(--cerebr-highlight);
 }
 
 .dark-theme .notification {
-  background: color-mix(in srgb, var(--cerebr-message-ai-bg) 70%, transparent);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  background: color-mix(in srgb, var(--cerebr-message-ai-bg) 75%, transparent);
+  box-shadow: 0 12px 36px rgba(3, 7, 18, 0.48);
 }
+
+.notification--success { border-left-color: #2ecc71; }
+.notification--warning { border-left-color: #f5a623; }
+.notification--error   { border-left-color: #ff4d4f; }
 
 .notification__content {
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.5;
   letter-spacing: 0.01em;
+  font-weight: 500;
 }
 
-/* 关闭按钮已移除 */
+.notification__description {
+  font-size: 12px;
+  opacity: 0.76;
+  line-height: 1.45;
+}
 
 .notification__progress {
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  bottom: 4px;
-  height: 3px;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--cerebr-text-color) 20%, transparent);
+  display: none;
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cerebr-text-color) 15%, transparent);
   overflow: hidden;
 }
 
-.notification__progress::before {
-  content: '';
+.notification--has-progress .notification__progress {
+  display: block;
+}
+
+.notification__progress-bar {
   position: absolute;
   left: 0;
   top: 0;
   bottom: 0;
-  width: 100%;
+  width: 0;
+  border-radius: inherit;
   background: var(--cerebr-highlight);
-  opacity: .50; /* 进一步降低存在感 */
-  transform: translateX(-100%);
-  animation: toastProgress var(--toast-duration, 2000ms) linear forwards;
+  transition: width 200ms ease;
 }
 
-@keyframes toastProgress {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(0); }
+.notification__progress-bar--indeterminate {
+  width: 60%;
+  animation: toastIndeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes toastIndeterminate {
+  0%   { transform: translateX(-120%); }
+  50%  { transform: translateX(-20%); }
+  100% { transform: translateX(120%); }
 }
 
 @keyframes notificationFadeIn {

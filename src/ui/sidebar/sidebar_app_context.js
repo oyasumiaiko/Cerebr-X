@@ -190,7 +190,40 @@ export function registerSidebarUtilities(appContext) {
    * @param {string} message - 展示文案。
    * @param {number} [duration=2000] - 持续毫秒数。
    */
-  appContext.utils.showNotification = (message, duration = 2000) => {
+  appContext.utils.showNotification = (input, legacyDuration) => {
+    const normalizeOptions = (value, fallbackDuration) => {
+      if (typeof value === 'string') {
+        const options = { message: value };
+        if (typeof fallbackDuration === 'number') options.duration = fallbackDuration;
+        return options;
+      }
+      if (value && typeof value === 'object') {
+        return { ...value };
+      }
+      return { message: '' };
+    };
+
+    /** @type {{ message:string, duration?:number, type?:'info'|'success'|'warning'|'error', autoClose?:boolean, showProgress?:boolean, progress?:number|null, progressMode?:'determinate'|'indeterminate', onClose?:()=>void, description?:string }} */
+    const config = normalizeOptions(input, legacyDuration);
+    const {
+      message = '',
+      description = '',
+      type = 'info',
+      onClose = null
+    } = config;
+    let { duration = 2000, autoClose = true, showProgress = false, progress = null, progressMode = 'determinate' } = config;
+
+    if (typeof duration !== 'number' || duration <= 0) {
+      duration = 2000;
+    }
+
+    if (progress !== null && typeof progress === 'number') {
+      showProgress = true;
+    }
+    if (progressMode === 'indeterminate') {
+      showProgress = true;
+    }
+
     let container = document.querySelector('.toast-container');
     if (!container) {
       container = document.createElement('div');
@@ -199,28 +232,190 @@ export function registerSidebarUtilities(appContext) {
     }
 
     const toast = document.createElement('div');
-    toast.className = 'notification';
+    toast.className = `notification notification--${type}`;
     toast.setAttribute('role', 'status');
     toast.setAttribute('aria-live', 'polite');
 
     const content = document.createElement('div');
     content.className = 'notification__content';
     content.textContent = message;
-
-    const progress = document.createElement('div');
-    progress.className = 'notification__progress';
-    toast.style.setProperty('--toast-duration', `${duration}ms`);
-
     toast.appendChild(content);
-    toast.appendChild(progress);
+
+    let descriptionEl = null;
+    if (description) {
+      descriptionEl = document.createElement('div');
+      descriptionEl.className = 'notification__description';
+      descriptionEl.textContent = description;
+      toast.appendChild(descriptionEl);
+    }
+
+    let progressContainer = null;
+    let progressBar = null;
+
+    const ensureProgressElements = () => {
+      if (progressContainer) return;
+      progressContainer = document.createElement('div');
+      progressContainer.className = 'notification__progress';
+      progressBar = document.createElement('div');
+      progressBar.className = 'notification__progress-bar';
+      progressContainer.appendChild(progressBar);
+      toast.appendChild(progressContainer);
+    };
+
+    const applyProgress = (value, mode = progressMode) => {
+      if (!showProgress || value === null || value === undefined) {
+        if (progressContainer) {
+          progressContainer.remove();
+          progressContainer = null;
+          progressBar = null;
+        }
+        toast.classList.remove('notification--has-progress');
+        return;
+      }
+
+      ensureProgressElements();
+      toast.classList.add('notification--has-progress');
+      progressBar.classList.remove('notification__progress-bar--indeterminate');
+
+      if (mode === 'indeterminate') {
+        progressBar.style.width = '50%';
+        progressBar.classList.add('notification__progress-bar--indeterminate');
+      } else {
+        const clamped = Math.max(0, Math.min(1, Number(value)));
+        progressBar.style.width = `${clamped * 100}%`;
+      }
+    };
+
+    if (showProgress) {
+      applyProgress(progress ?? 0, progressMode);
+    }
+
     container.appendChild(toast);
 
-    const removeToast = () => {
-      if (!toast) return;
-      toast.classList.add('fade-out');
-      setTimeout(() => toast.remove(), 500);
+    const state = {
+      closed: false,
+      autoClose,
+      duration,
+      type,
+      closeTimer: null,
+      progressMode,
+      onClose
     };
-    setTimeout(removeToast, duration);
+
+    const scheduleClose = () => {
+      if (!state.autoClose || state.closed) return;
+      if (state.closeTimer) clearTimeout(state.closeTimer);
+      state.closeTimer = setTimeout(() => handle.close(), state.duration);
+    };
+
+    const clearCloseTimer = () => {
+      if (state.closeTimer) {
+        clearTimeout(state.closeTimer);
+        state.closeTimer = null;
+      }
+    };
+
+    if (state.autoClose) {
+      scheduleClose();
+    }
+
+    const handle = {
+      element: toast,
+      update(updateOptions = {}) {
+        if (state.closed) return handle;
+
+        if (typeof updateOptions.message === 'string') {
+          content.textContent = updateOptions.message;
+        }
+
+        if (typeof updateOptions.description === 'string') {
+          if (!descriptionEl) {
+            descriptionEl = document.createElement('div');
+            descriptionEl.className = 'notification__description';
+            toast.insertBefore(descriptionEl, progressContainer);
+          }
+          descriptionEl.textContent = updateOptions.description;
+        } else if (updateOptions.description === null && descriptionEl) {
+          descriptionEl.remove();
+          descriptionEl = null;
+        }
+
+        if (updateOptions.type) {
+          toast.classList.remove(`notification--${state.type}`);
+          state.type = updateOptions.type;
+          toast.classList.add(`notification--${state.type}`);
+        }
+
+        if (typeof updateOptions.autoClose === 'boolean') {
+          state.autoClose = updateOptions.autoClose;
+          if (!state.autoClose) {
+            clearCloseTimer();
+          } else {
+            scheduleClose();
+          }
+        }
+
+        if (typeof updateOptions.duration === 'number' && updateOptions.duration > 0) {
+          state.duration = updateOptions.duration;
+          if (state.autoClose) {
+            scheduleClose();
+          }
+        }
+
+        if (updateOptions.progressMode) {
+          state.progressMode = updateOptions.progressMode;
+        }
+
+        if (updateOptions.showProgress !== undefined) {
+          showProgress = !!updateOptions.showProgress;
+          if (!showProgress) {
+            applyProgress(null);
+          }
+        }
+
+        if (updateOptions.progress !== undefined) {
+          progress = updateOptions.progress;
+          if (typeof progress === 'number' && !showProgress) {
+            showProgress = true;
+          }
+          if (progress === null) {
+            showProgress = false;
+          }
+          if (showProgress) {
+            applyProgress(progress, state.progressMode);
+          } else {
+            applyProgress(null, state.progressMode);
+          }
+        } else if (showProgress && updateOptions.progressMode) {
+          applyProgress(progress ?? 0, state.progressMode);
+        }
+
+        if (state.autoClose && updateOptions.progress === 1 && updateOptions.autoClose !== false) {
+          scheduleClose();
+        }
+
+        return handle;
+      },
+      close(immediate = false) {
+        if (state.closed) return;
+        state.closed = true;
+        clearCloseTimer();
+        toast.classList.add('fade-out');
+        const remove = () => {
+          toast.remove();
+          if (typeof state.onClose === 'function') {
+            try { state.onClose(); } catch (err) { console.error('通知关闭回调异常:', err); }
+          }
+        };
+        if (immediate) {
+          remove();
+        } else {
+          setTimeout(remove, 480);
+        }
+      }
+    };
+
+    return handle;
   };
 
   appContext.utils.requestScreenshot = () => {
