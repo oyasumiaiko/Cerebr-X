@@ -375,7 +375,7 @@ export function createApiManager(appContext) {
       saveAPIConfigs();
     });
 
-    // 传输模式：流式/非流式 开关
+    // 传输模式：流式/非流式 美观开关
     const streamingGroup = document.createElement('div');
     streamingGroup.className = 'form-group';
     const streamingHeader = document.createElement('div');
@@ -387,16 +387,27 @@ export function createApiManager(appContext) {
     streamingHint.textContent = (config.useStreaming !== false) ? '流式 (SSE)' : '非流式 (JSON)';
     streamingHeader.appendChild(streamingLabel);
     streamingHeader.appendChild(streamingHint);
-    const streamingToggleWrap = document.createElement('div');
-    streamingToggleWrap.className = 'input-wrapper';
+
+    const streamingRow = document.createElement('div');
+    streamingRow.className = 'switch-row';
+    const switchLabel = document.createElement('label');
+    switchLabel.className = 'switch';
     const streamingToggle = document.createElement('input');
     streamingToggle.type = 'checkbox';
+    streamingToggle.id = `use-streaming-${index}`;
     streamingToggle.className = 'use-streaming-toggle';
     streamingToggle.checked = (config.useStreaming !== false);
     streamingToggle.title = '启用流式传输 (SSE)。禁用则使用一次性JSON响应。';
+    const slider = document.createElement('span');
+    slider.className = 'slider';
+    switchLabel.appendChild(streamingToggle);
+    switchLabel.appendChild(slider);
     const streamingToggleText = document.createElement('span');
-    streamingToggleText.style.marginLeft = '8px';
+    streamingToggleText.className = 'switch-text';
     streamingToggleText.textContent = streamingToggle.checked ? '启用' : '禁用';
+    streamingRow.appendChild(switchLabel);
+    streamingRow.appendChild(streamingToggleText);
+
     streamingToggle.addEventListener('change', () => {
       const enabled = !!streamingToggle.checked;
       streamingToggleText.textContent = enabled ? '启用' : '禁用';
@@ -404,10 +415,9 @@ export function createApiManager(appContext) {
       apiConfigs[index].useStreaming = enabled;
       saveAPIConfigs();
     });
-    streamingToggleWrap.appendChild(streamingToggle);
-    streamingToggleWrap.appendChild(streamingToggleText);
+
     streamingGroup.appendChild(streamingHeader);
-    streamingGroup.appendChild(streamingToggleWrap);
+    streamingGroup.appendChild(streamingRow);
     if (formLeft) {
       formLeft.appendChild(streamingGroup);
     } else {

@@ -1108,6 +1108,18 @@ input:checked + .slider:before {
     user-select: text;  /* 允许输入框文字选择 */
 }
 
+/* 更美观的表单开关行 */
+.switch-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0 8px 0;
+}
+.switch-row .switch-text {
+    font-size: 12px;
+    opacity: 0.8;
+}
+
 /* 添加输入框包装容器样式 */
 .input-wrapper {
     display: flex;
