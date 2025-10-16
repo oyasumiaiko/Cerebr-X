@@ -192,6 +192,13 @@ export function registerSidebarUtilities(appContext) {
    * @param {number} [duration=2000] - 持续毫秒数。
    */
   appContext.utils.showNotification = (input, legacyDuration) => {
+    // 规范通知类型：统一为 'info' | 'warning' | 'error'，兼容 legacy 'success' -> 'info', 'warn' -> 'warning'
+    const normalizeType = (t) => {
+      if (!t) return 'info';
+      const map = { success: 'info', warn: 'warning' };
+      const mapped = map[t] || t;
+      return (mapped === 'info' || mapped === 'warning' || mapped === 'error') ? mapped : 'info';
+    };
     const normalizeOptions = (value, fallbackDuration) => {
       if (typeof value === 'string') {
         const options = { message: value };
@@ -204,7 +211,7 @@ export function registerSidebarUtilities(appContext) {
       return { message: '' };
     };
 
-    /** @type {{ message:string, duration?:number, type?:'info'|'success'|'warning'|'error', autoClose?:boolean, showProgress?:boolean, progress?:number|null, progressMode?:'determinate'|'indeterminate', onClose?:()=>void, description?:string }} */
+    /** @type {{ message:string, duration?:number, type?:'info'|'warning'|'error'|'success'|'warn', autoClose?:boolean, showProgress?:boolean, progress?:number|null, progressMode?:'determinate'|'indeterminate', onClose?:()=>void, description?:string }} */
     const config = normalizeOptions(input, legacyDuration);
     const {
       message = '',
@@ -233,7 +240,8 @@ export function registerSidebarUtilities(appContext) {
     }
 
     const toast = document.createElement('div');
-    toast.className = `notification notification--${type}`;
+    const initialType = normalizeType(type);
+    toast.className = `notification notification--${initialType}`;
     toast.setAttribute('role', 'status');
     toast.setAttribute('aria-live', 'polite');
 
@@ -297,7 +305,7 @@ export function registerSidebarUtilities(appContext) {
       closed: false,
       autoClose,
       duration,
-      type,
+      type: initialType,
       closeTimer: null,
       progressMode,
       onClose
@@ -342,8 +350,9 @@ export function registerSidebarUtilities(appContext) {
         }
 
         if (updateOptions.type) {
+          const nextType = normalizeType(updateOptions.type);
           toast.classList.remove(`notification--${state.type}`);
-          state.type = updateOptions.type;
+          state.type = nextType;
           toast.classList.add(`notification--${state.type}`);
         }
 
@@ -421,7 +430,8 @@ export function registerSidebarUtilities(appContext) {
 
   appContext.utils.requestScreenshot = () => {
     if (appContext.state.isStandalone) {
-      appContext.utils.showNotification('独立聊天页面不支持网页截图');
+      // 警告：独立页面不支持截图
+      appContext.utils.showNotification({ message: '独立聊天页面不支持网页截图', type: 'warning' });
       return;
     }
     window.parent.postMessage({ type: 'CAPTURE_SCREENSHOT' }, '*');

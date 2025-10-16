@@ -56,7 +56,7 @@ function setupOpenStandaloneHandler(appContext) {
         appContext.utils.showNotification('已在新标签页打开独立聊天');
       } catch (error) {
         console.error('打开独立聊天页面失败:', error);
-        appContext.utils.showNotification('无法打开独立聊天页面');
+        appContext.utils.showNotification({ message: '无法打开独立聊天页面', type: 'error' });
       }
       appContext.services.uiManager.toggleSettingsMenu(false);
     });
@@ -144,7 +144,7 @@ function setupEmptyStateHandlers(appContext) {
     appContext.dom.emptyStateLoadUrl.addEventListener('click', async () => {
       const currentUrl = appContext.state.pageInfo?.url;
       if (!currentUrl) {
-        appContext.utils.showNotification('未能获取当前页面URL');
+        appContext.utils.showNotification({ message: '未能获取当前页面URL', type: 'warning' });
         return;
       }
 
@@ -261,7 +261,6 @@ function setupRepomixButton(appContext) {
 
       const toast = appContext.utils.showNotification({
         message: '正在打包仓库...',
-        type: 'info',
         showProgress: true,
         progress: 0.12,
         autoClose: false
@@ -317,7 +316,6 @@ function setupRepomixButton(appContext) {
 
         toast.update({
           message: '仓库内容已添加到当前对话。',
-          type: 'success',
           progress: 1,
           autoClose: true,
           duration: 2200
@@ -496,14 +494,14 @@ function setupWindowMessageHandlers(appContext) {
         break;
       case 'QUICK_SUMMARY_COMMAND':
         if (appContext.state.isStandalone) {
-          appContext.utils.showNotification('独立聊天页面不支持网页总结');
+          appContext.utils.showNotification({ message: '独立聊天页面不支持网页总结', type: 'warning' });
           break;
         }
         appContext.services.messageSender.performQuickSummary(data.selectedContent);
         break;
       case 'QUICK_SUMMARY_COMMAND_QUERY':
         if (appContext.state.isStandalone) {
-          appContext.utils.showNotification('独立聊天页面不支持网页总结');
+          appContext.utils.showNotification({ message: '独立聊天页面不支持网页总结', type: 'warning' });
           break;
         }
         appContext.services.messageSender.performQuickSummary(data.selectedContent, true);
@@ -578,7 +576,7 @@ function setupMessageInputHandlers(appContext) {
       const hasImages = !!appContext.dom.imageContainer?.querySelector('.image-tag');
       if (!text && !hasImages) {
         // 没有任何内容时，不进行添加，给出轻提示
-        appContext.utils?.showNotification?.('没有可添加的内容');
+        appContext.utils?.showNotification?.({ message: '没有可添加的内容', type: 'warning' });
         return;
       }
 
@@ -612,11 +610,11 @@ function setupMessageInputHandlers(appContext) {
       try {
         const lastMessage = appContext.dom.chatContainer.querySelector('.message:last-child');
         if (!lastMessage) {
-          appContext.utils.showNotification('没有可用的历史用户消息');
+          appContext.utils.showNotification({ message: '没有可用的历史用户消息', type: 'warning' });
           return;
         }
         if (!lastMessage.classList?.contains('user-message')) {
-          appContext.utils.showNotification('最后一条消息不是用户消息，未发送');
+          appContext.utils.showNotification({ message: '最后一条消息不是用户消息，未发送', type: 'warning' });
           return;
         }
         appContext.services.messageSender.sendMessage({

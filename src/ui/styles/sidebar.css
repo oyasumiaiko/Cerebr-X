@@ -3615,9 +3615,10 @@ body.hide-references .reference-number.superscript {
   box-shadow: 0 12px 36px rgba(3, 7, 18, 0.48);
 }
 
-.notification--success { border-left-color: #2ecc71; }
-.notification--warning { border-left-color: #f5a623; }
-.notification--error   { border-left-color: #ff4d4f; }
+.notification--info    { border-left-color: #2ecc71; }  /* 信息：绿 */
+.notification--success { border-left-color: #2ecc71; }  /* 成功：同信息用绿 */
+.notification--warning { border-left-color: #f5a623; }  /* 警告：黄 */
+.notification--error   { border-left-color: #ff4d4f; }  /* 错误：红 */
 
 .notification__content {
   font-size: 13px;
@@ -3655,6 +3656,12 @@ body.hide-references .reference-number.superscript {
   background: var(--cerebr-highlight);
   transition: width 200ms ease;
 }
+
+/* 进度条颜色与类型保持一致（绿/黄/红） */
+.notification--info .notification__progress-bar,
+.notification--success .notification__progress-bar { background: #2ecc71; }
+.notification--warning .notification__progress-bar { background: #f5a623; }
+.notification--error .notification__progress-bar   { background: #ff4d4f; }
 
 .notification__progress-bar--indeterminate {
   width: 60%;

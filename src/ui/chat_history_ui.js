@@ -689,7 +689,7 @@ export function createChatHistoryUI(appContext) {
             invalidateMetadataCache();
             refreshChatHistory(); // 刷新列表显示新名称
             
-            showNotification({ message: '对话已重命名', type: 'success', duration: 1800 });
+            showNotification({ message: '对话已重命名', duration: 1800 });
           }
         }
       } catch (error) {
@@ -731,7 +731,7 @@ export function createChatHistoryUI(appContext) {
           // 复制到剪贴板
           await navigator.clipboard.writeText(jsonStr);
           
-          showNotification({ message: '聊天记录已复制到剪贴板', type: 'success', duration: 2000 });
+          showNotification({ message: '聊天记录已复制到剪贴板', duration: 2000 });
         }
       } catch (error) {
         console.error('复制聊天记录失败:', error);
@@ -1919,7 +1919,7 @@ export function createChatHistoryUI(appContext) {
       console.log('成功创建分支对话:', newConversationId);
       
       // 提示用户操作成功
-      showNotification({ message: '已创建分支对话', type: 'success', duration: 2000 });
+      showNotification({ message: '已创建分支对话', duration: 2000 });
       
     } catch (error) {
       console.error('创建分支对话失败:', error);

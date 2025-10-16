@@ -469,7 +469,8 @@ export function createMessageSender(appContext) {
         }
         if (typeof showNotification === 'function') {
           const displayAttempt = autoRetryAttempt + 1;
-          showNotification(`发送失败，正在自动重试 (${displayAttempt}/${MAX_AUTO_RETRY_ATTEMPTS})`);
+          // 警告：发送失败，进入自动重试
+          showNotification({ message: `发送失败，正在自动重试 (${displayAttempt}/${MAX_AUTO_RETRY_ATTEMPTS})`, type: 'warning' });
         }
         return retry(AUTO_RETRY_DELAY_MS, { __autoRetryAttempt: autoRetryAttempt + 1 });
       }
@@ -500,7 +501,8 @@ export function createMessageSender(appContext) {
       }
 
       if (autoRetryEnabled && typeof showNotification === 'function') {
-        showNotification('自动重试失败，已达到最大尝试次数');
+        // 错误：重试达到上限
+        showNotification({ message: '自动重试失败，已达到最大尝试次数', type: 'error' });
       }
 
       return { ok: false, error, apiConfig: (resolvedApiConfig || preferredApiConfig || apiManager.getSelectedConfig()), retryHint, retry };
