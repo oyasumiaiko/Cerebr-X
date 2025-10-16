@@ -562,14 +562,25 @@ function setupMessageInputHandlers(appContext) {
     if (e.key !== 'Enter') return;
     if (e.shiftKey) return;
     if (appContext.state.isComposing) return;
+    // 阻止默认行为，避免触发表单提交或换行等浏览器默认处理
     e.preventDefault();
+    // 阻止事件传播，避免其他监听器（如全局或父级）误判为普通 Enter 而触发发送
+    // 特别是 Alt+Enter 仅用于“添加到历史（未发送）”，不应触发其他逻辑
+    e.stopPropagation();
 
     if (e.altKey) {
+      // Alt+Enter：只添加到历史，不发送
+      // 说明：有些环境下可能还存在捕获阶段/冒泡阶段的监听，显式阻断
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
       if (appContext.state.isComposing) return;
       const text = (this.textContent || '').trim();
       const imagesHTML = appContext.dom.imageContainer?.innerHTML || '';
       const hasImages = !!appContext.dom.imageContainer?.querySelector('.image-tag');
-      if (!text && !hasImages) return;
+      if (!text && !hasImages) {
+        // 没有任何内容时，不进行添加，给出轻提示
+        appContext.utils?.showNotification?.('没有可添加的内容');
+        return;
+      }
 
       appContext.services.messageProcessor.appendMessage(
         text,
@@ -629,7 +640,10 @@ function setupMessageInputHandlers(appContext) {
         return;
       }
     }
-
+    // 兜底保护：若仍检测到 Alt/Ctrl/Meta 修饰键，则不发送，避免误发
+    if (e.altKey || e.ctrlKey || e.metaKey) {
+      return;
+    }
     appContext.services.messageSender.sendMessage();
   });
 }
