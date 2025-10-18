@@ -1678,19 +1678,48 @@ export function createChatHistoryUI(appContext) {
    */
   async function backupConversations() {
     try {
-      // 使用加载所有会话的完整数据进行备份
-      const allConversations = await getAllConversations();
-      const jsonStr = JSON.stringify(allConversations, null, 2);
-      const blob = new Blob([jsonStr], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      // 创建临时下载链接
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'chat_backup_' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // 交互：是否进行增量备份、是否排除图片
+      const doIncremental = window.confirm('是否进行增量备份？\n仅导出自上次备份后新增或更新的会话');
+      const excludeImages = window.confirm('是否排除图片与截图内容以减小体积？');
+
+      // 读取上次备份时间
+      const LAST_BACKUP_TIME_KEY = 'chat_last_backup_time';
+      let lastBackupAt = 0;
+      try {
+        const local = await chrome.storage.local.get([LAST_BACKUP_TIME_KEY]);
+        lastBackupAt = Number(local[LAST_BACKUP_TIME_KEY]) || 0;
+      } catch (_) {}
+
+      // 准备需要导出的会话列表
+      let conversationsToExport = [];
+      if (doIncremental && lastBackupAt > 0) {
+        // 增量：先获取元数据筛选 endTime 更大的会话，再逐个加载完整内容
+        const metas = await getAllConversations(false);
+        const updated = metas.filter(m => (Number(m.endTime) || 0) > lastBackupAt);
+        for (const meta of updated) {
+          const full = await getConversationById(meta.id, true);
+          if (full) conversationsToExport.push(full);
+        }
+      } else {
+        // 全量：直接获取完整数据
+        conversationsToExport = await getAllConversations();
+      }
+
+      // 可选：移除图片与截图内容
+      if (excludeImages) {
+        conversationsToExport = conversationsToExport.map(stripImagesFromConversation);
+      }
+
+      // 压缩并下载：使用原生 CompressionStream('gzip')
+      const filenamePrefix = doIncremental ? 'chat_backup_inc_' : 'chat_backup_full_';
+      await downloadAsGzip(conversationsToExport, filenamePrefix + new Date().toISOString().replace(/[:.]/g, '-') + (excludeImages ? '_noimg' : '') + '.json.gz');
+
+      // 记录本次备份时间（使用数据中最大 endTime 避免时间漂移）
+      try {
+        const maxEnd = conversationsToExport.reduce((acc, c) => Math.max(acc, Number(c.endTime) || 0), lastBackupAt);
+        const toSave = { [LAST_BACKUP_TIME_KEY]: maxEnd || Date.now() };
+        await chrome.storage.local.set(toSave);
+      } catch (_) {}
     } catch (error) {
       console.error('备份失败:', error);
       alert('备份失败，请检查浏览器控制台。');
@@ -1704,22 +1733,24 @@ export function createChatHistoryUI(appContext) {
     // 创建一个 file input 元素用于选择文件
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'application/json';
+    // 同时支持 .json 与 .json.gz
+    input.accept = '.json,application/json,.gz,application/gzip';
     input.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
       try {
-        const text = await file.text();
+        const text = await readBackupFileAsText(file);
         const backupData = JSON.parse(text);
         if (!Array.isArray(backupData)) {
           alert('备份文件格式不正确！');
           return;
         }
+        const overwrite = window.confirm('是否覆盖已有会话（同 ID）？\n选择取消则仅导入新增的会话');
         let countAdded = 0;
         for (const conv of backupData) {
           try {
             const existing = await getConversationById(conv.id, false);
-            if (!existing) {
+            if (!existing || overwrite) {
               await putConversation(conv);
               countAdded++;
             }
@@ -1738,6 +1769,87 @@ export function createChatHistoryUI(appContext) {
       }
     });
     input.click();
+  }
+
+  /**
+   * 工具：将会话中的图片内容移除，仅保留文本以减小备份体积
+   * @param {Object} conversation
+   * @returns {Object}
+   */
+  function stripImagesFromConversation(conversation) {
+    try {
+      const cloned = JSON.parse(JSON.stringify(conversation));
+      if (Array.isArray(cloned.messages)) {
+        cloned.messages = cloned.messages.map(msg => {
+          const m = { ...msg };
+          // 兼容字符串与多段内容
+          if (Array.isArray(m.content)) {
+            m.content = m.content.filter(part => part && ((part.type === 'text' && typeof part.text === 'string')));
+            // 若结果为空，则改为空字符串，避免还原失败
+            if (m.content.length === 0) m.content = '';
+          }
+          return m;
+        });
+      }
+      return cloned;
+    } catch (_) {
+      return conversation;
+    }
+  }
+
+  /**
+   * 工具：将对象压缩为 gzip 并触发下载
+   * 使用浏览器原生 CompressionStream('gzip')，无需额外依赖
+   * @param {any} data
+   * @param {string} filename
+   */
+  async function downloadAsGzip(data, filename) {
+    const jsonStr = JSON.stringify(data);
+    let blobToDownload = null;
+    try {
+      if (typeof CompressionStream !== 'undefined') {
+        const enc = new TextEncoder();
+        const inputStream = new Blob([enc.encode(jsonStr)]).stream();
+        const gzipStream = inputStream.pipeThrough(new CompressionStream('gzip'));
+        const gzipBlob = await new Response(gzipStream).blob();
+        blobToDownload = new Blob([gzipBlob], { type: 'application/gzip' });
+      } else {
+        // 回退：不支持压缩则直接下载原始 JSON
+        blobToDownload = new Blob([jsonStr], { type: 'application/json' });
+        filename = filename.replace(/\.json\.gz$/i, '.json');
+      }
+    } catch (e) {
+      console.warn('压缩失败，回退至原始 JSON:', e);
+      blobToDownload = new Blob([jsonStr], { type: 'application/json' });
+      filename = filename.replace(/\.json\.gz$/i, '.json');
+    }
+    const url = URL.createObjectURL(blobToDownload);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  /**
+   * 工具：读取备份文件文本，支持 .json 及 .json.gz
+   * @param {File} file
+   * @returns {Promise<string>}
+   */
+  async function readBackupFileAsText(file) {
+    // gzip 场景
+    if (/\.gz$/i.test(file.name)) {
+      if (typeof DecompressionStream === 'undefined') {
+        throw new Error('当前环境不支持解压 .gz 文件，请导入 .json 备份');
+      }
+      const ds = new DecompressionStream('gzip');
+      const decompressed = file.stream().pipeThrough(ds);
+      return await new Response(decompressed).text();
+    }
+    // 常规 JSON
+    return await file.text();
   }
 
   /**
