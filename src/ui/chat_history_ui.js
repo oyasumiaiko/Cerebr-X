@@ -12,6 +12,7 @@ import {
   releaseConversationMemory,
   getDatabaseStats
 } from '../storage/indexeddb_helper.js';
+import { storageService } from '../utils/storage_service.js';
 
 /**
  * 创建聊天历史UI管理器
@@ -2016,28 +2017,19 @@ export function createChatHistoryUI(appContext) {
   // ==== 仅下载方案的备份偏好 ====
   const BACKUP_PREFS_KEY = 'chat_backup_prefs';
   async function loadBackupPreferencesDownloadsOnly() {
-    try {
-      const res = await chrome.storage.local.get([BACKUP_PREFS_KEY]);
-      const prefs = res[BACKUP_PREFS_KEY] || {};
-      return {
-        incrementalDefault: prefs.incrementalDefault !== false, // 默认增量
-        excludeImagesDefault: !!prefs.excludeImagesDefault,     // 默认不排除（false）
-        compressDefault: prefs.compressDefault !== false        // 默认压缩
-      };
-    } catch (_) {
-      return { incrementalDefault: true, excludeImagesDefault: false, compressDefault: true };
-    }
+    const defaults = { incrementalDefault: true, excludeImagesDefault: false, compressDefault: true };
+    const prefs = await storageService.getJSON(BACKUP_PREFS_KEY, defaults, { area: 'sync' });
+    return {
+      incrementalDefault: prefs.incrementalDefault !== false,
+      excludeImagesDefault: !!prefs.excludeImagesDefault,
+      compressDefault: prefs.compressDefault !== false
+    };
   }
   async function saveBackupPreferencesDownloadsOnly(prefs) {
-    try {
-      const current = await loadBackupPreferencesDownloadsOnly();
-      const merged = { ...current, ...prefs };
-      await chrome.storage.local.set({ [BACKUP_PREFS_KEY]: merged });
-      return merged;
-    } catch (e) {
-      console.warn('保存备份偏好失败:', e);
-      return prefs;
-    }
+    const current = await loadBackupPreferencesDownloadsOnly();
+    const merged = { ...current, ...prefs };
+    await storageService.setJSON(BACKUP_PREFS_KEY, merged, { area: 'sync' });
+    return merged;
   }
 
   // 已移除目录授权/直写方案，统一使用下载 API
