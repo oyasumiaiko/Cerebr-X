@@ -1688,11 +1688,35 @@ export function createChatHistoryUI(appContext) {
     }
   }
 
+  // 自动备份锁（跨标签页）
+  const AUTO_BACKUP_LOCK_KEY = 'auto_backup_lock';
+  const INSTANCE_ID = `ab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  async function acquireAutoBackupLock(ttlMs = 2 * 60 * 1000) {
+    try {
+      const wrap = await chrome.storage.local.get([AUTO_BACKUP_LOCK_KEY]);
+      const lock = wrap[AUTO_BACKUP_LOCK_KEY];
+      const now = Date.now();
+      if (lock && lock.expiresAt && lock.expiresAt > now) return false;
+      const newLock = { owner: INSTANCE_ID, expiresAt: now + ttlMs };
+      await chrome.storage.local.set({ [AUTO_BACKUP_LOCK_KEY]: newLock });
+      const confirmWrap = await chrome.storage.local.get([AUTO_BACKUP_LOCK_KEY]);
+      return confirmWrap[AUTO_BACKUP_LOCK_KEY]?.owner === INSTANCE_ID;
+    } catch (e) { return false; }
+  }
+  async function releaseAutoBackupLock() {
+    try {
+      const wrap = await chrome.storage.local.get([AUTO_BACKUP_LOCK_KEY]);
+      if (wrap[AUTO_BACKUP_LOCK_KEY]?.owner === INSTANCE_ID) {
+        await chrome.storage.local.remove([AUTO_BACKUP_LOCK_KEY]);
+      }
+    } catch (_) {}
+  }
+
   /**
    * 备份所有对话记录
    * @returns {Promise<void>}
    */
-  async function backupConversations() {
+  async function backupConversations(opts = {}) {
     try {
       // 步进进度（等分）
       const stepTitles = ['读取偏好', '分析会话', '读取会话内容'];
@@ -1703,9 +1727,11 @@ export function createChatHistoryUI(appContext) {
 
       // 读取备份偏好（仅下载方案）
       const prefs = await loadBackupPreferencesDownloadsOnly();
-      const doIncremental = !!prefs.incrementalDefault;
-      const excludeImages = !!prefs.excludeImagesDefault;
-      const doCompress = prefs.compressDefault !== false; // 默认压缩
+      const mode = opts.mode || (prefs.incrementalDefault ? 'incremental' : 'full');
+      const isAuto = !!opts.auto;
+      const doIncremental = mode === 'incremental';
+      const excludeImages = isAuto ? false : (opts.excludeImages !== undefined ? !!opts.excludeImages : !!prefs.excludeImagesDefault);
+      const doCompress = (opts.compress !== undefined) ? !!opts.compress : (prefs.compressDefault !== false);
       includeStripImages = !!excludeImages;
       const steps = includeStripImages ? [...stepTitles, '处理图片', ...tailSteps] : [...stepTitles, ...tailSteps];
       const sp = utils.createStepProgress({ steps, type: 'info' });
@@ -1753,8 +1779,8 @@ export function createChatHistoryUI(appContext) {
       }
 
       // 生成文件名与 Blob
-      const filenamePrefix = doIncremental ? 'chat_backup_inc_' : 'chat_backup_full_';
-      const filename = filenamePrefix + new Date().toISOString().replace(/[:.]/g, '-') + (excludeImages ? '_noimg' : '') + (doCompress ? '.json.gz' : '.json');
+      const seqForName = doIncremental ? ((Number((await loadBackupPreferencesDownloadsOnly()).incSequence) || 0) + 1) : undefined;
+      const filename = buildBackupFilename({ mode: doIncremental ? 'incremental' : 'full', excludeImages, doCompress, seq: seqForName });
       sp.next('打包数据');
       const blob = await buildBackupBlob(conversationsToExport, doCompress);
       sp.next('保存文件');
@@ -1775,6 +1801,18 @@ export function createChatHistoryUI(appContext) {
       console.error('备份失败:', error);
       try { showNotification({ message: '备份失败', type: 'error', description: String(error?.message || error) }); } catch (_) {}
     }
+  }
+
+  function buildBackupFilename({ mode, excludeImages, doCompress, seq }) {
+    const ts = new Date();
+    const pad = (n, w) => String(n).padStart(w, '0');
+    const nameTs = `${ts.getFullYear()}${pad(ts.getMonth() + 1, 2)}${pad(ts.getDate(), 2)}_${pad(ts.getHours(), 2)}${pad(ts.getMinutes(), 2)}${pad(ts.getSeconds(), 2)}`;
+    const suffix = doCompress ? '.json.gz' : '.json';
+    if (mode === 'incremental') {
+      const s = pad(Math.max(1, Number(seq || 1)), 3);
+      return `chat_backup_inc_${nameTs}+${s}${suffix}`;
+    }
+    return `chat_backup_full_${nameTs}${excludeImages ? '_noimg' : ''}${suffix}`;
   }
 
   /**
@@ -2017,13 +2055,18 @@ export function createChatHistoryUI(appContext) {
   // ==== 仅下载方案的备份偏好 ====
   const BACKUP_PREFS_KEY = 'chat_backup_prefs';
   async function loadBackupPreferencesDownloadsOnly() {
-    const defaults = { incrementalDefault: true, excludeImagesDefault: false, compressDefault: true };
-    const prefs = await storageService.getJSON(BACKUP_PREFS_KEY, defaults, { area: 'sync' });
-    return {
-      incrementalDefault: prefs.incrementalDefault !== false,
-      excludeImagesDefault: !!prefs.excludeImagesDefault,
-      compressDefault: prefs.compressDefault !== false
+    const defaults = {
+      incrementalDefault: true,
+      excludeImagesDefault: false,
+      compressDefault: true,
+      autoBackupEnabled: false,
+      autoBackupIntervalMin: 60,
+      lastIncrementalBackupAt: 0,
+      lastFullBackupAt: 0,
+      incSequence: 0
     };
+    const prefs = await storageService.getJSON(BACKUP_PREFS_KEY, defaults, { area: 'sync' });
+    return { ...defaults, ...prefs };
   }
   async function saveBackupPreferencesDownloadsOnly(prefs) {
     const current = await loadBackupPreferencesDownloadsOnly();
@@ -2088,6 +2131,50 @@ export function createChatHistoryUI(appContext) {
     rowZip.appendChild(cbZip); rowZip.appendChild(lbZip);
     container.appendChild(rowZip);
 
+    // 自动备份开关
+    const rowAuto = makeRow();
+    const cbAuto = document.createElement('input');
+    cbAuto.type = 'checkbox';
+    cbAuto.checked = !!prefs.autoBackupEnabled;
+    const lbAuto = document.createElement('label');
+    lbAuto.textContent = '启用自动增量备份';
+    rowAuto.appendChild(cbAuto); rowAuto.appendChild(lbAuto);
+    container.appendChild(rowAuto);
+
+    // 备份间隔（分钟）
+    const rowInterval = makeRow();
+    const intervalInput = document.createElement('input');
+    intervalInput.type = 'number';
+    intervalInput.min = '5';
+    intervalInput.step = '5';
+    intervalInput.value = String(prefs.autoBackupIntervalMin || 60);
+    const lbInterval = document.createElement('label');
+    lbInterval.textContent = '间隔（分钟）';
+    rowInterval.appendChild(lbInterval); rowInterval.appendChild(intervalInput);
+    container.appendChild(rowInterval);
+
+    // 时间信息
+    const infoRow = document.createElement('div');
+    infoRow.style.fontSize = '12px';
+    infoRow.style.opacity = '0.8';
+    const fmt = (t) => t ? new Date(t).toLocaleString() : '从未';
+    const nextTs = prefs.lastIncrementalBackupAt ? (prefs.lastIncrementalBackupAt + (Number(prefs.autoBackupIntervalMin || 60) * 60 * 1000)) : 0;
+    infoRow.textContent = `上次增量：${fmt(prefs.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nextTs)}`;
+    container.appendChild(infoRow);
+
+    // 手动全量备份
+    const rowFull = makeRow();
+    const fullBtn = document.createElement('button');
+    fullBtn.textContent = '手动全量备份（重置增量）';
+    const cbIgnoreImg = document.createElement('input');
+    cbIgnoreImg.type = 'checkbox';
+    const lbIgnoreImg = document.createElement('label');
+    lbIgnoreImg.textContent = '忽略图片';
+    rowFull.appendChild(fullBtn);
+    rowFull.appendChild(cbIgnoreImg);
+    rowFull.appendChild(lbIgnoreImg);
+    container.appendChild(rowFull);
+
     // 下载路径说明
     const hint = document.createElement('div');
     hint.style.fontSize = '12px';
@@ -2097,9 +2184,14 @@ export function createChatHistoryUI(appContext) {
     container.appendChild(hint);
 
     // 事件：保存首选项
-    cbInc.addEventListener('change', async () => { await saveBackupPreferencesDownloadsOnly({ incrementalDefault: !!cbInc.checked }); });
-    cbImg.addEventListener('change', async () => { await saveBackupPreferencesDownloadsOnly({ excludeImagesDefault: !!cbImg.checked }); });
-    cbZip.addEventListener('change', async () => { await saveBackupPreferencesDownloadsOnly({ compressDefault: !!cbZip.checked }); });
+    cbInc.addEventListener('change', async () => { const p = await saveBackupPreferencesDownloadsOnly({ incrementalDefault: !!cbInc.checked }); const nx = p.lastIncrementalBackupAt ? (p.lastIncrementalBackupAt + (Number(p.autoBackupIntervalMin||60)*60*1000)) : 0; infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`; });
+    cbImg.addEventListener('change', async () => { const p = await saveBackupPreferencesDownloadsOnly({ excludeImagesDefault: !!cbImg.checked }); const nx = p.lastIncrementalBackupAt ? (p.lastIncrementalBackupAt + (Number(p.autoBackupIntervalMin||60)*60*1000)) : 0; infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`; });
+    cbZip.addEventListener('change', async () => { const p = await saveBackupPreferencesDownloadsOnly({ compressDefault: !!cbZip.checked }); const nx = p.lastIncrementalBackupAt ? (p.lastIncrementalBackupAt + (Number(p.autoBackupIntervalMin||60)*60*1000)) : 0; infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`; });
+    cbAuto.addEventListener('change', async () => { const p = await saveBackupPreferencesDownloadsOnly({ autoBackupEnabled: !!cbAuto.checked }); const nx = p.lastIncrementalBackupAt ? (p.lastIncrementalBackupAt + (Number(p.autoBackupIntervalMin||60)*60*1000)) : 0; infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`; restartAutoBackupScheduler?.(); });
+    intervalInput.addEventListener('change', async () => { const v = Math.max(5, Number(intervalInput.value)||60); intervalInput.value = String(v); const p = await saveBackupPreferencesDownloadsOnly({ autoBackupIntervalMin: v }); const nx = p.lastIncrementalBackupAt ? (p.lastIncrementalBackupAt + (Number(p.autoBackupIntervalMin||60)*60*1000)) : 0; infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`; restartAutoBackupScheduler?.(); });
+    fullBtn.addEventListener('click', async () => {
+      await backupConversations({ mode: 'full', excludeImages: !!cbIgnoreImg.checked });
+    });
 
     // 初始化勾选状态（从存储读取）
     (async () => {
@@ -2108,6 +2200,10 @@ export function createChatHistoryUI(appContext) {
         cbInc.checked = !!saved.incrementalDefault;
         cbImg.checked = !!saved.excludeImagesDefault;
         cbZip.checked = saved.compressDefault !== false;
+        cbAuto.checked = !!saved.autoBackupEnabled;
+        intervalInput.value = String(saved.autoBackupIntervalMin || 60);
+        const nextTs2 = saved.lastIncrementalBackupAt ? (saved.lastIncrementalBackupAt + (Number(saved.autoBackupIntervalMin || 60) * 60 * 1000)) : 0;
+        infoRow.textContent = `上次增量：${fmt(saved.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nextTs2)}`;
       } catch (e) {
         // ignore
       }
@@ -2148,6 +2244,39 @@ export function createChatHistoryUI(appContext) {
     
     // console.log('内存缓存已清理');
   }
+
+  // ---- 自动备份调度 ----
+  let autoBackupTimerId = null;
+  async function autoBackupTick() {
+    try {
+      const prefs = await loadBackupPreferencesDownloadsOnly();
+      if (!prefs.autoBackupEnabled) return;
+      const now = Date.now();
+      const intervalMs = Math.max(5, Number(prefs.autoBackupIntervalMin || 60)) * 60 * 1000;
+      const last = Number(prefs.lastIncrementalBackupAt || 0);
+      const due = last <= 0 ? (now >= intervalMs) : (now >= (last + intervalMs));
+      if (!due) return;
+      const locked = await acquireAutoBackupLock(2 * 60 * 1000);
+      if (!locked) return;
+      try {
+        await backupConversations({ mode: 'incremental', auto: true });
+      } finally {
+        await releaseAutoBackupLock();
+      }
+    } catch (_) {}
+  }
+
+  function startAutoBackupScheduler() {
+    if (autoBackupTimerId) clearInterval(autoBackupTimerId);
+    autoBackupTimerId = setInterval(autoBackupTick, 60 * 1000);
+  }
+  function stopAutoBackupScheduler() {
+    if (autoBackupTimerId) { clearInterval(autoBackupTimerId); autoBackupTimerId = null; }
+  }
+  function restartAutoBackupScheduler() { stopAutoBackupScheduler(); startAutoBackupScheduler(); }
+
+  // 启动自动备份调度器
+  startAutoBackupScheduler();
 
   // 添加URL处理函数
   function getDisplayUrl(url) {
@@ -2318,6 +2447,7 @@ export function createChatHistoryUI(appContext) {
     updatePageInfo,
     getCurrentConversationId: () => currentConversationId,
     clearMemoryCache,
-    createForkConversation
+    createForkConversation,
+    restartAutoBackupScheduler
   };
-} 
+}
