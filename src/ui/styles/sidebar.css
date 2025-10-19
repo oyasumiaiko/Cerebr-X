@@ -3627,11 +3627,30 @@ body.hide-references .reference-number.superscript {
   font-weight: 500;
 }
 
+/* 步骤标题动画（上下移动 + 淡入淡出） */
+.notification__content.step-anim-out {
+  animation: stepFadeOutUp 180ms ease forwards;
+}
+.notification__content.step-anim-in {
+  animation: stepFadeInDown 220ms ease forwards;
+}
+@keyframes stepFadeOutUp {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-6px); }
+}
+@keyframes stepFadeInDown {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 .notification__description {
   font-size: 12px;
   opacity: 0.76;
   line-height: 1.45;
 }
+
+/* 步骤列表：在通知顶部展示所有步骤 */
+/* （已移除步骤历史列表样式） */
 
 .notification__progress {
   display: none;

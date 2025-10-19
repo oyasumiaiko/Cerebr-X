@@ -235,10 +235,7 @@ export function registerSidebarUtilities(appContext) {
     let subDone = 0;
     let subTotal = 1;
 
-    const formatMessage = (customMessage) => {
-      const title = customMessage || steps[index] || '';
-      return `步骤 ${Math.min(index + 1, total)}/${total} · ${title}`;
-    };
+    const formatMessage = (customMessage) => (customMessage || steps[index] || '');
 
     const toast = appContext.utils.showNotification({
       message: formatMessage(config.message),
@@ -249,6 +246,7 @@ export function registerSidebarUtilities(appContext) {
       autoClose: false,
       duration: 0
     });
+    // 简化：仅显示当前步骤文案，不显示历史列表
 
     const calcProgress = () => {
       const stepBase = index / total;
