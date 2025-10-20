@@ -1535,7 +1535,8 @@ input:checked + .slider::before {
     color: color-mix(in srgb, var(--cerebr-red) 70%, var(--cerebr-text-color));
 }
 
-.message.gallery-highlight {
+.message.gallery-highlight,
+.message.search-highlight {
     animation: galleryHighlightPulse 1.2s ease-in-out 2;
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--cerebr-highlight) 45%, transparent);
     border-radius: 12px;
@@ -3195,6 +3196,15 @@ body.hide-references .reference-number.superscript {
     font-size: 12px;
     color: var(--cerebr-text-color);
     margin-top: 4px;
+}
+
+.highlight-snippet-line {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.highlight-snippet-line:last-child {
+    margin-bottom: 0;
 }
 
 /* 右键菜单：聊天记录上下文菜单 */

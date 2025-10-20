@@ -76,6 +76,17 @@ export function createChatHistoryUI(appContext) {
   };
   const GALLERY_IMAGE_LIMIT = 500;
 
+  function createEmptySearchCache() {
+    return {
+      query: '',
+      normalized: '',
+      results: null,
+      matchMap: new Map(),
+      timestamp: 0
+    };
+  }
+  let searchCache = createEmptySearchCache();
+
   function invalidateGalleryCache() {
     galleryCache.items = [];
     galleryCache.loaded = false;
@@ -94,10 +105,15 @@ export function createChatHistoryUI(appContext) {
     } catch (_) {}
   }
 
+  function invalidateSearchCache() {
+    searchCache = createEmptySearchCache();
+  }
+
   function invalidateMetadataCache() {
     metaCache.data = null;
     metaCache.time = 0;
     invalidateGalleryCache();
+    invalidateSearchCache();
   }
 
   async function getAllConversationMetadataWithCache(forceUpdate = false) {
@@ -284,6 +300,42 @@ export function createChatHistoryUI(appContext) {
       return msg.content.map(part => part.type === 'image_url' ? '[图片]' : part.text?.trim() || '').join(' ');
     }
     return '';
+  }
+
+  function buildExcerptSegments(sourceText, filterText, lowerFilter, contextLength = 32) {
+    if (!sourceText) return null;
+    const lowerSource = sourceText.toLowerCase();
+    let index = lowerSource.indexOf(lowerFilter);
+    if (index === -1) return null;
+
+    const filterLength = filterText.length;
+    const start = Math.max(0, index - contextLength);
+    const end = Math.min(sourceText.length, index + filterLength + contextLength);
+    const snippet = sourceText.slice(start, end);
+    const snippetLower = snippet.toLowerCase();
+
+    const segments = [];
+    let cursor = 0;
+    while (cursor < snippet.length) {
+      const matchIndex = snippetLower.indexOf(lowerFilter, cursor);
+      if (matchIndex === -1) {
+        if (cursor < snippet.length) {
+          segments.push({ type: 'text', value: snippet.slice(cursor) });
+        }
+        break;
+      }
+      if (matchIndex > cursor) {
+        segments.push({ type: 'text', value: snippet.slice(cursor, matchIndex) });
+      }
+      segments.push({ type: 'mark', value: snippet.slice(matchIndex, matchIndex + filterLength) });
+      cursor = matchIndex + filterLength;
+    }
+
+    return {
+      segments,
+      prefixEllipsis: start > 0,
+      suffixEllipsis: end < sourceText.length
+    };
   }
 
   /**
@@ -545,6 +597,17 @@ export function createChatHistoryUI(appContext) {
           behavior: 'instant'
         });
       }
+    });
+  }
+
+  function highlightMessageInChat(messageId) {
+    if (!messageId) return;
+    requestAnimationFrame(() => {
+      const target = chatContainer.querySelector(`[data-message-id="${messageId}"]`);
+      if (!target) return;
+      target.classList.add('search-highlight');
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => target.classList.remove('search-highlight'), 1600);
     });
   }
 
@@ -849,6 +912,8 @@ export function createChatHistoryUI(appContext) {
     const runId = createRunId();
     panel.dataset.currentFilter = filterText;
     panel.dataset.runId = runId;
+    const normalizedFilter = filterText.trim().toLowerCase();
+    panel.dataset.normalizedFilter = normalizedFilter;
 
     const listContainer = panel.querySelector('#chat-history-list');
     if (!listContainer) return;
@@ -884,112 +949,139 @@ export function createChatHistoryUI(appContext) {
       );
       effectiveFilterTextForHighlight = '';
     } else if (filterText) {
-      const lowerFilter = filterText.toLowerCase();
-      const matchedEntries = [];
-      const totalItems = allHistoriesMeta.length;
-      let nextIndex = 0;
-      let processedCount = 0;
-      let lastProgressUpdate = 0;
-      let cancelled = false;
-
-      // 在列表容器顶部插入搜索进度指示器
-      const searchProgressIndicator = document.createElement('div');
-      searchProgressIndicator.className = 'search-loading-indicator';
-
-      const filterBoxContainer = panel.querySelector('.filter-container');
-      if (filterBoxContainer && filterBoxContainer.parentNode === listContainer.parentNode) {
-        filterBoxContainer.insertAdjacentElement('afterend', searchProgressIndicator);
+      const normalizedFilter = panel.dataset.normalizedFilter || filterText.trim().toLowerCase();
+      if (searchCache.results && searchCache.normalized === normalizedFilter) {
+        sourceHistories = searchCache.results.slice();
+        effectiveFilterTextForHighlight = filterText;
       } else {
-        listContainer.insertBefore(searchProgressIndicator, listContainer.firstChild);
-      }
+        const lowerFilter = normalizedFilter;
+        const matchedEntries = [];
+        const matchInfoMap = new Map();
+        const totalItems = allHistoriesMeta.length;
+        let nextIndex = 0;
+        let processedCount = 0;
+        let lastProgressUpdate = 0;
+        let cancelled = false;
 
-      const PROGRESS_UPDATE_INTERVAL = 10;
-      const CONCURRENCY = Math.min(6, Math.max(2, navigator?.hardwareConcurrency ? Math.floor(navigator.hardwareConcurrency / 2) : 4));
+        // 在列表容器顶部插入搜索进度指示器
+        const searchProgressIndicator = document.createElement('div');
+        searchProgressIndicator.className = 'search-loading-indicator';
 
-      const updateProgress = (force = false) => {
-        if (!force && processedCount - lastProgressUpdate < PROGRESS_UPDATE_INTERVAL) return;
-        lastProgressUpdate = processedCount;
-        const percentComplete = totalItems === 0 ? 100 : Math.round((processedCount / totalItems) * 100);
-        const matchCount = matchedEntries.length;
-        searchProgressIndicator.innerHTML = `
-          <div class="search-progress">
-            <div class="search-progress-text">
-              正在搜索聊天记录... (${processedCount}/${totalItems}${matchCount ? ` · 已找到 ${matchCount}` : ''})
+        const filterBoxContainer = panel.querySelector('.filter-container');
+        if (filterBoxContainer && filterBoxContainer.parentNode === listContainer.parentNode) {
+          filterBoxContainer.insertAdjacentElement('afterend', searchProgressIndicator);
+        } else {
+          listContainer.insertBefore(searchProgressIndicator, listContainer.firstChild);
+        }
+
+        const PROGRESS_UPDATE_INTERVAL = 10;
+        const CONCURRENCY = Math.min(6, Math.max(2, navigator?.hardwareConcurrency ? Math.floor(navigator.hardwareConcurrency / 2) : 4));
+
+        const updateProgress = (force = false) => {
+          if (!force && processedCount - lastProgressUpdate < PROGRESS_UPDATE_INTERVAL) return;
+          lastProgressUpdate = processedCount;
+          const percentComplete = totalItems === 0 ? 100 : Math.round((processedCount / totalItems) * 100);
+          const matchCount = matchedEntries.length;
+          searchProgressIndicator.innerHTML = `
+            <div class="search-progress">
+              <div class="search-progress-text">
+                正在搜索聊天记录... (${processedCount}/${totalItems}${matchCount ? ` · 已找到 ${matchCount}` : ''})
+              </div>
+              <div class="search-progress-bar">
+                <div class="search-progress-fill" style="width: ${percentComplete}%"></div>
+              </div>
             </div>
-            <div class="search-progress-bar">
-              <div class="search-progress-fill" style="width: ${percentComplete}%"></div>
-            </div>
-          </div>
-        `;
-      };
+          `;
+        };
 
-      updateProgress(true);
+        updateProgress(true);
 
-      const workers = Array.from({ length: CONCURRENCY }).map(async () => {
-        while (true) {
-          const currentIndex = nextIndex++;
-          if (currentIndex >= totalItems || cancelled) break;
+        const workers = Array.from({ length: CONCURRENCY }).map(async () => {
+          while (true) {
+            const currentIndex = nextIndex++;
+            if (currentIndex >= totalItems || cancelled) break;
 
-          if (panel.dataset.runId !== runId) {
-            cancelled = true;
-            break;
-          }
+            if (panel.dataset.runId !== runId) {
+              cancelled = true;
+              break;
+            }
 
-          const historyMeta = allHistoriesMeta[currentIndex];
-          const url = (historyMeta.url || '').toLowerCase();
-          const summary = (historyMeta.summary || '').toLowerCase();
-          let matched = false;
+            const historyMeta = allHistoriesMeta[currentIndex];
+            const url = (historyMeta.url || '').toLowerCase();
+            const summary = (historyMeta.summary || '').toLowerCase();
+            let matched = false;
 
-          if (url.includes(lowerFilter) || summary.includes(lowerFilter)) {
-            matchedEntries.push({ index: currentIndex, data: historyMeta });
-            matched = true;
-          }
+            if (url.includes(lowerFilter) || summary.includes(lowerFilter)) {
+              matchedEntries.push({ index: currentIndex, data: historyMeta });
+              matchInfoMap.set(historyMeta.id, { messageId: null, excerpts: [], reason: 'meta' });
+              matched = true;
+            }
 
-          if (!matched) {
-            try {
-              const fullConversation = await getConversationFromCacheOrLoad(historyMeta.id);
-              if (panel.dataset.runId !== runId) {
-                cancelled = true;
-                break;
-              }
-              if (fullConversation && Array.isArray(fullConversation.messages)) {
-                const lowerFilterValue = lowerFilter;
-                let conversationMatched = false;
-                for (const message of fullConversation.messages) {
-                  const plainText = extractMessagePlainText(message);
-                  if (plainText && plainText.toLowerCase().includes(lowerFilterValue)) {
-                    conversationMatched = true;
-                    break;
+            if (!matched) {
+              try {
+                const fullConversation = await getConversationFromCacheOrLoad(historyMeta.id);
+                if (panel.dataset.runId !== runId) {
+                  cancelled = true;
+                  break;
+                }
+                if (fullConversation && Array.isArray(fullConversation.messages)) {
+                  const matchInfo = matchInfoMap.get(historyMeta.id) || { messageId: null, excerpts: [], reason: 'message' };
+                  let conversationMatched = false;
+                  for (const message of fullConversation.messages) {
+                    const plainText = extractMessagePlainText(message);
+                    if (!plainText) continue;
+                    const lowerPlain = plainText.toLowerCase();
+                    if (lowerPlain.includes(lowerFilter)) {
+                      conversationMatched = true;
+                      if (!matchInfo.messageId && message.id) {
+                        matchInfo.messageId = message.id;
+                      }
+                      if (matchInfo.excerpts.length < 4) {
+                        const excerpt = buildExcerptSegments(plainText, filterText, lowerFilter);
+                        if (excerpt) {
+                          matchInfo.excerpts.push(excerpt);
+                        }
+                      }
+                    }
+                    if (matchInfo.excerpts.length >= 4) break;
+                  }
+                  if (conversationMatched) {
+                    matchInfoMap.set(historyMeta.id, matchInfo);
+                    matchedEntries.push({ index: currentIndex, data: fullConversation });
                   }
                 }
-                if (conversationMatched) {
-                  matchedEntries.push({ index: currentIndex, data: fullConversation });
-                }
+              } catch (error) {
+                console.error(`搜索会话 ${historyMeta.id} 失败:`, error);
               }
-            } catch (error) {
-              console.error(`搜索会话 ${historyMeta.id} 失败:`, error);
             }
+
+            processedCount++;
+            updateProgress();
+            await new Promise(resolve => setTimeout(resolve, 0));
           }
+        });
 
-          processedCount++;
-          updateProgress();
-          await new Promise(resolve => setTimeout(resolve, 0));
+        await Promise.all(workers);
+
+        if (panel.dataset.runId !== runId || cancelled) {
+          if (searchProgressIndicator.parentNode) searchProgressIndicator.remove();
+          return;
         }
-      });
 
-      await Promise.all(workers);
-
-      if (panel.dataset.runId !== runId || cancelled) {
+        updateProgress(true);
         if (searchProgressIndicator.parentNode) searchProgressIndicator.remove();
-        return;
+
+        matchedEntries.sort((a, b) => a.index - b.index);
+        const finalResults = matchedEntries.map(entry => entry.data);
+        searchCache = {
+          query: filterText,
+          normalized: normalizedFilter,
+          results: finalResults.slice(),
+          matchMap: matchInfoMap,
+          timestamp: Date.now()
+        };
+        sourceHistories = searchCache.results.slice();
       }
-
-      updateProgress(true);
-      if (searchProgressIndicator.parentNode) searchProgressIndicator.remove();
-
-      matchedEntries.sort((a, b) => a.index - b.index);
-      sourceHistories = matchedEntries.map(entry => entry.data);
-      // effectiveFilterTextForHighlight 保持为 filterText
     } else {
       sourceHistories = allHistoriesMeta;
       effectiveFilterTextForHighlight = '';
@@ -1119,6 +1211,15 @@ export function createChatHistoryUI(appContext) {
       summaryDiv.textContent = displaySummary;
     }
 
+    let searchMatchInfo = null;
+    try {
+      const panelNode = document.getElementById('chat-history-panel');
+      const normalizedActiveFilter = panelNode?.dataset.normalizedFilter || '';
+      if (normalizedActiveFilter && searchCache.normalized === normalizedActiveFilter && searchCache.matchMap) {
+        searchMatchInfo = searchCache.matchMap.get(conv.id) || null;
+      }
+    } catch (_) {}
+
     const infoDiv = document.createElement('div');
     infoDiv.className = 'info';
     const convDate = new Date(conv.startTime);
@@ -1136,7 +1237,31 @@ export function createChatHistoryUI(appContext) {
     item.appendChild(summaryDiv);
     item.appendChild(infoDiv);
 
-    if (isTextFilterActive && conv.messages && Array.isArray(conv.messages)) {
+    let snippetRendered = false;
+    if (isTextFilterActive && searchMatchInfo && Array.isArray(searchMatchInfo.excerpts) && searchMatchInfo.excerpts.length) {
+      const snippetDiv = document.createElement('div');
+      snippetDiv.className = 'highlight-snippet';
+      searchMatchInfo.excerpts.forEach(excerpt => {
+        const line = document.createElement('div');
+        line.className = 'highlight-snippet-line';
+        if (excerpt.prefixEllipsis) line.appendChild(document.createTextNode('…'));
+        excerpt.segments.forEach(segment => {
+          if (segment.type === 'mark') {
+            const markEl = document.createElement('mark');
+            markEl.textContent = segment.value;
+            line.appendChild(markEl);
+          } else {
+            line.appendChild(document.createTextNode(segment.value));
+          }
+        });
+        if (excerpt.suffixEllipsis) line.appendChild(document.createTextNode('…'));
+        snippetDiv.appendChild(line);
+      });
+      item.appendChild(snippetDiv);
+      snippetRendered = true;
+    }
+
+    if (!snippetRendered && isTextFilterActive && conv.messages && Array.isArray(conv.messages)) {
       let snippets = [];
       let totalMatches = 0;
       const escapedFilter = filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1199,7 +1324,15 @@ export function createChatHistoryUI(appContext) {
     item.addEventListener('click', async () => {
       const conversation = await getConversationFromCacheOrLoad(conv.id);
       if (conversation) {
-        loadConversationIntoChat(conversation);
+        await loadConversationIntoChat(conversation);
+        const panelNode = document.getElementById('chat-history-panel');
+        const normalizedActiveFilter = panelNode?.dataset.normalizedFilter || '';
+        if (normalizedActiveFilter && searchCache.normalized === normalizedActiveFilter && searchCache.matchMap) {
+          const matchInfo = searchCache.matchMap.get(conv.id);
+          if (matchInfo && matchInfo.messageId) {
+            highlightMessageInChat(matchInfo.messageId);
+          }
+        }
       }
     });
     
