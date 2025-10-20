@@ -885,7 +885,12 @@ export function createChatHistoryUI(appContext) {
       effectiveFilterTextForHighlight = '';
     } else if (filterText) {
       const lowerFilter = filterText.toLowerCase();
-      const filteredResults = [];
+      const matchedEntries = [];
+      const totalItems = allHistoriesMeta.length;
+      let nextIndex = 0;
+      let processedCount = 0;
+      let lastProgressUpdate = 0;
+      let cancelled = false;
 
       // 在列表容器顶部插入搜索进度指示器
       const searchProgressIndicator = document.createElement('div');
@@ -898,66 +903,92 @@ export function createChatHistoryUI(appContext) {
         listContainer.insertBefore(searchProgressIndicator, listContainer.firstChild);
       }
 
-      const BATCH_PROCESS_SIZE = 25;
+      const PROGRESS_UPDATE_INTERVAL = 10;
+      const CONCURRENCY = Math.min(6, Math.max(2, navigator?.hardwareConcurrency ? Math.floor(navigator.hardwareConcurrency / 2) : 4));
 
-      for (let i = 0; i < allHistoriesMeta.length; i++) {
-        // 若当前任务已过期，立刻终止
-        if (panel.dataset.runId !== runId) {
-          if (searchProgressIndicator.parentNode) searchProgressIndicator.remove();
-          return;
-        }
-
-        const historyMeta = allHistoriesMeta[i];
-        const url = (historyMeta.url || '').toLowerCase();
-        const summary = (historyMeta.summary || '').toLowerCase();
-
-        let foundInMeta = false;
-        if (url.includes(lowerFilter) || summary.includes(lowerFilter)) {
-          filteredResults.push(historyMeta);
-          foundInMeta = true;
-        }
-
-        if (!foundInMeta) {
-          try {
-            const fullConversation = await getConversationById(historyMeta.id);
-            // await 之后再次核对任务是否仍然有效
-            if (panel.dataset.runId !== runId) {
-              if (searchProgressIndicator.parentNode) searchProgressIndicator.remove();
-              return;
-            }
-
-            if (fullConversation) {
-              const messagesContent = fullConversation.messages && fullConversation.messages.length
-                ? fullConversation.messages.map(msg => extractMessagePlainText(msg) || '').join(' ')
-                : '';
-              const lowerMessages = messagesContent.toLowerCase();
-              if (lowerMessages.includes(lowerFilter)) {
-                filteredResults.push(fullConversation);
-                updateConversationInCache(fullConversation);
-              }
-            }
-          } catch (error) {
-            console.error(`搜索会话 ${historyMeta.id} 失败:`, error);
-          }
-        }
-
-        // 批次更新进度并让出主线程
-        if ((i + 1) % BATCH_PROCESS_SIZE === 0 || i === allHistoriesMeta.length - 1) {
-          const percentComplete = Math.round(((i + 1) / allHistoriesMeta.length) * 100);
-          searchProgressIndicator.innerHTML = `
-            <div class="search-progress">
-              <div class="search-progress-text">正在搜索聊天记录... (${i+1}/${allHistoriesMeta.length})</div>
-              <div class="search-progress-bar">
-                <div class="search-progress-fill" style="width: ${percentComplete}%"></div>
-              </div>
+      const updateProgress = (force = false) => {
+        if (!force && processedCount - lastProgressUpdate < PROGRESS_UPDATE_INTERVAL) return;
+        lastProgressUpdate = processedCount;
+        const percentComplete = totalItems === 0 ? 100 : Math.round((processedCount / totalItems) * 100);
+        const matchCount = matchedEntries.length;
+        searchProgressIndicator.innerHTML = `
+          <div class="search-progress">
+            <div class="search-progress-text">
+              正在搜索聊天记录... (${processedCount}/${totalItems}${matchCount ? ` · 已找到 ${matchCount}` : ''})
             </div>
-          `;
+            <div class="search-progress-bar">
+              <div class="search-progress-fill" style="width: ${percentComplete}%"></div>
+            </div>
+          </div>
+        `;
+      };
+
+      updateProgress(true);
+
+      const workers = Array.from({ length: CONCURRENCY }).map(async () => {
+        while (true) {
+          const currentIndex = nextIndex++;
+          if (currentIndex >= totalItems || cancelled) break;
+
+          if (panel.dataset.runId !== runId) {
+            cancelled = true;
+            break;
+          }
+
+          const historyMeta = allHistoriesMeta[currentIndex];
+          const url = (historyMeta.url || '').toLowerCase();
+          const summary = (historyMeta.summary || '').toLowerCase();
+          let matched = false;
+
+          if (url.includes(lowerFilter) || summary.includes(lowerFilter)) {
+            matchedEntries.push({ index: currentIndex, data: historyMeta });
+            matched = true;
+          }
+
+          if (!matched) {
+            try {
+              const fullConversation = await getConversationFromCacheOrLoad(historyMeta.id);
+              if (panel.dataset.runId !== runId) {
+                cancelled = true;
+                break;
+              }
+              if (fullConversation && Array.isArray(fullConversation.messages)) {
+                const lowerFilterValue = lowerFilter;
+                let conversationMatched = false;
+                for (const message of fullConversation.messages) {
+                  const plainText = extractMessagePlainText(message);
+                  if (plainText && plainText.toLowerCase().includes(lowerFilterValue)) {
+                    conversationMatched = true;
+                    break;
+                  }
+                }
+                if (conversationMatched) {
+                  matchedEntries.push({ index: currentIndex, data: fullConversation });
+                }
+              }
+            } catch (error) {
+              console.error(`搜索会话 ${historyMeta.id} 失败:`, error);
+            }
+          }
+
+          processedCount++;
+          updateProgress();
           await new Promise(resolve => setTimeout(resolve, 0));
         }
+      });
+
+      await Promise.all(workers);
+
+      if (panel.dataset.runId !== runId || cancelled) {
+        if (searchProgressIndicator.parentNode) searchProgressIndicator.remove();
+        return;
       }
 
+      updateProgress(true);
       if (searchProgressIndicator.parentNode) searchProgressIndicator.remove();
-      sourceHistories = filteredResults;
+
+      matchedEntries.sort((a, b) => a.index - b.index);
+      sourceHistories = matchedEntries.map(entry => entry.data);
       // effectiveFilterTextForHighlight 保持为 filterText
     } else {
       sourceHistories = allHistoriesMeta;
