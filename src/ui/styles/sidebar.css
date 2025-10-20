@@ -1317,12 +1317,25 @@ input:checked + .slider::before {
     margin: 0 !important;
 }
 
+.backup-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
 .backup-panel-title {
     font-size: 16px;
     font-weight: 600;
     letter-spacing: 0.01em;
     color: color-mix(in srgb, var(--cerebr-text-color) 95%, transparent);
     padding: 4px 2px;
+}
+
+.backup-panel-subtitle {
+    font-size: 14px;
+    font-weight: 600;
+    color: color-mix(in srgb, var(--cerebr-text-color) 88%, transparent);
+    padding: 2px 2px;
 }
 
 .backup-form-row {
@@ -1372,6 +1385,23 @@ input:checked + .slider::before {
     box-shadow: var(--cerebr-control-inset-shadow);
 }
 
+.backup-button-group {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+}
+
+@media (min-width: 540px) {
+    .backup-button-group {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+.backup-button {
+    width: 100%;
+    justify-content: center;
+}
+
 .backup-panel-hint {
     font-size: 12px;
     opacity: 0.8;
@@ -1392,6 +1422,34 @@ input:checked + .slider::before {
     height: 14px;
     margin: 0;
     accent-color: var(--cerebr-highlight);
+}
+
+.backup-info-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-radius: var(--cerebr-control-radius);
+    background: color-mix(in srgb, var(--cerebr-control-bg) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cerebr-control-border) 80%, transparent);
+    box-shadow: var(--cerebr-control-inset-shadow);
+}
+
+.backup-info-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.backup-info-label {
+    color: color-mix(in srgb, var(--cerebr-text-color) 80%, transparent);
+}
+
+.backup-info-value {
+    font-weight: 600;
+    color: color-mix(in srgb, var(--cerebr-text-color) 92%, transparent);
 }
 
 /* 添加输入框包装容器样式 */
