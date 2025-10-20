@@ -69,9 +69,35 @@ export function createChatHistoryUI(appContext) {
   let metaCache = { data: null, time: 0 };
   const META_CACHE_TTL = 30 * 1000; // 30秒缓存元数据，打开面板/轻度操作极速响应
 
+  const galleryCache = {
+    items: [],
+    loaded: false,
+    lastLoadTs: 0
+  };
+  const GALLERY_IMAGE_LIMIT = 500;
+
+  function invalidateGalleryCache() {
+    galleryCache.items = [];
+    galleryCache.loaded = false;
+    galleryCache.lastLoadTs = 0;
+    try {
+      const panel = document.getElementById('chat-history-panel');
+      if (panel) {
+        const galleryContent = panel.querySelector('.history-tab-content[data-tab="gallery"]');
+        if (galleryContent) {
+          galleryContent.dataset.rendered = '';
+          if (!galleryContent.classList.contains('active')) {
+            galleryContent.innerHTML = '';
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
   function invalidateMetadataCache() {
     metaCache.data = null;
     metaCache.time = 0;
+    invalidateGalleryCache();
   }
 
   async function getAllConversationMetadataWithCache(forceUpdate = false) {
@@ -1228,6 +1254,159 @@ export function createChatHistoryUI(appContext) {
     }
   }
 
+  async function loadGalleryImages(forceRefresh = false) {
+    if (!forceRefresh && galleryCache.loaded) {
+      return galleryCache.items;
+    }
+    const conversations = await getAllConversations(true);
+    const images = [];
+    const seenKeys = new Set();
+    for (const conv of conversations) {
+      if (!conv || !Array.isArray(conv.messages)) continue;
+      const convDomain = getDisplayUrl(conv.url);
+      for (const msg of conv.messages) {
+        const timestamp = Number(msg?.timestamp || conv.endTime || conv.startTime || Date.now());
+        if (Array.isArray(msg?.content)) {
+          for (let idx = 0; idx < msg.content.length; idx++) {
+            const part = msg.content[idx];
+            if (part && part.type === 'image_url' && part.image_url && part.image_url.url) {
+              const url = part.image_url.url;
+              const key = `${conv.id || 'conv'}_${msg.id || idx}_${idx}_${url}`;
+              if (seenKeys.has(key)) continue;
+              seenKeys.add(key);
+              images.push({
+                conversationId: conv.id,
+                messageId: msg.id,
+                url,
+                timestamp,
+                summary: conv.summary || '',
+                title: conv.title || '',
+                domain: convDomain || '未知来源'
+              });
+              if (images.length >= GALLERY_IMAGE_LIMIT) break;
+            }
+          }
+        }
+        if (images.length >= GALLERY_IMAGE_LIMIT) {
+          break;
+        }
+      }
+      if (images.length >= GALLERY_IMAGE_LIMIT) break;
+    }
+    images.sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+    if (images.length > GALLERY_IMAGE_LIMIT) {
+      images.length = GALLERY_IMAGE_LIMIT;
+    }
+    galleryCache.items = images;
+    galleryCache.loaded = true;
+    galleryCache.lastLoadTs = Date.now();
+    return images;
+  }
+
+  async function renderGalleryTab(container, { forceRefresh = false } = {}) {
+    if (!container) return;
+    if (!forceRefresh && container.dataset.rendered === 'true') {
+      return;
+    }
+    if (container._rendering) {
+      return container._rendering;
+    }
+    container.dataset.rendered = '';
+    container.innerHTML = '';
+    const loading = document.createElement('div');
+    loading.className = 'gallery-loading';
+    loading.textContent = '正在收集图片…';
+    container.appendChild(loading);
+
+    const renderPromise = (async () => {
+      const images = await loadGalleryImages(forceRefresh);
+      container.innerHTML = '';
+      if (!images || images.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'gallery-empty';
+        empty.textContent = '暂无可展示的图片';
+        container.appendChild(empty);
+        container.dataset.rendered = 'true';
+        return;
+      }
+      const grid = document.createElement('div');
+      grid.className = 'gallery-grid';
+
+      images.forEach((record) => {
+        const item = document.createElement('div');
+        item.className = 'gallery-item';
+
+        const thumb = document.createElement('div');
+        thumb.className = 'gallery-thumb';
+        const img = document.createElement('img');
+        img.src = record.url;
+        img.loading = 'lazy';
+        img.alt = record.summary || record.title || record.domain || '聊天图片';
+        thumb.appendChild(img);
+        item.appendChild(thumb);
+
+        const meta = document.createElement('div');
+        meta.className = 'gallery-meta';
+
+        const metaTitle = document.createElement('div');
+        metaTitle.className = 'gallery-meta-title';
+        metaTitle.textContent = record.summary || record.title || record.domain || '聊天图片';
+        meta.appendChild(metaTitle);
+
+        const metaInfo = document.createElement('div');
+        metaInfo.className = 'gallery-meta-info';
+        metaInfo.textContent = `${formatRelativeTime(new Date(record.timestamp || Date.now()))} · ${record.domain || '未知来源'}`;
+        meta.appendChild(metaInfo);
+
+        item.appendChild(meta);
+
+        item.addEventListener('click', async () => {
+          try {
+            const conversation = await getConversationFromCacheOrLoad(record.conversationId);
+            if (conversation) {
+              await loadConversationIntoChat(conversation);
+              requestAnimationFrame(() => {
+                const messageEl = chatContainer.querySelector(`[data-message-id="${record.messageId}"]`);
+                if (messageEl) {
+                  messageEl.classList.add('gallery-highlight');
+                  messageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  setTimeout(() => messageEl.classList.remove('gallery-highlight'), 1600);
+                }
+              });
+            }
+          } catch (error) {
+            console.error('打开图片所属对话失败:', error);
+          }
+        });
+
+        item.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          try {
+            window.open(record.url, '_blank', 'noopener');
+          } catch (_) {}
+        });
+
+        grid.appendChild(item);
+      });
+
+      container.appendChild(grid);
+      container.dataset.rendered = 'true';
+    })().catch((error) => {
+      console.error('加载图片相册失败:', error);
+      invalidateGalleryCache();
+      container.innerHTML = '';
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'gallery-error';
+      errorDiv.textContent = '加载图片失败，请稍后重试';
+      container.appendChild(errorDiv);
+    }).finally(() => {
+      container._rendering = null;
+    });
+
+    container._rendering = renderPromise;
+    return renderPromise;
+  }
+
   /**
    * 获取数据库统计信息，优先使用缓存
    * @param {boolean} [forceUpdate=false] - 是否强制更新
@@ -1538,6 +1717,11 @@ export function createChatHistoryUI(appContext) {
       historyTab.textContent = '聊天记录';
       historyTab.dataset.tab = 'history';
       
+      const galleryTab = document.createElement('div');
+      galleryTab.className = 'history-tab';
+      galleryTab.textContent = '图片相册';
+      galleryTab.dataset.tab = 'gallery';
+      
       const statsTab = document.createElement('div');
       statsTab.className = 'history-tab';
       statsTab.textContent = '数据统计';
@@ -1549,6 +1733,7 @@ export function createChatHistoryUI(appContext) {
       backupTab.dataset.tab = 'backup-settings';
       
       tabBar.appendChild(historyTab);
+      tabBar.appendChild(galleryTab);
       tabBar.appendChild(statsTab);
       tabBar.appendChild(backupTab);
       panel.appendChild(tabBar);
@@ -1604,6 +1789,11 @@ export function createChatHistoryUI(appContext) {
       listContainer.id = 'chat-history-list';
       historyContent.appendChild(listContainer);
       
+      // 图片相册标签内容
+      const galleryContent = document.createElement('div');
+      galleryContent.className = 'history-tab-content';
+      galleryContent.dataset.tab = 'gallery';
+      
       // 统计数据标签内容
       const statsContent = document.createElement('div');
       statsContent.className = 'history-tab-content';
@@ -1617,6 +1807,7 @@ export function createChatHistoryUI(appContext) {
 
       // 添加标签内容到容器
       tabContents.appendChild(historyContent);
+      tabContents.appendChild(galleryContent);
       tabContents.appendChild(statsContent);
       tabContents.appendChild(backupSettingsContent);
       panel.appendChild(tabContents);
@@ -1637,6 +1828,8 @@ export function createChatHistoryUI(appContext) {
           if (tabName === 'history') {
              // 切换到历史记录时，聚焦到筛选框
              requestAnimationFrame(() => filterInput?.focus());
+          } else if (tabName === 'gallery') {
+            await renderGalleryTab(targetContent);
           } else if (tabName === 'stats') {
             // 仅在切换到 'stats' 标签页时加载/更新统计信息
             const existingStatsPanel = targetContent.querySelector('.db-stats-panel');
@@ -1697,10 +1890,21 @@ export function createChatHistoryUI(appContext) {
    * 刷新聊天记录面板
    */
   function refreshChatHistory() {
+    invalidateGalleryCache();
     const panel = document.getElementById('chat-history-panel');
     if (panel && panel.classList.contains('visible')) { // 仅当面板可见时刷新
       const filterInput = panel.querySelector('input[type="text"]');
       loadConversationHistories(panel, filterInput ? filterInput.value : '');
+      const galleryContent = panel.querySelector('.history-tab-content[data-tab="gallery"]');
+      const activeTabName = panel.querySelector('.history-tab.active')?.dataset.tab;
+      if (galleryContent) {
+        galleryContent.dataset.rendered = '';
+        if (activeTabName === 'gallery') {
+          renderGalleryTab(galleryContent, { forceRefresh: true });
+        } else {
+          galleryContent.innerHTML = '';
+        }
+      }
     }
   }
 
