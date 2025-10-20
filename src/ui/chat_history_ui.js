@@ -1727,6 +1727,7 @@ export function createChatHistoryUI(appContext) {
 
       // 读取备份偏好（仅下载方案）
       const prefs = await loadBackupPreferencesDownloadsOnly();
+      const seqBase = Number(prefs.incSequence) || 0;
       const mode = opts.mode || (prefs.incrementalDefault ? 'incremental' : 'full');
       const isAuto = !!opts.auto;
       const doIncremental = mode === 'incremental';
@@ -1779,7 +1780,7 @@ export function createChatHistoryUI(appContext) {
       }
 
       // 生成文件名与 Blob
-      const seqForName = doIncremental ? ((Number((await loadBackupPreferencesDownloadsOnly()).incSequence) || 0) + 1) : undefined;
+      const seqForName = doIncremental ? (seqBase + 1) : undefined;
       const filename = buildBackupFilename({ mode: doIncremental ? 'incremental' : 'full', excludeImages, doCompress, seq: seqForName });
       sp.next('打包数据');
       const blob = await buildBackupBlob(conversationsToExport, doCompress);
@@ -1790,10 +1791,28 @@ export function createChatHistoryUI(appContext) {
 
       // 记录本次备份时间（使用数据中最大 endTime 避免时间漂移）
       sp.next('更新备份时间');
+      let backupReferenceTime = Date.now();
       try {
         const maxEnd = conversationsToExport.reduce((acc, c) => Math.max(acc, Number(c.endTime) || 0), lastBackupAt);
-        const toSave = { [LAST_BACKUP_TIME_KEY]: maxEnd || Date.now() };
+        backupReferenceTime = maxEnd || Date.now();
+        const toSave = { [LAST_BACKUP_TIME_KEY]: backupReferenceTime };
         await chrome.storage.local.set(toSave);
+      } catch (_) {}
+      try {
+        const completedAt = Date.now();
+        const checkpoint = Math.max(completedAt, backupReferenceTime);
+        if (doIncremental) {
+          await saveBackupPreferencesDownloadsOnly({
+            lastIncrementalBackupAt: checkpoint,
+            incSequence: seqBase + 1
+          });
+        } else {
+          await saveBackupPreferencesDownloadsOnly({
+            lastFullBackupAt: checkpoint,
+            lastIncrementalBackupAt: checkpoint,
+            incSequence: 0
+          });
+        }
       } catch (_) {}
       sp.next('完成');
       sp.complete('备份完成', true);
@@ -2089,24 +2108,20 @@ export function createChatHistoryUI(appContext) {
     // 同步初始化控件，随后从存储刷新状态
     let prefs = { incrementalDefault: true, excludeImagesDefault: false, compressDefault: true };
 
-    const makeRow = () => {
+    const makeRow = (extraClass = '') => {
       const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.alignItems = 'center';
-      row.style.gap = '8px';
-      row.style.margin = '6px 0';
+      row.className = `backup-form-row${extraClass ? ` ${extraClass}` : ''}`;
       return row;
     };
 
     const title = document.createElement('div');
+    title.className = 'backup-panel-title';
     title.textContent = '备份默认项设置';
-    title.style.fontWeight = '600';
-    title.style.margin = '8px 0';
     container.appendChild(title);
 
     // 默认增量备份
     const rowInc = document.createElement('div');
-    rowInc.className = 'switch-row';
+    rowInc.className = 'switch-row backup-form-row';
     const switchInc = document.createElement('label');
     switchInc.className = 'switch';
     const cbInc = document.createElement('input');
@@ -2114,16 +2129,18 @@ export function createChatHistoryUI(appContext) {
     cbInc.checked = !!prefs.incrementalDefault;
     const sliderInc = document.createElement('span');
     sliderInc.className = 'slider';
-    switchInc.appendChild(cbInc); switchInc.appendChild(sliderInc);
+    switchInc.appendChild(cbInc);
+    switchInc.appendChild(sliderInc);
     const incText = document.createElement('span');
     incText.className = 'switch-text';
     incText.textContent = '默认增量备份（按 endTime 仅导出变更）';
-    rowInc.appendChild(switchInc); rowInc.appendChild(incText);
+    rowInc.appendChild(incText);
+    rowInc.appendChild(switchInc);
     container.appendChild(rowInc);
 
     // 默认排除图片
     const rowImg = document.createElement('div');
-    rowImg.className = 'switch-row';
+    rowImg.className = 'switch-row backup-form-row';
     const switchImg = document.createElement('label');
     switchImg.className = 'switch';
     const cbImg = document.createElement('input');
@@ -2131,16 +2148,18 @@ export function createChatHistoryUI(appContext) {
     cbImg.checked = !!prefs.excludeImagesDefault;
     const sliderImg = document.createElement('span');
     sliderImg.className = 'slider';
-    switchImg.appendChild(cbImg); switchImg.appendChild(sliderImg);
+    switchImg.appendChild(cbImg);
+    switchImg.appendChild(sliderImg);
     const imgText = document.createElement('span');
     imgText.className = 'switch-text';
     imgText.textContent = '默认排除图片/截图（仅导出文本）';
-    rowImg.appendChild(switchImg); rowImg.appendChild(imgText);
+    rowImg.appendChild(imgText);
+    rowImg.appendChild(switchImg);
     container.appendChild(rowImg);
 
     // 默认压缩
     const rowZip = document.createElement('div');
-    rowZip.className = 'switch-row';
+    rowZip.className = 'switch-row backup-form-row';
     const switchZip = document.createElement('label');
     switchZip.className = 'switch';
     const cbZip = document.createElement('input');
@@ -2148,16 +2167,18 @@ export function createChatHistoryUI(appContext) {
     cbZip.checked = prefs.compressDefault !== false;
     const sliderZip = document.createElement('span');
     sliderZip.className = 'slider';
-    switchZip.appendChild(cbZip); switchZip.appendChild(sliderZip);
+    switchZip.appendChild(cbZip);
+    switchZip.appendChild(sliderZip);
     const zipText = document.createElement('span');
     zipText.className = 'switch-text';
     zipText.textContent = '默认压缩为 .json.gz（不支持则回退 .json）';
-    rowZip.appendChild(switchZip); rowZip.appendChild(zipText);
+    rowZip.appendChild(zipText);
+    rowZip.appendChild(switchZip);
     container.appendChild(rowZip);
 
     // 自动备份开关
     const rowAuto = document.createElement('div');
-    rowAuto.className = 'switch-row';
+    rowAuto.className = 'switch-row backup-form-row';
     const switchAuto = document.createElement('label');
     switchAuto.className = 'switch';
     const cbAuto = document.createElement('input');
@@ -2165,89 +2186,133 @@ export function createChatHistoryUI(appContext) {
     cbAuto.checked = !!prefs.autoBackupEnabled;
     const sliderAuto = document.createElement('span');
     sliderAuto.className = 'slider';
-    switchAuto.appendChild(cbAuto); switchAuto.appendChild(sliderAuto);
+    switchAuto.appendChild(cbAuto);
+    switchAuto.appendChild(sliderAuto);
     const autoText = document.createElement('span');
     autoText.className = 'switch-text';
     autoText.textContent = '启用自动增量备份';
-    rowAuto.appendChild(switchAuto); rowAuto.appendChild(autoText);
+    rowAuto.appendChild(autoText);
+    rowAuto.appendChild(switchAuto);
     container.appendChild(rowAuto);
 
-    // 备份间隔（分钟）
     // 调度模式
-    const scheduleRow = makeRow();
+    const scheduleRow = makeRow('backup-form-row--select');
     const scheduleLabel = document.createElement('label');
+    scheduleLabel.className = 'backup-form-label';
     scheduleLabel.textContent = '调度模式';
     const scheduleSelect = document.createElement('select');
-    const optHourly = document.createElement('option'); optHourly.value = 'hourly'; optHourly.textContent = '每N小时';
-    const optDaily = document.createElement('option'); optDaily.value = 'daily'; optDaily.textContent = '每天固定时间';
-    scheduleSelect.appendChild(optHourly); scheduleSelect.appendChild(optDaily);
+    const optHourly = document.createElement('option');
+    optHourly.value = 'hourly';
+    optHourly.textContent = '每N小时';
+    const optDaily = document.createElement('option');
+    optDaily.value = 'daily';
+    optDaily.textContent = '每天固定时间';
+    scheduleSelect.appendChild(optHourly);
+    scheduleSelect.appendChild(optDaily);
     scheduleSelect.value = prefs.autoBackupMode || 'hourly';
-    scheduleRow.appendChild(scheduleLabel); scheduleRow.appendChild(scheduleSelect);
+    scheduleRow.appendChild(scheduleLabel);
+    scheduleRow.appendChild(scheduleSelect);
     container.appendChild(scheduleRow);
 
     // 每N小时
-    const hourlyRow = makeRow();
-    const hourlyLabel = document.createElement('label'); hourlyLabel.textContent = '间隔（小时）';
-    const hourlyInput = document.createElement('input'); hourlyInput.type = 'number'; hourlyInput.min = '1'; hourlyInput.step = '1'; hourlyInput.value = String(prefs.autoBackupHourlyHours || 1);
-    hourlyRow.appendChild(hourlyLabel); hourlyRow.appendChild(hourlyInput);
+    const hourlyRow = makeRow('backup-form-row--inline');
+    const hourlyLabel = document.createElement('label');
+    hourlyLabel.className = 'backup-form-label';
+    hourlyLabel.textContent = '间隔（小时）';
+    const hourlyInput = document.createElement('input');
+    hourlyInput.type = 'number';
+    hourlyInput.min = '1';
+    hourlyInput.step = '1';
+    hourlyInput.value = String(prefs.autoBackupHourlyHours || 1);
+    hourlyRow.appendChild(hourlyLabel);
+    hourlyRow.appendChild(hourlyInput);
     container.appendChild(hourlyRow);
 
     // 每天固定时间
-    const dailyRow = makeRow();
-    const dailyLabel = document.createElement('label'); dailyLabel.textContent = '时间（每天）';
-    const dailyInput = document.createElement('input'); dailyInput.type = 'time'; dailyInput.value = prefs.autoBackupDailyTime || '02:00';
-    dailyRow.appendChild(dailyLabel); dailyRow.appendChild(dailyInput);
+    const dailyRow = makeRow('backup-form-row--inline');
+    const dailyLabel = document.createElement('label');
+    dailyLabel.className = 'backup-form-label';
+    dailyLabel.textContent = '时间（每天）';
+    const dailyInput = document.createElement('input');
+    dailyInput.type = 'time';
+    dailyInput.value = prefs.autoBackupDailyTime || '02:00';
+    dailyRow.appendChild(dailyLabel);
+    dailyRow.appendChild(dailyInput);
     container.appendChild(dailyRow);
 
     // 时间信息
     const infoRow = document.createElement('div');
-    infoRow.style.fontSize = '12px';
-    infoRow.style.opacity = '0.8';
+    infoRow.className = 'backup-panel-info';
     const fmt = (t) => t ? new Date(t).toLocaleString() : '从未';
     const computeNextTs = (p) => {
       const now = Date.now();
       if ((p.autoBackupMode || 'hourly') === 'daily') {
         const [hh, mm] = String(p.autoBackupDailyTime || '02:00').split(':').map(x => parseInt(x, 10) || 0);
-        const today = new Date(); today.setHours(hh, mm, 0, 0);
+        const today = new Date();
+        today.setHours(hh, mm, 0, 0);
         const todayTs = today.getTime();
-        if (now < todayTs) return todayTs; else return todayTs + 24 * 60 * 60 * 1000;
-      } else {
-        const hours = Math.max(1, Number(p.autoBackupHourlyHours || 1));
-        const last = Number(p.lastIncrementalBackupAt || 0);
-        const intervalMs = hours * 60 * 60 * 1000;
-        return last ? (last + intervalMs) : (now + intervalMs);
+        if (now < todayTs) {
+          return todayTs;
+        }
+        return todayTs + 24 * 60 * 60 * 1000;
       }
+      const hours = Math.max(1, Number(p.autoBackupHourlyHours || 1));
+      const last = Number(p.lastIncrementalBackupAt || 0);
+      const intervalMs = hours * 60 * 60 * 1000;
+      return last ? (last + intervalMs) : (now + intervalMs);
     };
     const nextTs = computeNextTs(prefs);
     infoRow.textContent = `上次增量：${fmt(prefs.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nextTs)}`;
     container.appendChild(infoRow);
 
     // 手动全量备份
-    const rowFull = makeRow();
+    const rowFull = makeRow('backup-form-row--actions');
     const fullBtn = document.createElement('button');
     fullBtn.textContent = '手动全量备份（重置增量）';
     const cbIgnoreImg = document.createElement('input');
     cbIgnoreImg.type = 'checkbox';
     const lbIgnoreImg = document.createElement('label');
-    lbIgnoreImg.textContent = '忽略图片';
+    lbIgnoreImg.className = 'backup-inline-checkbox';
+    const ignoreText = document.createElement('span');
+    ignoreText.textContent = '忽略图片';
+    lbIgnoreImg.appendChild(cbIgnoreImg);
+    lbIgnoreImg.appendChild(ignoreText);
     rowFull.appendChild(fullBtn);
-    rowFull.appendChild(cbIgnoreImg);
     rowFull.appendChild(lbIgnoreImg);
     container.appendChild(rowFull);
 
     // 下载路径说明
     const hint = document.createElement('div');
-    hint.style.fontSize = '12px';
-    hint.style.opacity = '0.8';
-    hint.style.marginTop = '6px';
+    hint.className = 'backup-panel-hint';
     hint.textContent = '备份将保存到 “下载/Cerebr/” 子目录。';
     container.appendChild(hint);
 
     // 事件：保存首选项
-    cbInc.addEventListener('change', async () => { const p = await saveBackupPreferencesDownloadsOnly({ incrementalDefault: !!cbInc.checked }); const nx = p.lastIncrementalBackupAt ? (p.lastIncrementalBackupAt + (Number(p.autoBackupIntervalMin||60)*60*1000)) : 0; infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`; });
-    cbImg.addEventListener('change', async () => { const p = await saveBackupPreferencesDownloadsOnly({ excludeImagesDefault: !!cbImg.checked }); const nx = p.lastIncrementalBackupAt ? (p.lastIncrementalBackupAt + (Number(p.autoBackupIntervalMin||60)*60*1000)) : 0; infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`; });
-    cbZip.addEventListener('change', async () => { const p = await saveBackupPreferencesDownloadsOnly({ compressDefault: !!cbZip.checked }); const nx = p.lastIncrementalBackupAt ? (p.lastIncrementalBackupAt + (Number(p.autoBackupIntervalMin||60)*60*1000)) : 0; infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`; });
-    cbAuto.addEventListener('change', async () => { const p = await saveBackupPreferencesDownloadsOnly({ autoBackupEnabled: !!cbAuto.checked }); const nx = computeNextTs(p); infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`; restartAutoBackupScheduler?.(); });
+    cbInc.addEventListener('change', async () => {
+      const p = await saveBackupPreferencesDownloadsOnly({ incrementalDefault: !!cbInc.checked });
+      const nx = computeNextTs(p);
+      infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`;
+    });
+    cbImg.addEventListener('change', async () => {
+      const p = await saveBackupPreferencesDownloadsOnly({ excludeImagesDefault: !!cbImg.checked });
+      const nx = computeNextTs(p);
+      infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`;
+    });
+    cbZip.addEventListener('change', async () => {
+      const p = await saveBackupPreferencesDownloadsOnly({ compressDefault: !!cbZip.checked });
+      const nx = computeNextTs(p);
+      infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`;
+    });
+    cbAuto.addEventListener('change', async () => {
+      const enabled = !!cbAuto.checked;
+      let p = await saveBackupPreferencesDownloadsOnly({ autoBackupEnabled: enabled });
+      if (enabled && !p.lastIncrementalBackupAt) {
+        p = await saveBackupPreferencesDownloadsOnly({ lastIncrementalBackupAt: Date.now() });
+      }
+      const nx = computeNextTs(p);
+      infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`;
+      restartAutoBackupScheduler?.();
+    });
     scheduleSelect.addEventListener('change', async () => {
       const mode = scheduleSelect.value === 'daily' ? 'daily' : 'hourly';
       hourlyRow.style.display = mode === 'hourly' ? 'flex' : 'none';
@@ -2256,17 +2321,27 @@ export function createChatHistoryUI(appContext) {
       const nx = computeNextTs(p); infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`; restartAutoBackupScheduler?.();
     });
     hourlyInput.addEventListener('change', async () => {
-      const v = Math.max(1, Number(hourlyInput.value)||1); hourlyInput.value = String(v);
+      const v = Math.max(1, Number(hourlyInput.value) || 1);
+      hourlyInput.value = String(v);
       const p = await saveBackupPreferencesDownloadsOnly({ autoBackupHourlyHours: v });
-      const nx = computeNextTs(p); infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`; restartAutoBackupScheduler?.();
+      const nx = computeNextTs(p);
+      infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`;
+      restartAutoBackupScheduler?.();
     });
     dailyInput.addEventListener('change', async () => {
       const t = dailyInput.value || '02:00';
       const p = await saveBackupPreferencesDownloadsOnly({ autoBackupDailyTime: t });
-      const nx = computeNextTs(p); infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`; restartAutoBackupScheduler?.();
+      const nx = computeNextTs(p);
+      infoRow.textContent = `上次增量：${fmt(p.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`;
+      restartAutoBackupScheduler?.();
     });
     fullBtn.addEventListener('click', async () => {
       await backupConversations({ mode: 'full', excludeImages: !!cbIgnoreImg.checked });
+      try {
+        const updated = await loadBackupPreferencesDownloadsOnly();
+        const nx = computeNextTs(updated);
+        infoRow.textContent = `上次增量：${fmt(updated.lastIncrementalBackupAt)} ｜ 下次预计：${fmt(nx)}`;
+      } catch (_) {}
     });
 
     // 初始化勾选状态（从存储读取）

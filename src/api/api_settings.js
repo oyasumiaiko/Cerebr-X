@@ -480,7 +480,7 @@ export function createApiManager(appContext) {
     streamingHeader.appendChild(streamingHint);
 
     const streamingRow = document.createElement('div');
-    streamingRow.className = 'switch-row';
+    streamingRow.className = 'switch-row backup-form-row';
     const switchLabel = document.createElement('label');
     switchLabel.className = 'switch';
     const streamingToggle = document.createElement('input');

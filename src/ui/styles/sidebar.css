@@ -50,6 +50,25 @@ input, textarea, select {
     --cerebr-code-color: #24292e;
     --cerebr-code-border: #e1e4e8;
     --cerebr-inline-code-bg: rgba(0, 0, 0, 0.1);
+
+    /* 控件统一样式变量 */
+    --cerebr-control-bg: color-mix(in srgb, var(--cerebr-bg-color) 65%, #ffffff 35%);
+    --cerebr-control-bg-hover: color-mix(in srgb, var(--cerebr-bg-color) 55%, #ffffff 45%);
+    --cerebr-control-bg-active: color-mix(in srgb, var(--cerebr-bg-color) 45%, #ffffff 55%);
+    --cerebr-control-border: color-mix(in srgb, var(--cerebr-text-color) 18%, transparent);
+    --cerebr-control-border-hover: color-mix(in srgb, var(--cerebr-text-color) 28%, transparent);
+    --cerebr-control-radius: 10px;
+    --cerebr-control-padding: 8px 12px;
+    --cerebr-control-inset-shadow: inset 0 1px 2px rgba(15, 15, 15, 0.08);
+    --cerebr-control-focus-ring: 0 0 0 3px color-mix(in srgb, var(--cerebr-highlight) 25%, transparent);
+
+    --cerebr-button-bg: color-mix(in srgb, var(--cerebr-highlight) 85%, rgba(255, 255, 255, 0.08));
+    --cerebr-button-hover-bg: color-mix(in srgb, var(--cerebr-highlight) 90%, rgba(0, 0, 0, 0.08));
+    --cerebr-button-active-bg: color-mix(in srgb, var(--cerebr-highlight) 78%, rgba(0, 0, 0, 0.18));
+    --cerebr-button-shadow: 0 10px 24px rgba(15, 15, 15, 0.12);
+    --cerebr-button-color: #ffffff;
+    --cerebr-button-disabled-bg: color-mix(in srgb, var(--cerebr-highlight) 30%, rgba(255, 255, 255, 0.6));
+    --cerebr-button-disabled-color: rgba(255, 255, 255, 0.7);
 }
 
 /* 深色主题变量 */
@@ -70,6 +89,22 @@ input, textarea, select {
     --cerebr-code-color: #abb2bf;
     --cerebr-code-border: transparent;
     --cerebr-inline-code-bg: rgba(255, 255, 255, 0.1);
+
+    /* 深色控件覆盖 */
+    --cerebr-control-bg: color-mix(in srgb, var(--cerebr-bg-color) 60%, rgba(255, 255, 255, 0.04));
+    --cerebr-control-bg-hover: color-mix(in srgb, var(--cerebr-bg-color) 50%, rgba(255, 255, 255, 0.08));
+    --cerebr-control-bg-active: color-mix(in srgb, var(--cerebr-bg-color) 40%, rgba(255, 255, 255, 0.1));
+    --cerebr-control-border: color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+    --cerebr-control-border-hover: color-mix(in srgb, var(--cerebr-border-color) 95%, transparent);
+    --cerebr-control-inset-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+    --cerebr-control-focus-ring: 0 0 0 3px color-mix(in srgb, var(--cerebr-highlight) 30%, transparent);
+
+    --cerebr-button-bg: color-mix(in srgb, var(--cerebr-highlight) 70%, rgba(0, 0, 0, 0.35));
+    --cerebr-button-hover-bg: color-mix(in srgb, var(--cerebr-highlight) 82%, rgba(0, 0, 0, 0.25));
+    --cerebr-button-active-bg: color-mix(in srgb, var(--cerebr-highlight) 60%, rgba(0, 0, 0, 0.45));
+    --cerebr-button-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+    --cerebr-button-disabled-bg: color-mix(in srgb, var(--cerebr-highlight) 28%, rgba(0, 0, 0, 0.55));
+    --cerebr-button-disabled-color: color-mix(in srgb, #ffffff 65%, var(--cerebr-text-color) 35%);
 }
 
 /* 全局滚动条样式（统一定义在 :root/html/body） */
@@ -197,6 +232,135 @@ html:not(.has-custom-background-image)::before {
 html.standalone-mode,
 body.standalone-mode {
     background-color: var(--cerebr-bg-color);
+}
+
+/* 全局控件统一样式 */
+button,
+input[type="text"],
+input[type="number"],
+input[type="time"],
+input[type="url"],
+input[type="search"],
+input[type="password"],
+input[type="email"],
+select,
+textarea {
+    font: inherit;
+    color: var(--cerebr-text-color);
+    border-radius: var(--cerebr-control-radius);
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, transform 0.1s ease;
+    box-sizing: border-box;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="time"],
+input[type="url"],
+input[type="search"],
+input[type="password"],
+input[type="email"],
+select,
+textarea {
+    background: var(--cerebr-control-bg);
+    border: 1px solid var(--cerebr-control-border);
+    padding: var(--cerebr-control-padding);
+    box-shadow: var(--cerebr-control-inset-shadow);
+    min-height: 36px;
+}
+
+input[type="text"]:hover,
+input[type="number"]:hover,
+input[type="time"]:hover,
+input[type="url"]:hover,
+input[type="search"]:hover,
+input[type="password"]:hover,
+input[type="email"]:hover,
+select:hover,
+textarea:hover {
+    background: var(--cerebr-control-bg-hover);
+    border-color: var(--cerebr-control-border-hover);
+}
+
+input[type="text"]:focus-visible,
+input[type="number"]:focus-visible,
+input[type="time"]:focus-visible,
+input[type="url"]:focus-visible,
+input[type="search"]:focus-visible,
+input[type="password"]:focus-visible,
+input[type="email"]:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: none;
+    border-color: var(--cerebr-highlight);
+    box-shadow: var(--cerebr-control-focus-ring);
+    background: var(--cerebr-control-bg-hover);
+}
+
+input[type="text"]:disabled,
+input[type="number"]:disabled,
+input[type="time"]:disabled,
+input[type="url"]:disabled,
+input[type="search"]:disabled,
+input[type="password"]:disabled,
+input[type="email"]:disabled,
+select:disabled,
+textarea:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: var(--cerebr-control-bg);
+    box-shadow: none;
+}
+
+textarea {
+    resize: vertical;
+    min-height: 90px;
+}
+
+select {
+    appearance: none;
+    background-image:
+        linear-gradient(45deg, transparent 50%, currentColor 50%),
+        linear-gradient(135deg, currentColor 50%, transparent 50%),
+        linear-gradient(to right, transparent, transparent);
+    background-position:
+        calc(100% - 18px) calc(50% - 4px),
+        calc(100% - 12px) calc(50% - 4px),
+        calc(100% - 2.2em) 0.5em;
+    background-size: 6px 6px, 6px 6px, 1px 1.6em;
+    background-repeat: no-repeat;
+    padding-right: 2.5em;
+}
+
+button {
+    border: 1px solid transparent;
+    background: var(--cerebr-button-bg);
+    color: var(--cerebr-button-color);
+    padding: var(--cerebr-control-padding);
+    box-shadow: var(--cerebr-button-shadow);
+    cursor: pointer;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 38px;
+}
+
+button:hover {
+    background: var(--cerebr-button-hover-bg);
+}
+
+button:active {
+    background: var(--cerebr-button-active-bg);
+    transform: translateY(1px);
+}
+
+button:disabled {
+    background: var(--cerebr-button-disabled-bg);
+    color: var(--cerebr-button-disabled-color);
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
 }
 
 body.standalone-mode {
@@ -697,9 +861,10 @@ body.standalone-mode #empty-state-repomix {
 /* 开关样式 */
 .switch {
     position: relative;
-    display: inline-block;
-    width: 36px;
-    height: 20px;
+    display: inline-flex;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
 }
 
 .switch input {
@@ -711,34 +876,37 @@ body.standalone-mode #empty-state-repomix {
 .slider {
     position: absolute;
     cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(128, 128, 128, 0.3);
-    transition: .3s;
-    border-radius: 20px;
+    inset: 0;
+    background-color: color-mix(in srgb, var(--cerebr-text-color) 18%, transparent);
+    transition: background-color 0.25s ease;
+    border-radius: 999px;
 }
 
-.slider:before {
+.slider::before {
     position: absolute;
     content: "";
-    height: 16px;
-    width: 16px;
+    height: 20px;
+    width: 20px;
     left: 2px;
-    bottom: 2px;
-    background-color: #fff;
-    transition: .3s;
+    top: 2px;
+    background-color: #ffffff;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
     border-radius: 50%;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 10px rgba(15, 15, 15, 0.25);
+}
+
+.switch input:focus-visible + .slider {
+    outline: none;
+    box-shadow: var(--cerebr-control-focus-ring);
 }
 
 input:checked + .slider {
-    background-color: var(--cerebr-icon-color);
+    background-color: var(--cerebr-highlight);
 }
 
-input:checked + .slider:before {
-    transform: translateX(24px);
+input:checked + .slider::before {
+    transform: translateX(20px);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.2);
 }
 
 /* API设置页面样式 */
@@ -1110,14 +1278,120 @@ input:checked + .slider:before {
 
 /* 更美观的表单开关行 */
 .switch-row {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 4px 0 8px 0;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 14px;
+    background: var(--cerebr-control-bg);
+    border: 1px solid var(--cerebr-control-border);
+    border-radius: var(--cerebr-control-radius);
+    box-shadow: var(--cerebr-control-inset-shadow);
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
+
+.switch-row:hover {
+    background: var(--cerebr-control-bg-hover);
+    border-color: var(--cerebr-control-border-hover);
+}
+
 .switch-row .switch-text {
+    font-size: 13px;
+    line-height: 1.4;
+    flex: 1;
+    color: color-mix(in srgb, var(--cerebr-text-color) 92%, transparent);
+}
+
+.backup-settings-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px;
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--cerebr-bg-color) 82%, rgba(255, 255, 255, 0.08));
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 80%, transparent);
+    box-shadow: 0 18px 36px rgba(15, 15, 15, 0.12);
+}
+
+.backup-settings-panel > * {
+    margin: 0 !important;
+}
+
+.backup-panel-title {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: color-mix(in srgb, var(--cerebr-text-color) 95%, transparent);
+    padding: 4px 2px;
+}
+
+.backup-form-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    border-radius: var(--cerebr-control-radius);
+    background: var(--cerebr-control-bg);
+    border: 1px solid var(--cerebr-control-border);
+    box-shadow: var(--cerebr-control-inset-shadow);
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.backup-form-row:hover {
+    background: var(--cerebr-control-bg-hover);
+    border-color: var(--cerebr-control-border-hover);
+}
+
+.backup-form-row--inline input,
+.backup-form-row--inline select {
+    flex: 1;
+}
+
+.backup-form-row--select select {
+    flex: 1;
+}
+
+.backup-form-row--actions {
+    justify-content: space-between;
+    gap: 18px;
+}
+
+.backup-form-label {
+    min-width: 96px;
+    font-size: 13px;
+    color: color-mix(in srgb, var(--cerebr-text-color) 82%, transparent);
+}
+
+.backup-panel-info {
+    font-size: 12px;
+    color: color-mix(in srgb, var(--cerebr-text-color) 78%, transparent);
+    background: color-mix(in srgb, var(--cerebr-control-bg) 65%, transparent);
+    padding: 10px 14px;
+    border-radius: var(--cerebr-control-radius);
+    border: 1px dashed color-mix(in srgb, var(--cerebr-border-color) 82%, transparent);
+    box-shadow: var(--cerebr-control-inset-shadow);
+}
+
+.backup-panel-hint {
     font-size: 12px;
     opacity: 0.8;
+    padding: 0 4px 4px;
+    color: color-mix(in srgb, var(--cerebr-text-color) 72%, transparent);
+}
+
+.backup-inline-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: color-mix(in srgb, var(--cerebr-text-color) 82%, transparent);
+}
+
+.backup-inline-checkbox input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--cerebr-highlight);
 }
 
 /* 添加输入框包装容器样式 */
