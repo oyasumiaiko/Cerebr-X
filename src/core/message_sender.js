@@ -585,14 +585,22 @@ export function createMessageSender(appContext) {
         }
         const allConfigs = (apiManager.getAllConfigs && apiManager.getAllConfigs()) || [];
         let label = '';
+        let matchedConfig = null;
         if (nodeLike.apiUuid) {
-          const cfg = allConfigs.find(c => c.id === nodeLike.apiUuid);
-          if (cfg && cfg.modelName) label = cfg.modelName;
+          matchedConfig = allConfigs.find(c => c.id === nodeLike.apiUuid) || null;
+        }
+        if (!label && matchedConfig && typeof matchedConfig.displayName === 'string' && matchedConfig.displayName.trim()) {
+          label = matchedConfig.displayName.trim();
+        }
+        if (!label && matchedConfig && typeof matchedConfig.modelName === 'string' && matchedConfig.modelName.trim()) {
+          label = matchedConfig.modelName.trim();
         }
         if (!label) label = (nodeLike.apiDisplayName || '').trim();
         if (!label) label = (nodeLike.apiModelId || '').trim();
         footer.textContent = label || '';
-        footer.title = `API uuid: ${nodeLike.apiUuid || '-'} | displayName: ${nodeLike.apiDisplayName || '-'} | model: ${nodeLike.apiModelId || '-'}`;
+        const titleDisplayName = matchedConfig?.displayName || nodeLike.apiDisplayName || '-';
+        const titleModelId = matchedConfig?.modelName || nodeLike.apiModelId || '-';
+        footer.title = `API uuid: ${nodeLike.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}`;
       } catch (e) {
         console.warn('渲染API footer失败:', e);
       }
@@ -857,14 +865,22 @@ export function createMessageSender(appContext) {
         }
         const allConfigs = (apiManager.getAllConfigs && apiManager.getAllConfigs()) || [];
         let label = '';
+        let matchedConfig = null;
         if (nodeLike.apiUuid) {
-          const cfg = allConfigs.find(c => c.id === nodeLike.apiUuid);
-          if (cfg && cfg.modelName) label = cfg.modelName;
+          matchedConfig = allConfigs.find(c => c.id === nodeLike.apiUuid) || null;
+        }
+        if (!label && matchedConfig && typeof matchedConfig.displayName === 'string' && matchedConfig.displayName.trim()) {
+          label = matchedConfig.displayName.trim();
+        }
+        if (!label && matchedConfig && typeof matchedConfig.modelName === 'string' && matchedConfig.modelName.trim()) {
+          label = matchedConfig.modelName.trim();
         }
         if (!label) label = (nodeLike.apiDisplayName || '').trim();
         if (!label) label = (nodeLike.apiModelId || '').trim();
         footer.textContent = label || '';
-        footer.title = `API uuid: ${nodeLike.apiUuid || '-'} | displayName: ${nodeLike.apiDisplayName || '-'} | model: ${nodeLike.apiModelId || '-'}`;
+        const titleDisplayName = matchedConfig?.displayName || nodeLike.apiDisplayName || '-';
+        const titleModelId = matchedConfig?.modelName || nodeLike.apiModelId || '-';
+        footer.title = `API uuid: ${nodeLike.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}`;
       } catch (e) {
         console.warn('渲染API footer失败:', e);
       }

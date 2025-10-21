@@ -567,14 +567,22 @@ export function createChatHistoryUI(appContext) {
         const footer = messageElem.querySelector('.api-footer') || (() => { const f = document.createElement('div'); f.className = 'api-footer'; messageElem.appendChild(f); return f; })();
         const allConfigs = appContext.services.apiManager.getAllConfigs?.() || [];
         let label = '';
+        let matchedConfig = null;
         if (msg.apiUuid) {
-          const cfg = allConfigs.find(c => c.id === msg.apiUuid);
-          if (cfg && cfg.modelName) label = cfg.modelName;
+          matchedConfig = allConfigs.find(c => c.id === msg.apiUuid) || null;
+        }
+        if (!label && matchedConfig && typeof matchedConfig.displayName === 'string' && matchedConfig.displayName.trim()) {
+          label = matchedConfig.displayName.trim();
+        }
+        if (!label && matchedConfig && typeof matchedConfig.modelName === 'string' && matchedConfig.modelName.trim()) {
+          label = matchedConfig.modelName.trim();
         }
         if (!label) label = (msg.apiDisplayName || '').trim();
         if (!label) label = (msg.apiModelId || '').trim();
         footer.textContent = (role === 'ai') ? (label || '') : footer.textContent;
-        footer.title = (role === 'ai') ? `API uuid: ${msg.apiUuid || '-'} | displayName: ${msg.apiDisplayName || '-'} | model: ${msg.apiModelId || '-'}` : footer.title;
+        const titleDisplayName = matchedConfig?.displayName || msg.apiDisplayName || '-';
+        const titleModelId = matchedConfig?.modelName || msg.apiModelId || '-';
+        footer.title = (role === 'ai') ? `API uuid: ${msg.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}` : footer.title;
       } catch (_) {}
     });
     // 恢复加载的对话历史到聊天管理器
