@@ -546,10 +546,32 @@ class CerebrSidebar {
             const payload = event.data.payload || {};
             const result = performNormalizedClick(payload.x, payload.y);
             iframeEl.contentWindow.postMessage({
-              type: 'COMPUTER_USE_CLICK_RESULT',
+              type: 'COMPUTER_USE_ACTION_RESULT',
               requestId: event.data.requestId,
               ...result
             }, '*');
+          })();
+          break;
+        case 'PERFORM_COMPUTER_USE_ACTION':
+          (async () => {
+            const iframeEl = this.sidebar?.querySelector('.cerebr-sidebar__iframe');
+            if (!iframeEl) return;
+            try {
+              const result = await performComputerUseAction(event.data.action);
+              iframeEl.contentWindow.postMessage({
+                type: 'COMPUTER_USE_ACTION_RESULT',
+                requestId: event.data.requestId,
+                ...result,
+              }, '*');
+            } catch (error) {
+              console.error('执行电脑操作动作失败:', error);
+              iframeEl.contentWindow.postMessage({
+                type: 'COMPUTER_USE_ACTION_RESULT',
+                requestId: event.data.requestId,
+                success: false,
+                error: error?.message || '执行电脑操作动作失败',
+              }, '*');
+            }
           })();
           break;
       }
@@ -1421,43 +1443,71 @@ async function extractChaptersFromPDFData(completeData) {
  * 捕获当前可见标签页的屏幕截图并发送到侧边栏。
  * 截图前会先隐藏侧边栏，并在等待两帧后再进行截图，最后恢复侧边栏显示。
  */
-function captureAndDropScreenshot() {
-  const sidebarVisibility = sidebar.sidebar.style.visibility; // 保存侧边栏原始可见状态
-  sidebar.sidebar.style.transition = 'none'; // 设置侧边栏无过渡效果
-  sidebar.sidebar.style.visibility = 'hidden'; // 立即隐藏侧边栏
-
-  /**
-   * 递归地执行 requestAnimationFrame，并在指定次数后执行截屏操作。
-   * @param {number} waitFramesCount 递归层级，控制等待的帧数。
-   */
-  function waitCaptureWithAnimationFrame(waitFramesCount) {
-    requestAnimationFrame(() => {
-      if (waitFramesCount > 0) {
-        // 递归调用，减少递归层级
-        waitCaptureWithAnimationFrame(waitFramesCount - 1);
-      } else {
-        // 达到指定递归层级后，执行截屏操作
-        chrome.runtime.sendMessage({ action: 'capture_visible_tab' }, (response) => {
-          sidebar.sidebar.style.visibility = sidebarVisibility; // 截图完成后恢复侧边栏显示
-          sidebar.sidebar.style.transition = '';
-          const iframe = sidebar.sidebar?.querySelector('.cerebr-sidebar__iframe');
-          if (response && response.success && response.dataURL) {
-            console.log('页面截图完成，发送到侧边栏');
-            if (iframe) {
-              iframe.contentWindow.postMessage({
-                type: 'DROP_IMAGE',
-                imageData: { data: response.dataURL, name: 'page-screenshot.png' },
-              }, '*');
-            }
-          } else {
-            console.error('屏幕截图失败:', response && response.error);
-          }
-        });
+function withSidebarHidden(task) {
+  const sidebarElement = sidebar?.sidebar;
+  const original = sidebarElement
+    ? {
+        visibility: sidebarElement.style.visibility,
+        transition: sidebarElement.style.transition,
+        pointerEvents: sidebarElement.style.pointerEvents
       }
-    });
+    : null;
+
+  if (sidebarElement) {
+    sidebarElement.style.transition = 'none';
+    sidebarElement.style.visibility = 'hidden';
+    sidebarElement.style.pointerEvents = 'none';
   }
 
-  waitCaptureWithAnimationFrame(5); // 初始调用，设置递归层级为 5，实现等待五帧的效果
+  const restore = () => {
+    if (sidebarElement && original) {
+      sidebarElement.style.visibility = original.visibility || '';
+      sidebarElement.style.transition = original.transition || '';
+      sidebarElement.style.pointerEvents = original.pointerEvents || '';
+    }
+  };
+
+  try {
+    const result = task();
+    if (result && typeof result.then === 'function') {
+      return result.finally(restore);
+    }
+    restore();
+    return result;
+  } catch (error) {
+    restore();
+    throw error;
+  }
+}
+
+function captureAndDropScreenshot() {
+  return withSidebarHidden(() => new Promise((resolve) => {
+    function waitCaptureWithAnimationFrame(waitFramesCount) {
+      requestAnimationFrame(() => {
+        if (waitFramesCount > 0) {
+          waitCaptureWithAnimationFrame(waitFramesCount - 1);
+        } else {
+          chrome.runtime.sendMessage({ action: 'capture_visible_tab' }, (response) => {
+            const iframe = sidebar.sidebar?.querySelector('.cerebr-sidebar__iframe');
+            if (response && response.success && response.dataURL) {
+              console.log('页面截图完成，发送到侧边栏');
+              if (iframe) {
+                iframe.contentWindow.postMessage({
+                  type: 'DROP_IMAGE',
+                  imageData: { data: response.dataURL, name: 'page-screenshot.png' },
+                }, '*');
+              }
+            } else {
+              console.error('屏幕截图失败:', response && response.error);
+            }
+            resolve();
+          });
+        }
+      });
+    }
+
+    waitCaptureWithAnimationFrame(5);
+  }));
 }
 
 /**
@@ -1465,28 +1515,11 @@ function captureAndDropScreenshot() {
  * @returns {Promise<string>} dataURL
  */
 function captureScreenshotForComputerUse() {
-  return new Promise((resolve, reject) => {
+  return withSidebarHidden(() => new Promise((resolve, reject) => {
     try {
-      const sidebarElement = sidebar?.sidebar;
-      const originalVisibility = sidebarElement?.style?.visibility || '';
-      const originalTransition = sidebarElement?.style?.transition || '';
-
-      const restoreSidebar = () => {
-        if (sidebarElement) {
-          sidebarElement.style.visibility = originalVisibility;
-          sidebarElement.style.transition = originalTransition;
-        }
-      };
-
-      if (sidebarElement) {
-        sidebarElement.style.transition = 'none';
-        sidebarElement.style.visibility = 'hidden';
-      }
-
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           chrome.runtime.sendMessage({ action: 'capture_visible_tab' }, (response) => {
-            restoreSidebar();
             if (chrome.runtime.lastError) {
               reject(new Error(chrome.runtime.lastError.message));
               return;
@@ -1502,7 +1535,7 @@ function captureScreenshotForComputerUse() {
     } catch (error) {
       reject(error);
     }
-  });
+  }));
 }
 
 function buildCssSelector(element) {
@@ -1561,48 +1594,354 @@ function flashClickOverlay(clientX, clientY) {
   }
 }
 
-function performNormalizedClick(normalizedX, normalizedY) {
+function getViewportPoint(normalizedX, normalizedY) {
   const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
   if (!viewportWidth || !viewportHeight) {
-    return { success: false, error: '无法获取视口尺寸' };
+    return null;
   }
   const clientX = (Number(normalizedX) / 1000) * viewportWidth;
   const clientY = (Number(normalizedY) / 1000) * viewportHeight;
-  const sidebarElement = sidebar?.sidebar;
-  const originalPointerEvents = sidebarElement ? sidebarElement.style.pointerEvents : '';
-  if (sidebarElement) {
-    sidebarElement.style.pointerEvents = 'none';
-  }
-  let target;
-  try {
-    target = document.elementFromPoint(clientX, clientY);
-  } finally {
-    if (sidebarElement) {
-      sidebarElement.style.pointerEvents = originalPointerEvents || '';
+  return { clientX, clientY };
+}
+
+function performNormalizedClick(normalizedX, normalizedY) {
+  return withSidebarHidden(() => {
+    const point = getViewportPoint(normalizedX, normalizedY);
+    if (!point) {
+      return { success: false, error: '无法获取视口尺寸' };
     }
+    const { clientX, clientY } = point;
+    const target = document.elementFromPoint(clientX, clientY);
+    if (!target) {
+      return { success: false, error: '未找到可点击元素' };
+    }
+    const eventInit = {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+      view: window,
+      button: 0
+    };
+    try {
+      target.dispatchEvent(new MouseEvent('mousemove', eventInit));
+      target.dispatchEvent(new MouseEvent('mousedown', eventInit));
+      target.dispatchEvent(new MouseEvent('mouseup', eventInit));
+      target.dispatchEvent(new MouseEvent('click', eventInit));
+      flashClickOverlay(clientX, clientY);
+      return { success: true, selector: buildCssSelector(target) };
+    } catch (error) {
+      console.error('执行归一化点击失败:', error);
+      return { success: false, error: error.message || '执行点击失败' };
+    }
+  });
+}
+
+function performHoverAt(normalizedX, normalizedY) {
+  return withSidebarHidden(() => {
+    const point = getViewportPoint(normalizedX, normalizedY);
+    if (!point) {
+      return { success: false, error: '无法获取视口尺寸' };
+    }
+    const { clientX, clientY } = point;
+    const target = document.elementFromPoint(clientX, clientY);
+    if (!target) {
+      return { success: false, error: '未找到目标元素' };
+    }
+    const eventInit = {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+      view: window
+    };
+    try {
+      target.dispatchEvent(new MouseEvent('mousemove', eventInit));
+      target.dispatchEvent(new MouseEvent('mouseover', eventInit));
+      target.dispatchEvent(new MouseEvent('mouseenter', eventInit));
+      return { success: true, selector: buildCssSelector(target) };
+    } catch (error) {
+      console.error('执行 hover 失败:', error);
+      return { success: false, error: error.message || '执行 hover 失败' };
+    }
+  });
+}
+
+function setValueForElement(element, text, clearBefore) {
+  if (!element) return false;
+  const tag = element.tagName?.toLowerCase();
+  const isInputLike = tag === 'input' || tag === 'textarea';
+  const isContentEditable = element.isContentEditable;
+  if (!isInputLike && !isContentEditable) {
+    try {
+      element.focus();
+    } catch (_) {}
+    return false;
   }
-  if (!target) {
-    return { success: false, error: '未找到可点击元素' };
+
+  const valueSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value')?.set;
+  if (isInputLike) {
+    const previousValue = element.value;
+    const nextValue = clearBefore ? text : `${previousValue || ''}${text}`;
+    if (valueSetter) {
+      valueSetter.call(element, nextValue);
+    } else {
+      element.value = nextValue;
+    }
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  } else if (isContentEditable) {
+    if (clearBefore) {
+      element.textContent = '';
+    }
+    element.focus();
+    document.execCommand('insertText', false, text);
   }
-  const eventInit = {
-    bubbles: true,
-    cancelable: true,
-    clientX,
-    clientY,
-    view: window,
-    button: 0
-  };
-  try {
-    target.dispatchEvent(new MouseEvent('mousemove', eventInit));
-    target.dispatchEvent(new MouseEvent('mousedown', eventInit));
-    target.dispatchEvent(new MouseEvent('mouseup', eventInit));
-    target.dispatchEvent(new MouseEvent('click', eventInit));
-    flashClickOverlay(clientX, clientY);
-    return { success: true, selector: buildCssSelector(target) };
-  } catch (error) {
-    console.error('执行归一化点击失败:', error);
-    return { success: false, error: error.message || '执行点击失败' };
+  return true;
+}
+
+function performTypeTextAt(args = {}) {
+  const { x, y, text = '', press_enter = true, clear_before_typing = true } = args;
+  if (typeof x !== 'number' || typeof y !== 'number') {
+    return { success: false, error: 'type_text_at 缺少坐标参数' };
+  }
+  return withSidebarHidden(() => {
+    const point = getViewportPoint(x, y);
+    if (!point) {
+      return { success: false, error: '无法获取视口尺寸' };
+    }
+    const { clientX, clientY } = point;
+    const target = document.elementFromPoint(clientX, clientY);
+    if (!target) {
+      return { success: false, error: '未找到目标元素' };
+    }
+    try {
+      target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX, clientY }));
+      target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX, clientY }));
+      target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX, clientY }));
+      target.focus?.();
+      setValueForElement(target, text, clear_before_typing !== false);
+      if (press_enter !== false) {
+        const active = document.activeElement || target;
+        ['keydown', 'keypress', 'keyup'].forEach(type => {
+          active.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', bubbles: true }));
+        });
+      }
+      return { success: true, selector: buildCssSelector(target) };
+    } catch (error) {
+      console.error('执行 type_text_at 失败:', error);
+      return { success: false, error: error.message || '输入文本失败' };
+    }
+  });
+}
+
+function parseKeySequence(keys) {
+  if (!keys) return [];
+  return String(keys)
+    .split(/\s*\+\s*/)
+    .map(k => k.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function performKeyCombination(args = {}) {
+  const sequence = parseKeySequence(args.keys);
+  if (!sequence.length) {
+    return { success: false, error: 'key_combination 缺少 keys 参数' };
+  }
+  return withSidebarHidden(() => {
+    const active = document.activeElement || document.body;
+    const modifiers = ['control', 'ctrl', 'alt', 'shift', 'meta', 'command'];
+    const down = new Set();
+    const normalizeKey = (key) => {
+      if (!key) return '';
+      if (key === 'ctrl') return 'Control';
+      if (key === 'command') return 'Meta';
+      const lower = key.toLowerCase();
+      if (modifiers.includes(lower)) {
+        return lower.charAt(0).toUpperCase() + lower.slice(1);
+      }
+      if (lower.length === 1) return lower;
+      switch (lower) {
+        case 'enter':
+          return 'Enter';
+        case 'escape':
+        case 'esc':
+          return 'Escape';
+        case 'tab':
+          return 'Tab';
+        case 'space':
+        case 'spacebar':
+          return ' '; // Space key
+        default:
+          return lower.charAt(0).toUpperCase() + lower.slice(1);
+      }
+    };
+    try {
+      sequence.forEach(key => {
+        const normalized = normalizeKey(key);
+        const eventInit = { key: normalized, code: normalized, bubbles: true };
+        modifiers.forEach(mod => { if (down.has(mod)) eventInit[`${mod}Key`] = true; });
+        active.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+        down.add(key);
+      });
+      [...sequence].reverse().forEach(key => {
+        const normalized = normalizeKey(key);
+        const eventInit = { key: normalized, code: normalized, bubbles: true };
+        modifiers.forEach(mod => { if (down.has(mod)) eventInit[`${mod}Key`] = true; });
+        active.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+        down.delete(key);
+      });
+      return { success: true };
+    } catch (error) {
+      console.error('执行快捷键失败:', error);
+      return { success: false, error: error.message || '执行快捷键失败' };
+    }
+  });
+}
+
+function performScrollDocument(direction = 'down') {
+  const distance = 800;
+  const normalized = String(direction || '').toLowerCase();
+  return withSidebarHidden(() => {
+    switch (normalized) {
+      case 'up':
+        window.scrollBy({ top: -distance, behavior: 'smooth' });
+        break;
+      case 'down':
+        window.scrollBy({ top: distance, behavior: 'smooth' });
+        break;
+      case 'left':
+        window.scrollBy({ left: -distance, behavior: 'smooth' });
+        break;
+      case 'right':
+        window.scrollBy({ left: distance, behavior: 'smooth' });
+        break;
+      default:
+        return { success: false, error: `未知的滚动方向: ${direction}` };
+    }
+    return { success: true };
+  });
+}
+
+function performScrollAt(args = {}) {
+  const { x, y, direction = 'down', magnitude = 800 } = args;
+  const point = getViewportPoint(x, y);
+  if (!point) {
+    return { success: false, error: '无法获取视口尺寸' };
+  }
+  return withSidebarHidden(() => {
+    const { clientX, clientY } = point;
+    const target = document.elementFromPoint(clientX, clientY);
+    if (!target) {
+      return { success: false, error: '未找到目标元素' };
+    }
+    const delta = Number(magnitude) || 800;
+    try {
+      const dir = String(direction || '').toLowerCase();
+      const applyScroll = (dx, dy) => {
+        if (typeof target.scrollBy === 'function') {
+          target.scrollBy(dx, dy);
+        } else {
+          target.scrollLeft = (target.scrollLeft || 0) + dx;
+          target.scrollTop = (target.scrollTop || 0) + dy;
+        }
+      };
+      switch (dir) {
+        case 'up':
+          applyScroll(0, -delta);
+          break;
+        case 'down':
+          applyScroll(0, delta);
+          break;
+        case 'left':
+          applyScroll(-delta, 0);
+          break;
+        case 'right':
+          applyScroll(delta, 0);
+          break;
+        default:
+          return { success: false, error: `未知的滚动方向: ${direction}` };
+      }
+      return { success: true, selector: buildCssSelector(target) };
+    } catch (error) {
+      console.error('局部滚动失败:', error);
+      return { success: false, error: error.message || '局部滚动失败' };
+    }
+  });
+}
+
+function performDragAndDrop(args = {}) {
+  const { x, y, destination_x, destination_y } = args;
+  const startPoint = getViewportPoint(x, y);
+  const endPoint = getViewportPoint(destination_x, destination_y);
+  if (!startPoint || !endPoint) {
+    return { success: false, error: '拖拽坐标无效' };
+  }
+  return withSidebarHidden(() => {
+    const source = document.elementFromPoint(startPoint.clientX, startPoint.clientY);
+    if (!source) {
+      return { success: false, error: '未找到拖拽起始元素' };
+    }
+    try {
+      const mousedown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: startPoint.clientX, clientY: startPoint.clientY, button: 0 });
+      source.dispatchEvent(mousedown);
+      const mousemove = new MouseEvent('mousemove', { bubbles: true, cancelable: true, clientX: endPoint.clientX, clientY: endPoint.clientY, buttons: 1 });
+      document.dispatchEvent(mousemove);
+      const mouseup = new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: endPoint.clientX, clientY: endPoint.clientY, button: 0 });
+      document.dispatchEvent(mouseup);
+      return { success: true, selector: buildCssSelector(source) };
+    } catch (error) {
+      console.error('拖拽失败:', error);
+      return { success: false, error: error.message || '拖拽失败' };
+    }
+  });
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function performComputerUseAction(action = {}) {
+  const name = action?.name;
+  const args = action?.args || {};
+  switch (name) {
+    case 'open_web_browser':
+      return { success: true, info: '浏览器已处于激活状态' };
+    case 'wait_5_seconds':
+      await delay(5000);
+      return { success: true };
+    case 'go_back':
+      setTimeout(() => window.history.back(), 0);
+      return { success: true, navigation: true };
+    case 'go_forward':
+      setTimeout(() => window.history.forward(), 0);
+      return { success: true, navigation: true };
+    case 'search':
+      setTimeout(() => { window.location.href = 'https://www.google.com'; }, 0);
+      return { success: true, navigation: true };
+    case 'navigate':
+      if (!args.url) {
+        return { success: false, error: 'navigate 缺少 url 参数' };
+      }
+      setTimeout(() => { window.location.href = args.url; }, 0);
+      return { success: true, navigation: true };
+    case 'click_at':
+      return performNormalizedClick(args.x, args.y);
+    case 'hover_at':
+      return performHoverAt(args.x, args.y);
+    case 'type_text_at':
+      return performTypeTextAt(args);
+    case 'key_combination':
+      return performKeyCombination(args);
+    case 'scroll_document':
+      return performScrollDocument(args.direction);
+    case 'scroll_at':
+      return performScrollAt(args);
+    case 'drag_and_drop':
+      return performDragAndDrop(args);
+    default:
+      return { success: false, error: `暂不支持的动作：${name}` };
   }
 }
 

@@ -541,8 +541,8 @@ function setupWindowMessageHandlers(appContext) {
       case 'COMPUTER_USE_SNAPSHOT_RESULT':
         appContext.services.computerUseTool?.handleSnapshotResult(data);
         break;
-      case 'COMPUTER_USE_CLICK_RESULT':
-        appContext.services.computerUseTool?.handleClickResult(data);
+      case 'COMPUTER_USE_ACTION_RESULT':
+        appContext.services.computerUseTool?.handleActionResult(data);
         break;
       default:
         break;

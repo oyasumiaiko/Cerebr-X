@@ -17,7 +17,7 @@ export function createComputerUseTool(appContext) {
   const showNotification = utils.showNotification || (() => {});
 
   const pendingSnapshots = new Map();
-  const pendingClicks = new Map();
+  const pendingActions = new Map();
   let latestScreenshot = null;
   let latestScreenshotAt = 0;
   let isLoading = false;
@@ -53,6 +53,7 @@ export function createComputerUseTool(appContext) {
     dom.computerUseBackButton?.addEventListener('click', closePanel);
     dom.computerUseRunButton?.addEventListener('click', handleRunRequest);
     dom.computerUseCaptureButton?.addEventListener('click', refreshScreenshot);
+    setupInstructionShortcuts();
   }
 
   function bindConfigSubscription() {
@@ -121,6 +122,18 @@ export function createComputerUseTool(appContext) {
     });
   }
 
+  function setupInstructionShortcuts() {
+    if (!dom.computerUseInstruction) return;
+    dom.computerUseInstruction.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        if (!isLoading) {
+          handleRunRequest();
+        }
+      }
+    });
+  }
+
   function openPanel() {
     dom.computerUsePanel.classList.add('visible');
   }
@@ -170,29 +183,21 @@ export function createComputerUseTool(appContext) {
     });
   }
 
-  async function refreshScreenshot() {
+  async function refreshScreenshot({ silent = false } = {}) {
     try {
-      setLoading(true, '正在截取网页截图...');
+      if (!silent) setLoading(true, '正在截取网页截图...');
       const dataUrl = await requestScreenshot();
       latestScreenshot = dataUrl;
       latestScreenshotAt = Date.now();
       updateSnapshotMeta();
-      setStatus('截图更新完成，可以继续生成操作。', 'success');
+      if (!silent) setStatus('截图更新完成，可以继续生成操作。', 'success');
     } catch (error) {
       console.error('刷新截图失败:', error);
-      setStatus(error.message || '截图失败', 'error');
+      if (!silent) setStatus(error.message || '截图失败', 'error');
+      throw error;
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }
-
-  async function ensureScreenshot() {
-    if (latestScreenshot) return latestScreenshot;
-    const dataUrl = await requestScreenshot();
-    latestScreenshot = dataUrl;
-    latestScreenshotAt = Date.now();
-    updateSnapshotMeta();
-    return dataUrl;
   }
 
   function renderActions({ narration = '', actions = [] }) {
@@ -235,15 +240,11 @@ export function createComputerUseTool(appContext) {
       }
       card.appendChild(argList);
 
-      if (action.name === 'click_at' && typeof action.args?.x === 'number' && typeof action.args?.y === 'number') {
-        const button = document.createElement('button');
-        button.className = 'computer-use-action-btn';
-        button.textContent = '在页面执行点击';
-        button.addEventListener('click', () => {
-          executeClickAction(action.args);
-        });
-        card.appendChild(button);
-      }
+      const button = document.createElement('button');
+      button.className = 'computer-use-action-btn';
+      button.textContent = '执行该操作';
+      button.addEventListener('click', () => executeAction(action));
+      card.appendChild(button);
 
       dom.computerUseActionList.appendChild(card);
     });
@@ -262,6 +263,11 @@ export function createComputerUseTool(appContext) {
       return;
     }
 
+    if (isLoading) {
+      setStatus('正在处理上一条指令，请稍候...', 'warning');
+      return;
+    }
+
     if (!cachedConfig?.apiKey) {
       setStatus('请先在上方填写电脑操作专用 API Key', 'warning');
       dom.computerUseApiKey?.focus();
@@ -269,8 +275,13 @@ export function createComputerUseTool(appContext) {
     }
 
     try {
+      setLoading(true, '正在更新截图...');
+      await refreshScreenshot({ silent: true });
+      const screenshot = latestScreenshot;
+      if (!screenshot) {
+        throw new Error('截图失败，无法构建请求');
+      }
       setLoading(true, '正在向 Gemini 请求操作...');
-      const screenshot = await ensureScreenshot();
       const result = await computerUseApi.sendInitialRequest({
         instruction,
         screenshotDataUrl: screenshot
@@ -285,35 +296,63 @@ export function createComputerUseTool(appContext) {
     }
   }
 
-  function requestClick(args) {
+  function requestAction(action) {
     return new Promise((resolve, reject) => {
-      const requestId = generateRequestId('click');
+      if (!action || typeof action !== 'object') {
+        reject(new Error('缺少动作参数'));
+        return;
+      }
+      const requestId = generateRequestId('act');
       const timeout = setTimeout(() => {
-        pendingClicks.delete(requestId);
-        reject(new Error('页面执行点击超时'));
-      }, 8000);
-      pendingClicks.set(requestId, { resolve, reject, timeout });
-      window.parent.postMessage({
-        type: 'PERFORM_COMPUTER_USE_CLICK',
-        requestId,
-        payload: { x: args.x, y: args.y }
-      }, '*');
+        pendingActions.delete(requestId);
+        reject(new Error('执行动作超时'));
+      }, 15000);
+      pendingActions.set(requestId, { resolve, reject, timeout });
+      window.parent.postMessage({ type: 'PERFORM_COMPUTER_USE_ACTION', requestId, action }, '*');
     });
   }
 
-  async function executeClickAction(args) {
-    try {
-      if (typeof args.x !== 'number' || typeof args.y !== 'number') {
-        setStatus('当前操作缺少坐标参数，无法执行点击。', 'warning');
+  async function executeAction(action) {
+    if (!action || !action.name) {
+      setStatus('无效的动作数据，无法执行。', 'error');
+      return;
+    }
+    const workingAction = JSON.parse(JSON.stringify(action));
+    const safetyDecision = workingAction?.args?.safety_decision;
+    if (safetyDecision?.decision === 'require_confirmation') {
+      const confirmed = await utils.showConfirm?.({
+        message: '执行敏感操作确认',
+        description: safetyDecision.explanation || '模型请求执行敏感操作，是否继续？',
+        confirmText: '继续执行',
+        cancelText: '取消',
+        type: 'warning'
+      });
+      if (!confirmed) {
+        setStatus('用户取消了敏感操作执行。', 'warning');
         return;
       }
-      setStatus(`正在执行点击 (${args.x}, ${args.y}) ...`, 'info');
-      const result = await requestClick(args);
-      const selector = result.selector ? `元素：${result.selector}` : '已尝试点击目标位置';
-      setStatus(`点击完成，${selector}`, 'success');
+      workingAction.args.safety_acknowledgement = true;
+    }
+    try {
+      setStatus(`正在执行动作：${workingAction.name}`, 'info');
+      const result = await requestAction(workingAction);
+      if (!result?.success) {
+        setStatus(result?.error || `动作 ${workingAction.name} 执行失败`, 'error');
+        return;
+      }
+      if (result.navigation) {
+        setStatus('已触发页面导航，正在等待浏览器更新...', 'success');
+      } else if (result.selector) {
+        setStatus(`动作完成：${result.selector}`, 'success');
+      } else {
+        setStatus('动作执行完成', 'success');
+      }
+      try {
+        await refreshScreenshot({ silent: true });
+      } catch (_) {}
     } catch (error) {
-      console.error('执行页面点击失败:', error);
-      setStatus(error.message || '执行点击失败', 'error');
+      console.error('执行电脑操作动作失败:', error);
+      setStatus(error.message || `动作 ${workingAction.name} 执行失败`, 'error');
     }
   }
 
@@ -330,16 +369,16 @@ export function createComputerUseTool(appContext) {
     }
   }
 
-  function handleClickResult(message) {
+  function handleActionResult(message) {
     if (!message.requestId) return;
-    const entry = pendingClicks.get(message.requestId);
+    const entry = pendingActions.get(message.requestId);
     if (!entry) return;
     clearTimeout(entry.timeout);
-    pendingClicks.delete(message.requestId);
+    pendingActions.delete(message.requestId);
     if (message.success) {
       entry.resolve(message);
     } else {
-      entry.reject(new Error(message.error || '点击失败'));
+      entry.reject(new Error(message.error || '动作执行失败'));
     }
   }
 
@@ -348,6 +387,6 @@ export function createComputerUseTool(appContext) {
     openPanel,
     closePanel,
     handleSnapshotResult,
-    handleClickResult
+    handleActionResult
   };
 }
