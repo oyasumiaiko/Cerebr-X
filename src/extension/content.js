@@ -1569,7 +1569,19 @@ function performNormalizedClick(normalizedX, normalizedY) {
   }
   const clientX = (Number(normalizedX) / 1000) * viewportWidth;
   const clientY = (Number(normalizedY) / 1000) * viewportHeight;
-  const target = document.elementFromPoint(clientX, clientY);
+  const sidebarElement = sidebar?.sidebar;
+  const originalPointerEvents = sidebarElement ? sidebarElement.style.pointerEvents : '';
+  if (sidebarElement) {
+    sidebarElement.style.pointerEvents = 'none';
+  }
+  let target;
+  try {
+    target = document.elementFromPoint(clientX, clientY);
+  } finally {
+    if (sidebarElement) {
+      sidebarElement.style.pointerEvents = originalPointerEvents || '';
+    }
+  }
   if (!target) {
     return { success: false, error: '未找到可点击元素' };
   }

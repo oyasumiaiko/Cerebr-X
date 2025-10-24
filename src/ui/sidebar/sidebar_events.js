@@ -373,7 +373,8 @@ function setupClickAwayHandler(appContext) {
         openers: [appContext.dom.emptyStateHistory]
       },
       { panel: appContext.dom.apiSettingsPanel, toggle: appContext.dom.apiSettingsToggle, openers: [] },
-      { panel: appContext.dom.promptSettingsPanel, toggle: appContext.dom.promptSettingsToggle, openers: [] }
+      { panel: appContext.dom.promptSettingsPanel, toggle: appContext.dom.promptSettingsToggle, openers: [] },
+      { panel: appContext.dom.computerUsePanel, toggle: appContext.dom.computerUseMenuItem, openers: [] }
     ];
 
     let clickInsideManagedElement = false;
