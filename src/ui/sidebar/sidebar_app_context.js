@@ -102,7 +102,10 @@ export function createSidebarAppContext(isStandalone) {
     computerUseToggleKey: document.getElementById('computer-use-toggle-key'),
     computerUseModelInput: document.getElementById('computer-use-model'),
     computerUseTempSlider: document.getElementById('computer-use-temperature'),
-    computerUseTempValue: document.getElementById('computer-use-temp-value')
+    computerUseTempValue: document.getElementById('computer-use-temp-value'),
+    computerUseModeAuto: document.getElementById('computer-use-mode-auto'),
+    computerUseModeManual: document.getElementById('computer-use-mode-manual'),
+    computerUseStepButton: document.getElementById('computer-use-step')
   };
 
   return {

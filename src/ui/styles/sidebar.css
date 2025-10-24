@@ -1058,6 +1058,58 @@ input:checked + .slider::before {
     color: var(--cerebr-secondary-text, #8a8f99);
 }
 
+.computer-use-mode {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color, rgba(255,255,255,0.15)) 80%, transparent);
+    background: color-mix(in srgb, var(--cerebr-surface, #1f2229) 92%, transparent);
+    margin-bottom: 8px;
+}
+
+.computer-use-mode .mode-label {
+    font-size: 0.85rem;
+    color: var(--cerebr-secondary-text, #9aa0a6);
+    white-space: nowrap;
+}
+
+.computer-use-mode .mode-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.9rem;
+    color: var(--cerebr-text-color, #fff);
+}
+
+.computer-use-mode .mode-option input[type="radio"] {
+    accent-color: var(--cerebr-highlight, #2ecc71);
+    cursor: pointer;
+}
+
+.computer-use-step-btn {
+    margin-left: auto;
+    border-radius: 10px;
+    border: 1px solid var(--cerebr-border-color, rgba(255,255,255,0.2));
+    background: color-mix(in srgb, var(--cerebr-surface, #20232a) 85%, transparent);
+    color: var(--cerebr-text-color, #fff);
+    padding: 6px 12px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    display: none;
+}
+
+.computer-use-step-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--cerebr-highlight, #2ecc71) 35%, transparent);
+    border-color: var(--cerebr-highlight, #2ecc71);
+}
+
+.computer-use-step-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .computer-use-hint {
     margin: 0;
     font-size: 0.9rem;
@@ -1192,6 +1244,11 @@ input:checked + .slider::before {
     display: flex;
     flex-direction: column;
     gap: 8px;
+}
+
+.computer-use-action-card.next-action {
+    border-color: var(--cerebr-highlight, #2ecc71);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--cerebr-highlight, #2ecc71) 60%, transparent);
 }
 
 .action-header {

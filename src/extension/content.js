@@ -539,19 +539,6 @@ class CerebrSidebar {
             }
           })();
           break;
-        case 'PERFORM_COMPUTER_USE_CLICK':
-          (async () => {
-            const iframeEl = this.sidebar?.querySelector('.cerebr-sidebar__iframe');
-            if (!iframeEl) return;
-            const payload = event.data.payload || {};
-            const result = performNormalizedClick(payload.x, payload.y);
-            iframeEl.contentWindow.postMessage({
-              type: 'COMPUTER_USE_ACTION_RESULT',
-              requestId: event.data.requestId,
-              ...result
-            }, '*');
-          })();
-          break;
         case 'PERFORM_COMPUTER_USE_ACTION':
           (async () => {
             const iframeEl = this.sidebar?.querySelector('.cerebr-sidebar__iframe');

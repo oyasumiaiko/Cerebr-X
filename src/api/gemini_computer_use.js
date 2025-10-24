@@ -10,8 +10,26 @@ export function createComputerUseApi(appContext) {
   const defaultConfig = {
     apiKey: '',
     modelName: 'gemini-2.5-computer-use-preview-10-2025',
-    temperature: 0.2
+    temperature: 0.2,
+    executionMode: 'auto'
   };
+
+  const PREDEFINED_SCREENSHOT_ACTIONS = new Set([
+    'open_web_browser',
+    'click_at',
+    'hover_at',
+    'type_text_at',
+    'scroll_document',
+    'scroll_at',
+    'wait_5_seconds',
+    'go_back',
+    'go_forward',
+    'search',
+    'navigate',
+    'key_combination',
+    'drag_and_drop'
+  ]);
+  const MAX_SCREENSHOT_TURNS = 3;
 
   let initialized = false;
   let currentConfig = { ...defaultConfig };
@@ -102,6 +120,27 @@ export function createComputerUseApi(appContext) {
   }
 
   /**
+   * 深拷贝任意 JSON 兼容结构
+   * @param {any} data
+   * @returns {any}
+   */
+  function cloneDeep(data) {
+    if (typeof structuredClone === 'function') {
+      try {
+        return structuredClone(data);
+      } catch (_) {
+        // 忽略 structuredClone 失败，退回 JSON 方案
+      }
+    }
+    try {
+      return JSON.parse(JSON.stringify(data));
+    } catch (error) {
+      console.warn('电脑操作：克隆数据失败，返回原始引用', error);
+      return data;
+    }
+  }
+
+  /**
    * 将 dataURL 转换为裸的 Base64 字符串
    * @param {string} dataUrl - 形如 data:image/png;base64,... 的字符串
    * @returns {string}
@@ -110,6 +149,138 @@ export function createComputerUseApi(appContext) {
     if (!dataUrl) return '';
     const commaIndex = dataUrl.indexOf(',');
     return commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl;
+  }
+
+  /**
+   * 判断部件中是否包含截图数据
+   * @param {Object} part
+   * @returns {boolean}
+   */
+  function hasInlineScreenshot(part) {
+    if (!part) return false;
+    const candidate = part.inline_data || part.inlineData;
+    if (candidate && candidate.data) return true;
+    if (Array.isArray(part.parts)) {
+      return part.parts.some((child) => hasInlineScreenshot(child));
+    }
+    return false;
+  }
+
+  /**
+   * 清理会话历史中过旧的截图，限制体积
+   * @param {Array<Object>} contents
+   */
+  function pruneSessionScreenshots(contents) {
+    let screenshotTurns = 0;
+    for (let idx = contents.length - 1; idx >= 0; idx -= 1) {
+      const content = contents[idx];
+      if (!content?.parts || !Array.isArray(content.parts)) continue;
+      let hasScreenshot = false;
+      content.parts.forEach((part) => {
+        const functionResponse = part.function_response || part.functionResponse;
+        if (
+          functionResponse?.parts &&
+          Array.isArray(functionResponse.parts) &&
+          PREDEFINED_SCREENSHOT_ACTIONS.has(functionResponse.name)
+        ) {
+          const containsScreenshot = functionResponse.parts.some((inner) => hasInlineScreenshot(inner));
+          if (containsScreenshot) {
+            hasScreenshot = true;
+            if (screenshotTurns >= MAX_SCREENSHOT_TURNS) {
+              functionResponse.parts = [];
+            }
+          }
+        }
+      });
+      if (hasScreenshot) screenshotTurns += 1;
+    }
+  }
+
+  /**
+   * 构建函数响应部件
+   * @param {Object} fr
+   * @returns {Object|null}
+   */
+  function buildFunctionResponsePart(fr) {
+    if (!fr || typeof fr !== 'object') return null;
+    const payload = {
+      name: fr.name,
+      response: cloneDeep(fr.response || {})
+    };
+    if (!payload.name) {
+      return null;
+    }
+    const callId = fr.id || fr.callId || fr.call_id;
+    if (callId) payload.id = callId;
+    if (Array.isArray(fr.parts) && fr.parts.length > 0) {
+      payload.parts = fr.parts.map((part) => cloneDeep(part));
+    }
+    return { function_response: payload };
+  }
+
+  /**
+   * 根据最新请求与响应生成新的会话快照
+   * @param {Array<Object>} contents
+   * @param {Object} payload
+   * @returns {{ contents: Array<Object> }}
+   */
+  function createSessionContext(contents, payload) {
+    const snapshot = Array.isArray(contents) ? contents.map((item) => cloneDeep(item)) : [];
+    const candidateContent = payload?.candidates?.[0]?.content;
+    if (candidateContent) {
+      snapshot.push(cloneDeep(candidateContent));
+    }
+    pruneSessionScreenshots(snapshot);
+    return {
+      contents: snapshot,
+      createdAt: Date.now()
+    };
+  }
+
+  /**
+   * 构造标准 Computer Use 请求体
+   * @param {Array<Object>} contents
+   * @param {number} temperature
+   * @returns {Object}
+   */
+  function buildRequestBody(contents, temperature) {
+    return {
+      contents,
+      tools: [
+        {
+          computerUse: {
+            environment: 'ENVIRONMENT_BROWSER'
+          }
+        }
+      ],
+      generationConfig: {
+        temperature: typeof temperature === 'number' ? temperature : defaultConfig.temperature,
+        topP: 0.95,
+        topK: 40,
+        maxOutputTokens: 4096
+      }
+    };
+  }
+
+  /**
+   * 执行与 Gemini 的 HTTP 请求
+   * @param {string} endpoint
+   * @param {Object} body
+   * @returns {Promise<Object>}
+   */
+  async function callGemini(endpoint, body) {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Computer Use 请求失败 (${response.status}): ${detail}`);
+    }
+
+    return response.json();
   }
 
   /**
@@ -131,9 +302,12 @@ export function createComputerUseApi(appContext) {
         narrationPieces.push(part.text);
       }
       if (part?.functionCall) {
+        const call = part.functionCall;
+        if (!call?.name) continue;
         actions.push({
-          name: part.functionCall.name,
-          args: part.functionCall.args || {}
+          name: call?.name,
+          args: call?.args || {},
+          callId: call?.id || call?.callId || null
         });
       }
     }
@@ -143,6 +317,43 @@ export function createComputerUseApi(appContext) {
       actions,
       candidate
     };
+  }
+
+  /**
+   * 标准化 session 对象
+   * @param {any} session
+   * @param {Object|null} [fallback=null]
+   * @returns {Object|null}
+   */
+  function normalizeSession(session, fallback = null) {
+    if (!session) return fallback || null;
+    if (typeof session === 'string') {
+      return { name: session };
+    }
+    if (typeof session === 'object') {
+      const copy = cloneDeep(session);
+      if (!copy.name && copy.id) {
+        copy.name = copy.id;
+      }
+      return copy;
+    }
+    return fallback || null;
+  }
+
+  /**
+   * 从返回 payload 提取 session 信息
+   * @param {Object} payload
+   * @param {Object|null} [fallback=null]
+   * @returns {Object|null}
+   */
+  function extractSession(payload, fallback = null) {
+    const direct = normalizeSession(payload?.session);
+    if (direct) return direct;
+    const candidateSession = normalizeSession(payload?.candidates?.[0]?.session);
+    if (candidateSession) return candidateSession;
+    const sessionId = payload?.sessionId || payload?.session_id;
+    if (sessionId) return normalizeSession(sessionId);
+    return fallback || null;
   }
 
   /**
@@ -174,53 +385,32 @@ export function createComputerUseApi(appContext) {
       throw new Error('未获取到有效的页面截图');
     }
 
-    const requestBody = {
-      contents: [
+    const initialContent = {
+      role: 'user',
+      parts: [
+        { text: instruction.trim() },
         {
-          role: 'user',
-          parts: [
-            { text: instruction.trim() },
-            {
-              inline_data: {
-                mime_type: 'image/png',
-                data: inlineData
-              }
-            }
-          ]
-        }
-      ],
-      tools: [
-        {
-          computerUse: {
-            environment: 'ENVIRONMENT_BROWSER'
+          inline_data: {
+            mime_type: 'image/png',
+            data: inlineData
           }
         }
-      ],
-      generationConfig: {
-        temperature: typeof temperature === 'number' ? temperature : defaultConfig.temperature,
-        topP: 0.95,
-        topK: 40,
-        maxOutputTokens: 4096
-      }
+      ]
     };
 
     try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      });
-
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`Computer Use 请求失败 (${response.status}): ${detail}`);
-      }
-
-      const payload = await response.json();
+      const requestBody = buildRequestBody([initialContent], temperature);
+      const payload = await callGemini(endpoint, requestBody);
       const parsed = normalizeResponse(payload);
+      const sessionContext = createSessionContext([initialContent], payload);
+      const sessionMeta = {
+        ...sessionContext,
+        serverSession: extractSession(payload),
+        clientToolState: cloneDeep(payload?.clientToolState) || null
+      };
       return {
         ...parsed,
-        session: payload.session || null,
+        session: sessionMeta,
         finishReason: payload.candidates?.[0]?.finishReason || null
       };
     } catch (error) {
@@ -231,8 +421,11 @@ export function createComputerUseApi(appContext) {
   }
 
   async function continueSession({ session, functionResponses }) {
-    if (!session) {
+    if (!session || !Array.isArray(session?.contents) || session.contents.length === 0) {
       throw new Error('缺少会话信息，无法继续电脑操作流程');
+    }
+    if (!Array.isArray(functionResponses) || functionResponses.length === 0) {
+      throw new Error('缺少动作执行结果，无法继续电脑操作流程');
     }
 
     await loadConfig();
@@ -247,42 +440,35 @@ export function createComputerUseApi(appContext) {
 
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName.trim()}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
 
-    const requestBody = {
-      session,
-      contents: [],
-      tools: [
-        {
-          computerUse: {
-            environment: 'ENVIRONMENT_BROWSER'
-          }
-        }
-      ],
-      toolResponse: functionResponses || [],
-      generationConfig: {
-        temperature: typeof temperature === 'number' ? temperature : defaultConfig.temperature,
-        topP: 0.95,
-        topK: 40,
-        maxOutputTokens: 4096
-      }
+    const parts = functionResponses
+      .map((item) => buildFunctionResponsePart(item))
+      .filter((part) => !!part);
+
+    if (!parts.length) {
+      throw new Error('动作执行结果无效，无法继续电脑操作流程');
+    }
+
+    const historyContents = session.contents.map((content) => cloneDeep(content));
+    const userContent = {
+      role: 'user',
+      parts
     };
+    const nextContents = [...historyContents, userContent];
+
+    const requestBody = buildRequestBody(nextContents, temperature);
 
     try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      });
-
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`Computer Use 请求失败 (${response.status}): ${detail}`);
-      }
-
-      const payload = await response.json();
+      const payload = await callGemini(endpoint, requestBody);
       const parsed = normalizeResponse(payload);
+      const sessionContext = createSessionContext(nextContents, payload);
+      const updatedSession = {
+        ...sessionContext,
+        serverSession: extractSession(payload, session.serverSession),
+        clientToolState: payload?.clientToolState ? cloneDeep(payload.clientToolState) : cloneDeep(session.clientToolState)
+      };
       return {
         ...parsed,
-        session: payload.session || session,
+        session: updatedSession,
         finishReason: payload.candidates?.[0]?.finishReason || null
       };
     } catch (error) {
