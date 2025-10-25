@@ -341,7 +341,7 @@ let pendingStateRestore = false;
     updateStatusBadge();
   }
 
-  function updateStatusBadge(state) {
+  function updateStatusBadge(state = {}) {
     const badge = dom.computerUseStatusBadge;
     if (!badge) return;
     badge.classList.remove('badge-auto', 'badge-paused', 'badge-error');

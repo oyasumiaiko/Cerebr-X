@@ -250,8 +250,16 @@ class CerebrSidebar {
       this.toggle(true);
       const iframe = this.sidebar?.querySelector('.cerebr-sidebar__iframe');
       if (!iframe) return;
-      iframe.contentWindow.postMessage({ type: 'COMPUTER_USE_FORCE_OPEN' }, '*');
-      iframe.contentWindow.postMessage({ type: 'COMPUTER_USE_SESSION_STATE', ok: true, payload }, '*');
+      const sendRestore = () => {
+        iframe.contentWindow.postMessage({ type: 'COMPUTER_USE_FORCE_OPEN' }, '*');
+        iframe.contentWindow.postMessage({ type: 'COMPUTER_USE_SESSION_STATE', ok: true, payload }, '*');
+      };
+
+      if (iframe.contentDocument?.readyState === 'complete') {
+        sendRestore();
+      } else {
+        iframe.addEventListener('load', sendRestore, { once: true });
+      }
     } catch (error) {
       console.warn('尝试恢复电脑操作会话失败:', error);
     }
