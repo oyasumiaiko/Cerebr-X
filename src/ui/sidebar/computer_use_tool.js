@@ -1,5 +1,6 @@
 const MODE_AUTO = 'auto';
 const MODE_MANUAL = 'manual';
+const ACTION_SETTLE_DELAY_MS = 350; // 操作执行后等待页面稳定的延迟
 
 function generateRequestId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -419,6 +420,7 @@ export function createComputerUseTool(appContext) {
       }
 
       try {
+        await new Promise((resolve) => setTimeout(resolve, ACTION_SETTLE_DELAY_MS));
         await refreshScreenshot({ silent: true });
       } catch (_) {}
 

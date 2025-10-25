@@ -1793,16 +1793,16 @@ function performScrollDocument(direction = 'down') {
   return withSidebarHidden(() => {
     switch (normalized) {
       case 'up':
-        window.scrollBy({ top: -distance, behavior: 'smooth' });
+        window.scrollBy(0, -distance);
         break;
       case 'down':
-        window.scrollBy({ top: distance, behavior: 'smooth' });
+        window.scrollBy(0, distance);
         break;
       case 'left':
-        window.scrollBy({ left: -distance, behavior: 'smooth' });
+        window.scrollBy(-distance, 0);
         break;
       case 'right':
-        window.scrollBy({ left: distance, behavior: 'smooth' });
+        window.scrollBy(distance, 0);
         break;
       default:
         return { success: false, error: `未知的滚动方向: ${direction}` };
