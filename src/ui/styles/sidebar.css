@@ -1052,6 +1052,16 @@ input:checked + .slider::before {
     width: 100%;
 }
 
+.computer-use-config .delay-group label span {
+    color: var(--cerebr-highlight, #2ecc71);
+    font-weight: 600;
+    margin-left: 4px;
+}
+
+#computer-use-delay {
+    width: 100%;
+}
+
 .computer-use-tip {
     margin: 0;
     font-size: 0.8rem;

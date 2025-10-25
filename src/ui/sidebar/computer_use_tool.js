@@ -1,6 +1,6 @@
 const MODE_AUTO = 'auto';
 const MODE_MANUAL = 'manual';
-const ACTION_SETTLE_DELAY_MS = 1000; // 操作执行后等待页面稳定的延迟
+const DEFAULT_ACTION_SETTLE_DELAY_MS = 1000; // 操作执行后等待页面稳定的默认延迟
 
 function generateRequestId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -23,6 +23,31 @@ export function createComputerUseTool(appContext) {
   let isLoading = false;
   let unsubscribeConfig = null;
   let cachedConfig = computerUseApi?.getConfig?.() || {};
+  let actionSettleDelayMs = normalizeDelay(
+    typeof cachedConfig.actionSettleDelayMs === 'number'
+      ? cachedConfig.actionSettleDelayMs
+      : DEFAULT_ACTION_SETTLE_DELAY_MS
+  );
+
+  function normalizeDelay(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0) return DEFAULT_ACTION_SETTLE_DELAY_MS;
+    return Math.min(Math.round(num), 10000);
+  }
+
+  function formatDelayLabel(value) {
+    const delay = Math.max(0, Number(value) || 0);
+    if (delay >= 1000) {
+      return `${(delay / 1000).toFixed(delay % 1000 === 0 ? 0 : 1)}s`;
+    }
+    return `${delay}ms`;
+  }
+
+  function updateDelayValue(value) {
+    if (dom.computerUseDelayValue) {
+      dom.computerUseDelayValue.textContent = formatDelayLabel(value);
+    }
+  }
 
   function init() {
     if (!dom.computerUseMenuItem || !dom.computerUsePanel) return;
@@ -64,6 +89,9 @@ export function createComputerUseTool(appContext) {
     if (unsubscribeConfig) unsubscribeConfig();
     unsubscribeConfig = computerUseApi.subscribe((config) => {
       cachedConfig = config || {};
+      if (typeof cachedConfig.actionSettleDelayMs === 'number') {
+        actionSettleDelayMs = normalizeDelay(cachedConfig.actionSettleDelayMs);
+      }
       populateConfigFields(config || {});
     });
   }
@@ -74,6 +102,7 @@ export function createComputerUseTool(appContext) {
       computerUseToggleKey,
       computerUseModelInput,
       computerUseTempSlider,
+      computerUseDelaySlider,
       computerUseModeAuto,
       computerUseModeManual
     } = dom;
@@ -84,6 +113,15 @@ export function createComputerUseTool(appContext) {
     if (computerUseTempSlider) {
       computerUseTempSlider.addEventListener('input', () => updateTempValue(Number(computerUseTempSlider.value)));
       computerUseTempSlider.addEventListener('change', () => saveConfig({ temperature: Number(computerUseTempSlider.value) }));
+    }
+
+    if (computerUseDelaySlider) {
+      computerUseDelaySlider.addEventListener('input', () => updateDelayValue(Number(computerUseDelaySlider.value)));
+      computerUseDelaySlider.addEventListener('change', () => {
+        const nextDelay = normalizeDelay(Number(computerUseDelaySlider.value));
+        actionSettleDelayMs = nextDelay;
+        saveConfig({ actionSettleDelayMs: nextDelay });
+      });
     }
 
     computerUseToggleKey?.addEventListener('click', () => {
@@ -116,6 +154,15 @@ export function createComputerUseTool(appContext) {
     updateTempValue(temperature);
     if (dom.computerUseTempSlider && document.activeElement !== dom.computerUseTempSlider) {
       dom.computerUseTempSlider.value = String(temperature);
+    }
+
+    if (dom.computerUseDelaySlider && document.activeElement !== dom.computerUseDelaySlider) {
+      const delay = normalizeDelay(config.actionSettleDelayMs ?? actionSettleDelayMs);
+      dom.computerUseDelaySlider.value = String(delay);
+      actionSettleDelayMs = delay;
+      updateDelayValue(delay);
+    } else {
+      updateDelayValue(actionSettleDelayMs);
     }
 
     const mode = config.executionMode || executionMode;
@@ -420,7 +467,10 @@ export function createComputerUseTool(appContext) {
       }
 
       try {
-        await new Promise((resolve) => setTimeout(resolve, ACTION_SETTLE_DELAY_MS));
+        const delayMs = Math.max(0, Number(actionSettleDelayMs) || 0);
+        if (delayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
         await refreshScreenshot({ silent: true });
       } catch (_) {}
 

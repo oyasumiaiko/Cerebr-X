@@ -103,6 +103,8 @@ export function createSidebarAppContext(isStandalone) {
     computerUseModelInput: document.getElementById('computer-use-model'),
     computerUseTempSlider: document.getElementById('computer-use-temperature'),
     computerUseTempValue: document.getElementById('computer-use-temp-value'),
+    computerUseDelaySlider: document.getElementById('computer-use-delay'),
+    computerUseDelayValue: document.getElementById('computer-use-delay-value'),
     computerUseModeAuto: document.getElementById('computer-use-mode-auto'),
     computerUseModeManual: document.getElementById('computer-use-mode-manual'),
     computerUseStepButton: document.getElementById('computer-use-step')

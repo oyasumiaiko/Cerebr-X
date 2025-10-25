@@ -11,7 +11,8 @@ export function createComputerUseApi(appContext) {
     apiKey: '',
     modelName: 'gemini-2.5-computer-use-preview-10-2025',
     temperature: 0.2,
-    executionMode: 'auto'
+    executionMode: 'auto',
+    actionSettleDelayMs: 1000
   };
 
   const PREDEFINED_SCREENSHOT_ACTIONS = new Set([
