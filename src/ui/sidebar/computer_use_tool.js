@@ -23,11 +23,13 @@ export function createComputerUseTool(appContext) {
   let isLoading = false;
   let unsubscribeConfig = null;
   let cachedConfig = computerUseApi?.getConfig?.() || {};
+  let currentInstruction = '';
   let actionSettleDelayMs = normalizeDelay(
     typeof cachedConfig.actionSettleDelayMs === 'number'
       ? cachedConfig.actionSettleDelayMs
       : DEFAULT_ACTION_SETTLE_DELAY_MS
   );
+  let pendingStateRestore = false;
 
   function normalizeDelay(value) {
     const num = Number(value);
@@ -47,6 +49,83 @@ export function createComputerUseTool(appContext) {
     if (dom.computerUseDelayValue) {
       dom.computerUseDelayValue.textContent = formatDelayLabel(value);
     }
+  }
+
+  function cloneForTransport(value) {
+    if (value === undefined) return undefined;
+    if (typeof structuredClone === 'function') {
+      try {
+        return structuredClone(value);
+      } catch (error) {
+        console.warn('structuredClone 失败，回退 JSON 序列化', error);
+      }
+    }
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (error) {
+      console.warn('克隆数据失败:', error);
+      return null;
+    }
+  }
+
+  function postToParent(type, payload) {
+    try {
+      window.parent.postMessage({ type, payload }, '*');
+    } catch (error) {
+      console.warn('发送电脑操作消息到父窗口失败:', error);
+    }
+  }
+
+  function clearSessionState(reason = 'clear') {
+    postToParent('COMPUTER_USE_CLEAR_STATE', { reason });
+  }
+
+  function syncSessionState(overrides = {}) {
+    const {
+      status = 'active',
+      finishReason = null,
+      pendingResponses = undefined,
+      note = undefined,
+      awaitingRecovery = status === 'closing'
+    } = overrides;
+
+    if (!currentSession) {
+      postToParent('COMPUTER_USE_SYNC_STATE', {
+        status,
+        finishReason,
+        pendingResponses,
+        note,
+        session: null,
+        updatedAt: Date.now(),
+        awaitingRecovery
+      });
+      return;
+    }
+
+    const payload = {
+      status,
+      finishReason,
+      pendingResponses,
+      note,
+      session: cloneForTransport(currentSession),
+      pendingActions: cloneForTransport(pendingActionQueue),
+      narration: latestNarration,
+      instruction: currentInstruction,
+      executionMode,
+      latestScreenshotAt,
+      actionSettleDelayMs,
+      url: window.location.href,
+      title: document.title,
+      updatedAt: Date.now(),
+      awaitingRecovery
+    };
+    postToParent('COMPUTER_USE_SYNC_STATE', payload);
+  }
+
+  function requestSessionState() {
+    if (pendingStateRestore) return;
+    pendingStateRestore = true;
+    postToParent('COMPUTER_USE_REQUEST_STATE');
   }
 
   function init() {
@@ -79,6 +158,8 @@ export function createComputerUseTool(appContext) {
     dom.computerUseCaptureButton?.addEventListener('click', () => refreshScreenshot({ silent: false }));
     dom.computerUseStepButton?.addEventListener('click', handleStepExecution);
     setupInstructionShortcuts();
+    setupSessionBridge();
+    requestSessionState();
 
     executionMode = cachedConfig.executionMode || MODE_AUTO;
     setExecutionMode(executionMode, { persist: false, updateUI: true });
@@ -121,6 +202,9 @@ export function createComputerUseTool(appContext) {
         const nextDelay = normalizeDelay(Number(computerUseDelaySlider.value));
         actionSettleDelayMs = nextDelay;
         saveConfig({ actionSettleDelayMs: nextDelay });
+        if (currentSession) {
+          syncSessionState({ status: 'active', pendingResponses: [] });
+        }
       });
     }
 
@@ -211,6 +295,10 @@ export function createComputerUseTool(appContext) {
       } else if (currentSession) {
         setStatus('等待模型返回新动作，稍后点击 >|。', 'info');
       }
+    }
+
+    if (currentSession) {
+      syncSessionState({ status: 'active', pendingResponses: [] });
     }
   }
 
@@ -365,9 +453,12 @@ export function createComputerUseTool(appContext) {
     }
 
     try {
+      pendingStateRestore = false;
+      currentInstruction = instruction;
       currentSession = null;
       latestNarration = '';
       updatePendingActions([]);
+      clearSessionState('restart');
 
       setLoading(true, '正在更新截图...');
       await refreshScreenshot({ silent: true });
@@ -381,6 +472,7 @@ export function createComputerUseTool(appContext) {
       const initialActions = startResult.actions || [];
       updatePendingActions(initialActions);
       setLoading(false);
+      syncSessionState({ status: 'active', pendingResponses: [] });
 
       const hasActions = initialActions.length > 0;
       const shouldStop = !hasActions && startResult.finishReason === 'STOP';
@@ -388,6 +480,7 @@ export function createComputerUseTool(appContext) {
       if (!currentSession || shouldStop) {
         currentSession = null;
         setStatus('电脑操作流程完成。', 'success');
+        clearSessionState('completed');
         return;
       }
 
@@ -402,6 +495,7 @@ export function createComputerUseTool(appContext) {
       console.error('调用 Gemini Computer Use 失败:', error);
       setStatus(error.message || '请求失败，请检查控制台日志', 'error');
       setLoading(false);
+      clearSessionState('error');
     }
   }
 
@@ -430,6 +524,7 @@ export function createComputerUseTool(appContext) {
   async function executeAction(action) {
     if (!action || !action.name) {
       setStatus('无效的动作数据，无法执行。', 'error');
+      syncSessionState({ status: 'error', note: 'invalid-action' });
       return null;
     }
 
@@ -455,6 +550,7 @@ export function createComputerUseTool(appContext) {
       const result = await requestAction(workingAction);
       if (!result?.success) {
         setStatus(result?.error || `动作 ${workingAction.name} 执行失败`, 'error');
+        syncSessionState({ status: 'error', note: 'action-execution-failed' });
         return null;
       }
 
@@ -486,15 +582,24 @@ export function createComputerUseTool(appContext) {
         responsePayload.safety_acknowledgement = true;
       }
 
-      return {
+      const functionResponse = {
         name: workingAction.name,
         id: workingAction.callId || workingAction.id || workingAction.call_id || null,
         response: responsePayload,
         parts: base64 ? [{ inline_data: { mime_type: 'image/png', data: base64 } }] : []
       };
+
+      syncSessionState({
+        status: result.navigation ? 'waiting-navigation' : 'pending-response',
+        pendingResponses: [cloneForTransport(functionResponse)],
+        note: result.navigation ? 'navigation' : undefined
+      });
+
+      return functionResponse;
     } catch (error) {
       console.error('执行电脑操作动作失败:', error);
       setStatus(error.message || `动作 ${workingAction.name} 执行失败`, 'error');
+      syncSessionState({ status: 'error', note: error?.message || 'action-error' });
       return null;
     }
   }
@@ -505,6 +610,7 @@ export function createComputerUseTool(appContext) {
     }
 
     while (executionMode === MODE_AUTO && pendingActionQueue.length > 0) {
+      syncSessionState({ status: 'executing', pendingResponses: [], note: 'auto-sequence' });
       const action = pendingActionQueue.shift();
       renderActionsList();
       updateStepButtonState();
@@ -516,6 +622,10 @@ export function createComputerUseTool(appContext) {
 
     if (executionMode === MODE_AUTO && currentSession && pendingActionQueue.length === 0) {
       setStatus('等待模型返回新动作...', 'info');
+    }
+
+    if (currentSession) {
+      syncSessionState({ status: 'active', pendingResponses: [] });
     }
   }
 
@@ -532,6 +642,7 @@ export function createComputerUseTool(appContext) {
       const newActions = next.actions || [];
       updatePendingActions(newActions);
       setLoading(false);
+      syncSessionState({ status: 'active', pendingResponses: [] });
 
       const hasActions = newActions.length > 0;
       const shouldStop = !hasActions && next.finishReason === 'STOP';
@@ -539,6 +650,7 @@ export function createComputerUseTool(appContext) {
       if (!currentSession || shouldStop) {
         currentSession = null;
         setStatus('电脑操作流程完成。', 'success');
+        clearSessionState('completed');
         return;
       }
 
@@ -555,6 +667,11 @@ export function createComputerUseTool(appContext) {
       console.error('继续电脑操作流程失败:', error);
       setStatus(error.message || '继续执行失败', 'error');
       setLoading(false);
+      syncSessionState({
+        status: 'error',
+        pendingResponses: cloneForTransport(responses),
+        note: error?.message || 'continue-failed'
+      });
     }
   }
 
@@ -572,6 +689,7 @@ export function createComputerUseTool(appContext) {
     const action = pendingActionQueue.shift();
     renderActionsList();
     updateStepButtonState();
+    syncSessionState({ status: 'executing', pendingResponses: [], note: 'manual-step' });
     const response = await executeAction(action);
     if (!response) return;
     await advanceSessionWithResponses([response], { triggerAuto: false });
@@ -619,11 +737,104 @@ export function createComputerUseTool(appContext) {
     });
   }
 
+  function setupSessionBridge() {
+    try {
+      window.addEventListener('pageshow', () => {
+        requestSessionState();
+      });
+      window.addEventListener('beforeunload', () => {
+        if (currentSession) {
+          syncSessionState({ status: 'closing' });
+        }
+      });
+    } catch (error) {
+      console.warn('注册 session bridge 失败:', error);
+    }
+  }
+
+  function handleSessionState(message) {
+    pendingStateRestore = false;
+    if (!message?.ok) {
+      setStatus(message?.error || '无法恢复电脑操作会话。', 'warning');
+      return;
+    }
+    const state = message.payload;
+    if (!state || !state.session) return;
+    if (currentSession) return;
+
+    currentSession = state.session;
+    latestNarration = state.narration || '';
+    currentInstruction = state.instruction || currentInstruction || '';
+    actionSettleDelayMs = normalizeDelay(state.actionSettleDelayMs ?? actionSettleDelayMs);
+    latestScreenshotAt = state.latestScreenshotAt || latestScreenshotAt;
+
+    if (dom.computerUseInstruction && currentInstruction) {
+      dom.computerUseInstruction.value = currentInstruction;
+    }
+    if (dom.computerUseDelaySlider) {
+      dom.computerUseDelaySlider.value = String(actionSettleDelayMs);
+    }
+    updateDelayValue(actionSettleDelayMs);
+
+    updatePendingActions(state.pendingActions || []);
+    if (state.executionMode && state.executionMode !== executionMode) {
+      setExecutionMode(state.executionMode, { persist: false, updateUI: true });
+    } else {
+      updateStepButtonState();
+    }
+
+    if (latestNarration && dom.computerUseNarration) {
+      dom.computerUseNarration.textContent = latestNarration;
+    }
+
+    const status = state.status || 'active';
+    const pendingResponses = Array.isArray(state.pendingResponses) ? state.pendingResponses : [];
+
+    if (status === 'active') {
+      if (executionMode === MODE_AUTO && pendingActionQueue.length > 0) {
+        setStatus('导航完成，继续执行自动操作...', 'info');
+        setTimeout(() => {
+          runActionsSequence();
+        }, 0);
+      } else if (pendingActionQueue.length > 0) {
+        setStatus('已恢复操作，请点击 >| 执行下一步。', 'info');
+      } else {
+        setStatus('已恢复会话，等待模型返回新动作。', 'info');
+      }
+    } else if (status === 'closing') {
+      setStatus('页面正在重新加载，稍后将尝试恢复会话。', 'info');
+    } else if (status === 'pending-response' || status === 'waiting-navigation') {
+      setStatus('检测到待继续的操作，正在恢复...', 'info');
+    } else if (status === 'continuing') {
+      setStatus('正在恢复电脑操作流程...', 'info');
+    } else if (status === 'executing') {
+      setStatus('正在执行电脑操作...', 'info');
+    }
+
+    if (pendingResponses.length > 0 && currentSession) {
+      // 去重：防止重复提交
+      syncSessionState({ status: 'continuing', pendingResponses, note: 'restoring-responses' });
+      advanceSessionWithResponses(pendingResponses, { triggerAuto: executionMode === MODE_AUTO }).catch((error) => {
+        console.error('恢复电脑操作 pendingResponses 失败:', error);
+        setStatus(error?.message || '恢复操作失败，请重新生成', 'error');
+        syncSessionState({ status: 'error', note: 'restore-failed' });
+      });
+    } else if (status === 'closing') {
+      // 等待下一次 pageshow 再处理
+      setTimeout(() => {
+        requestSessionState();
+      }, 1200);
+    } else {
+      syncSessionState({ status: 'active', pendingResponses: [] });
+    }
+  }
+
   return {
     init,
     openPanel,
     closePanel,
     handleSnapshotResult,
-    handleActionResult
+    handleActionResult,
+    handleSessionState
   };
 }

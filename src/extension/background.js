@@ -12,6 +12,64 @@ self.addEventListener('activate', (event) => {
 // 添加启动日志
 console.log('Background script loaded at:', new Date().toISOString());
 
+const computerUseSessions = new Map();
+const COMPUTER_USE_STORAGE_PREFIX = 'computerUseSession:';
+const hasSessionStorage = !!chrome.storage?.session;
+
+function getTabId(sender) {
+  return sender?.tab?.id ?? null;
+}
+
+function cloneValue(value) {
+  if (value === undefined) return undefined;
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(value);
+    } catch (error) {
+      console.warn('structuredClone 失败，回退 JSON 序列化', error);
+    }
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    console.warn('JSON 克隆失败:', error);
+    return null;
+  }
+}
+
+async function persistSessionState(tabId, state) {
+  if (!hasSessionStorage) return;
+  const key = `${COMPUTER_USE_STORAGE_PREFIX}${tabId}`;
+  try {
+    if (!state) {
+      await chrome.storage.session.remove(key);
+    } else {
+      await chrome.storage.session.set({ [key]: state });
+    }
+  } catch (error) {
+    console.warn('同步电脑操作会话存储失败:', error);
+  }
+}
+
+async function loadPersistedSessions() {
+  if (!hasSessionStorage) return;
+  try {
+    const items = await chrome.storage.session.get(null);
+    for (const [key, value] of Object.entries(items)) {
+      if (!key.startsWith(COMPUTER_USE_STORAGE_PREFIX)) continue;
+      if (!value || typeof value !== 'object') continue;
+      const tabId = Number(key.slice(COMPUTER_USE_STORAGE_PREFIX.length));
+      if (!Number.isNaN(tabId)) {
+        computerUseSessions.set(tabId, value);
+      }
+    }
+  } catch (error) {
+    console.warn('加载电脑操作会话缓存失败:', error);
+  }
+}
+
+loadPersistedSessions();
+
 function checkCustomShortcut(callback) {
   chrome.commands.getAll((commands) => {
       const toggleCommand = commands.find(command => command.name === '_execute_action' || command.name === '_execute_browser_action');
@@ -144,6 +202,65 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'COMPUTER_USE_SYNC_STATE') {
+    const tabId = getTabId(sender);
+    if (!tabId) {
+      sendResponse?.({ ok: false, error: 'NO_TAB' });
+      return false;
+    }
+    const payload = message.payload;
+    if (!payload) {
+      computerUseSessions.delete(tabId);
+      persistSessionState(tabId, null);
+    } else {
+      const cloned = cloneValue({
+        ...payload,
+        updatedAt: Date.now()
+      });
+      computerUseSessions.set(tabId, cloned);
+      persistSessionState(tabId, cloned);
+    }
+    sendResponse?.({ ok: true });
+    return true;
+  }
+
+  if (message.type === 'COMPUTER_USE_REQUEST_STATE') {
+    const tabId = getTabId(sender);
+    const state = tabId ? computerUseSessions.get(tabId) || null : null;
+    sendResponse?.({ ok: true, payload: cloneValue(state) });
+    return true;
+  }
+
+  if (message.type === 'COMPUTER_USE_CLEAR_STATE') {
+    const tabId = getTabId(sender);
+    if (tabId) {
+      computerUseSessions.delete(tabId);
+      persistSessionState(tabId, null);
+    }
+    sendResponse?.({ ok: true });
+    return true;
+  }
+
+  if (message.type === 'COMPUTER_USE_NAV_EVENT') {
+    const tabId = getTabId(sender);
+    if (tabId) {
+      const existing = computerUseSessions.get(tabId);
+      if (existing && existing.session) {
+        const updated = {
+          ...existing,
+          navStatus: message.status || existing.navStatus || 'unknown',
+          navTimestamp: Date.now(),
+          lastUrl: message.url || existing.lastUrl || '',
+          lastTitle: message.title || existing.lastTitle || ''
+        };
+        computerUseSessions.set(tabId, updated);
+        persistSessionState(tabId, updated);
+      }
+    }
+    sendResponse?.({ ok: true });
+    return true;
+  }
+
   // 处理来自 sidebar 的网页内容请求
   if (message.type === 'GET_PAGE_CONTENT_FROM_SIDEBAR') {
     (async () => {
@@ -233,8 +350,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: chrome.runtime.lastError.message });
       } else {
         sendResponse({ success: true, dataURL });
-      }
-    });
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (computerUseSessions.has(tabId)) {
+    computerUseSessions.delete(tabId);
+    persistSessionState(tabId, null);
+  }
+});
     return true; // 指明 sendResponse 将异步调用
   }
 

@@ -544,6 +544,9 @@ function setupWindowMessageHandlers(appContext) {
       case 'COMPUTER_USE_ACTION_RESULT':
         appContext.services.computerUseTool?.handleActionResult(data);
         break;
+      case 'COMPUTER_USE_SESSION_STATE':
+        appContext.services.computerUseTool?.handleSessionState?.(data);
+        break;
       default:
         break;
     }

@@ -152,6 +152,20 @@ class CerebrSidebar {
   setupUrlChangeListener() {
     let lastUrl = window.location.href;
 
+    const emitNavEvent = (status, extra = {}) => {
+      try {
+        chrome.runtime.sendMessage({
+          type: 'COMPUTER_USE_NAV_EVENT',
+          status,
+          url: window.location.href,
+          title: document.title,
+          ...extra
+        });
+      } catch (error) {
+        console.warn('发送电脑操作导航事件失败:', error);
+      }
+    };
+
     // 检查URL是否发生实质性变化
     const hasUrlChanged = (currentUrl) => {
       if (currentUrl === lastUrl) return false;
@@ -168,6 +182,8 @@ class CerebrSidebar {
       if (hasUrlChanged(currentUrl)) {
         console.log('URL变化:', '从:', lastUrl, '到:', currentUrl);
         lastUrl = currentUrl;
+
+        emitNavEvent('navigated');
 
         // 获取iframe并发送消息
         const iframe = sidebar.sidebar?.querySelector('.cerebr-sidebar__iframe');
@@ -192,6 +208,10 @@ class CerebrSidebar {
       handleUrlChange();
     });
 
+    window.addEventListener('beforeunload', () => {
+      emitNavEvent('unloading');
+    });
+
     // 重写history方法
     const originalPushState = history.pushState;
     const originalReplaceState = history.replaceState;
@@ -210,6 +230,8 @@ class CerebrSidebar {
 
     // 添加定期检查
     setInterval(handleUrlChange, 1000);
+
+    emitNavEvent('loaded');
   }
 
   async initializeSidebar() {
@@ -534,6 +556,58 @@ class CerebrSidebar {
             // console.log('已发送当前页面信息到侧边栏');
           }
           break;
+        case 'COMPUTER_USE_SYNC_STATE': {
+          (async () => {
+            try {
+              await chrome.runtime.sendMessage({
+                type: 'COMPUTER_USE_SYNC_STATE',
+                payload: {
+                  tabId: event.data.payload?.tabId || null,
+                  status: event.data.payload?.status || 'unknown',
+                  lastUrl: window.location.href,
+                  title: document.title,
+                  ...event.data.payload
+                }
+              });
+            } catch (error) {
+              console.warn('同步电脑操作会话失败:', error);
+            }
+          })();
+          break;
+        }
+        case 'COMPUTER_USE_REQUEST_STATE': {
+          const iframeEl = this.sidebar?.querySelector('.cerebr-sidebar__iframe');
+          if (!iframeEl) break;
+          (async () => {
+            try {
+              const response = await chrome.runtime.sendMessage({ type: 'COMPUTER_USE_REQUEST_STATE' });
+              iframeEl.contentWindow.postMessage(
+                {
+                  type: 'COMPUTER_USE_SESSION_STATE',
+                  ok: true,
+                  payload: response?.payload || null
+                },
+                '*'
+              );
+            } catch (error) {
+              iframeEl.contentWindow.postMessage(
+                {
+                  type: 'COMPUTER_USE_SESSION_STATE',
+                  ok: false,
+                  error: error?.message || '获取电脑操作会话失败'
+                },
+                '*'
+              );
+            }
+          })();
+          break;
+        }
+        case 'COMPUTER_USE_CLEAR_STATE': {
+          chrome.runtime.sendMessage({ type: 'COMPUTER_USE_CLEAR_STATE' }).catch((error) => {
+            console.warn('清理电脑操作会话失败:', error);
+          });
+          break;
+        }
         case 'REQUEST_COMPUTER_USE_SNAPSHOT':
           (async () => {
             const iframeEl = this.sidebar?.querySelector('.cerebr-sidebar__iframe');
