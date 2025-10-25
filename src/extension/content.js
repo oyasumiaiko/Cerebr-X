@@ -269,7 +269,6 @@ class CerebrSidebar {
           /* Delay visibility toggle so content stays rendered throughout the slide animation */
           transition: transform 0.3s ease, box-shadow 0.3s ease, opacity 0.3s ease, visibility 0s linear 0.3s;
         }
-
         .cerebr-sidebar.visible {
           pointer-events: auto;
           visibility: visible;
@@ -277,6 +276,16 @@ class CerebrSidebar {
           transform: translateX(0) !important;
           box-shadow: var(--box-shadow-visible);
           transition: transform 0.3s ease, box-shadow 0.3s ease, opacity 0.3s ease, visibility 0s linear 0s;
+        }
+
+        .cerebr-sidebar.capturing {
+          opacity: 0 !important;
+          visibility: visible;
+        }
+
+        .cerebr-sidebar.visible.capturing {
+          opacity: 0 !important;
+          pointer-events: none !important;
         }
 
         .cerebr-sidebar__content {
@@ -295,7 +304,6 @@ class CerebrSidebar {
           border-radius: 0;
           contain: style layout size;
         }
-
         .cerebr-sidebar.fullscreen {
           transition: all 0s !important;
 
@@ -328,6 +336,15 @@ class CerebrSidebar {
           box-sizing: border-box;
           /* 避免在深色宿主页面被强制套白底（Chrome 的“可读性”行为） */
           color-scheme: auto;
+          z-index: 1;
+          opacity: 1;
+          transition: opacity 140ms ease;
+          pointer-events: auto;
+        }
+
+        .cerebr-sidebar.capturing .cerebr-sidebar__iframe {
+          opacity: 0;
+          pointer-events: none;
         }
       `;
 
@@ -1426,6 +1443,9 @@ async function extractChaptersFromPDFData(completeData) {
 
 // ====================== 网页截图功能 ======================
 
+const SIDEBAR_CAPTURE_FADE_MS = 140;
+const SIDEBAR_CAPTURE_WAIT_MS = SIDEBAR_CAPTURE_FADE_MS + 120;
+
 /**
  * 捕获当前可见标签页的屏幕截图并发送到侧边栏。
  * 截图前会先隐藏侧边栏，并在等待两帧后再进行截图，最后恢复侧边栏显示。
@@ -1434,22 +1454,18 @@ function withSidebarHidden(task) {
   const sidebarElement = sidebar?.sidebar;
   const original = sidebarElement
     ? {
-        visibility: sidebarElement.style.visibility,
-        transition: sidebarElement.style.transition,
         pointerEvents: sidebarElement.style.pointerEvents
       }
     : null;
 
   if (sidebarElement) {
-    sidebarElement.style.transition = 'none';
-    sidebarElement.style.visibility = 'hidden';
+    sidebarElement.classList.add('capturing');
     sidebarElement.style.pointerEvents = 'none';
   }
 
   const restore = () => {
     if (sidebarElement && original) {
-      sidebarElement.style.visibility = original.visibility || '';
-      sidebarElement.style.transition = original.transition || '';
+      sidebarElement.classList.remove('capturing');
       sidebarElement.style.pointerEvents = original.pointerEvents || '';
     }
   };
@@ -1465,6 +1481,43 @@ function withSidebarHidden(task) {
     restore();
     throw error;
   }
+}
+
+function waitForSidebarFadeOut() {
+  return new Promise((resolve) => {
+    const sidebarElement = sidebar?.sidebar;
+    if (!sidebarElement) {
+      resolve();
+      return;
+    }
+    let resolved = false;
+    const maxWait = SIDEBAR_CAPTURE_WAIT_MS;
+    const start = performance.now();
+
+    const finalize = () => {
+      if (resolved) return;
+      resolved = true;
+      resolve();
+    };
+
+    const inspect = () => {
+      if (resolved) return;
+      const styles = window.getComputedStyle(sidebarElement);
+      const opacity = Number.parseFloat(styles.opacity || '0');
+      if (opacity <= 0.02 || styles.visibility === 'hidden') {
+        finalize();
+        return;
+      }
+      if (performance.now() - start >= maxWait) {
+        finalize();
+        return;
+      }
+      requestAnimationFrame(inspect);
+    };
+
+    requestAnimationFrame(inspect);
+    setTimeout(finalize, maxWait + 80);
+  });
 }
 
 function captureAndDropScreenshot() {
@@ -1493,7 +1546,9 @@ function captureAndDropScreenshot() {
       });
     }
 
-    waitCaptureWithAnimationFrame(5);
+    waitForSidebarFadeOut().then(() => {
+      waitCaptureWithAnimationFrame(5);
+    });
   }));
 }
 
@@ -1504,18 +1559,20 @@ function captureAndDropScreenshot() {
 function captureScreenshotForComputerUse() {
   return withSidebarHidden(() => new Promise((resolve, reject) => {
     try {
-      requestAnimationFrame(() => {
+      waitForSidebarFadeOut().then(() => {
         requestAnimationFrame(() => {
-          chrome.runtime.sendMessage({ action: 'capture_visible_tab' }, (response) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-              return;
-            }
-            if (response?.success && response.dataURL) {
-              resolve(response.dataURL);
-            } else {
-              reject(new Error(response?.error || '截图失败'));
-            }
+          requestAnimationFrame(() => {
+            chrome.runtime.sendMessage({ action: 'capture_visible_tab' }, (response) => {
+              if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+                return;
+              }
+              if (response?.success && response.dataURL) {
+                resolve(response.dataURL);
+              } else {
+                reject(new Error(response?.error || '截图失败'));
+              }
+            });
           });
         });
       });
