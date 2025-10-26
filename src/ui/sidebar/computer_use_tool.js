@@ -283,10 +283,14 @@ let isComputerUseInputActive = false;
       historyEntries = [];
       currentRoundId = null;
       currentInstructionEntryId = null;
+      lastPendingResponsesSnapshot = [];
       renderHistory();
     } else {
       currentRoundId = null;
       currentInstructionEntryId = null;
+      if (reason === 'restart') {
+        lastPendingResponsesSnapshot = [];
+      }
     }
   }
 
@@ -307,11 +311,17 @@ let isComputerUseInputActive = false;
 
     updateStatusBadge({ status, error: status === 'error' ? note : undefined });
 
+    const effectivePendingResponses = pendingResponses !== undefined ? pendingResponses : lastPendingResponsesSnapshot;
+    const clonedPendingResponses = cloneForTransport(effectivePendingResponses);
+    if (pendingResponses !== undefined) {
+      lastPendingResponsesSnapshot = cloneForTransport(pendingResponses) || [];
+    }
+
     if (!currentSession) {
       postToParent('COMPUTER_USE_SYNC_STATE', {
         status,
         finishReason,
-        pendingResponses,
+        pendingResponses: clonedPendingResponses,
         note,
         session: null,
         updatedAt: Date.now(),
@@ -325,7 +335,7 @@ let isComputerUseInputActive = false;
     const payload = {
       status,
       finishReason,
-      pendingResponses,
+      pendingResponses: clonedPendingResponses,
       note,
       session: cloneForTransport(currentSession),
       pendingActions: cloneForTransport(pendingActionQueue),
@@ -1298,10 +1308,18 @@ let isComputerUseInputActive = false;
 
     const status = state.status || 'active';
     const pendingResponses = Array.isArray(state.pendingResponses) ? state.pendingResponses : [];
+    lastPendingResponsesSnapshot = cloneForTransport(pendingResponses) || [];
     updateStatusBadge({ status });
 
     if (status === 'active') {
-      if (isAutoMode && pendingActionQueue.length > 0) {
+      if (pendingResponses.length > 0 && currentSession) {
+        setStatus('检测到待继续的操作，正在恢复...', 'info');
+        advanceSessionWithResponses(pendingResponses, { triggerAuto: isAutoMode }).catch((error) => {
+          console.error('恢复电脑操作 pendingResponses 失败:', error);
+          setStatus(error?.message || '恢复操作失败，请重新生成', 'error');
+          syncSessionState({ status: 'error', note: 'restore-failed' });
+        });
+      } else if (isAutoMode && pendingActionQueue.length > 0) {
         setStatus('导航完成，继续执行自动操作...', 'info');
         setTimeout(() => {
           runActionsSequence();
@@ -1311,17 +1329,31 @@ let isComputerUseInputActive = false;
       } else {
         setStatus('已恢复会话，等待模型返回新动作。', 'info');
       }
+    } else if (status === 'pending-response' || status === 'waiting-navigation' || status === 'continuing') {
+      if (pendingResponses.length > 0 && currentSession) {
+        setStatus('检测到待继续的操作，正在恢复...', 'info');
+        advanceSessionWithResponses(pendingResponses, { triggerAuto: isAutoMode }).catch((error) => {
+          console.error('恢复电脑操作 pendingResponses 失败:', error);
+          setStatus(error?.message || '恢复操作失败，请重新生成', 'error');
+          syncSessionState({ status: 'error', note: 'restore-failed' });
+        });
+      } else if (pendingActionQueue.length > 0 && isAutoMode) {
+        setStatus('导航完成，继续执行自动操作...', 'info');
+        setTimeout(() => {
+          runActionsSequence();
+        }, 0);
+      } else {
+        setStatus('页面正在重新加载，稍后将尝试恢复会话。', 'info');
+      }
     } else if (status === 'closing') {
       setStatus('页面正在重新加载，稍后将尝试恢复会话。', 'info');
-    } else if (status === 'pending-response' || status === 'waiting-navigation') {
-      setStatus('检测到待继续的操作，正在恢复...', 'info');
-    } else if (status === 'continuing') {
-      setStatus('正在恢复电脑操作流程...', 'info');
     } else if (status === 'executing') {
       setStatus('正在执行电脑操作...', 'info');
+    } else {
+      setStatus('已恢复会话。', 'info');
     }
 
-    if (pendingResponses.length > 0 && currentSession) {
+    if (pendingResponses.length > 0 && currentSession && status !== 'active' && status !== 'pending-response' && status !== 'waiting-navigation' && status !== 'continuing') {
       // 去重：防止重复提交
       syncSessionState({ status: 'continuing', pendingResponses, note: 'restoring-responses' });
       advanceSessionWithResponses(pendingResponses, { triggerAuto: isAutoMode }).catch((error) => {
@@ -1329,11 +1361,6 @@ let isComputerUseInputActive = false;
         setStatus(error?.message || '恢复操作失败，请重新生成', 'error');
         syncSessionState({ status: 'error', note: 'restore-failed' });
       });
-    } else if (status === 'closing') {
-      // 等待下一次 pageshow 再处理
-      setTimeout(() => {
-        requestSessionState();
-      }, 1200);
     } else {
       syncSessionState({ status: 'active', pendingResponses: [] });
     }
