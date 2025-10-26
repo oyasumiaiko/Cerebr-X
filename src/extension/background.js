@@ -251,7 +251,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const updated = {
           ...existing,
           navStatus: message.status || existing.navStatus || 'unknown',
-          navTimestamp: Date.now(),
+          navTimestamp: message.timestamp || Date.now(),
+          readyState: message.readyState || existing.readyState || 'unknown',
           lastUrl: message.url || existing.lastUrl || '',
           lastTitle: message.title || existing.lastTitle || ''
         };

@@ -160,6 +160,8 @@ class CerebrSidebar {
           status,
           url: window.location.href,
           title: document.title,
+          readyState: document.readyState,
+          timestamp: Date.now(),
           ...extra
         });
       } catch (error) {
@@ -185,6 +187,9 @@ class CerebrSidebar {
         lastUrl = currentUrl;
 
         emitNavEvent('navigated');
+        waitForPageStability({ initialDelay: 300 }).then((info) => {
+          emitNavEvent('stable', info);
+        });
 
         // 获取iframe并发送消息
         const iframe = sidebar.sidebar?.querySelector('.cerebr-sidebar__iframe');
@@ -642,6 +647,13 @@ class CerebrSidebar {
           const iframeEl = this.sidebar?.querySelector('.cerebr-sidebar__iframe');
           if (!iframeEl) break;
           iframeEl.contentWindow.postMessage({ type: 'COMPUTER_USE_FORCE_OPEN' }, '*');
+          break;
+        }
+        case 'REQUEST_PAGE_STABLE': {
+          const iframeEl = this.sidebar?.querySelector('.cerebr-sidebar__iframe');
+          waitForPageStability({ initialDelay: 200 }).then((info) => {
+            iframeEl?.contentWindow.postMessage({ type: 'PAGE_STABLE', info }, '*');
+          });
           break;
         }
         case 'REQUEST_COMPUTER_USE_SNAPSHOT':
@@ -1555,6 +1567,97 @@ async function extractChaptersFromPDFData(completeData) {
 
 const SIDEBAR_CAPTURE_FADE_MS = 140;
 const SIDEBAR_CAPTURE_WAIT_MS = SIDEBAR_CAPTURE_FADE_MS + 120;
+let activePageStableWait = null;
+
+function waitForPageStability(options = {}) {
+  const {
+    timeout = 8000,
+    idleDuration = 700,
+    initialDelay = 200,
+    requireComplete = true
+  } = options;
+
+  if (activePageStableWait) {
+    return activePageStableWait;
+  }
+
+  activePageStableWait = new Promise((resolve) => {
+    const start = performance.now();
+    let resolved = false;
+    let idleTimer = null;
+    let timeoutTimer = null;
+
+    const cleanup = () => {
+      observer.disconnect();
+      document.removeEventListener('readystatechange', onReadyStateChange);
+      window.removeEventListener('load', onWindowLoad);
+      clearTimeout(idleTimer);
+      clearTimeout(timeoutTimer);
+      activePageStableWait = null;
+    };
+
+    const finish = (status) => {
+      if (resolved) return;
+      resolved = true;
+      const info = {
+        status,
+        readyState: document.readyState,
+        elapsed: performance.now() - start
+      };
+      cleanup();
+      resolve(info);
+    };
+
+    const armIdleTimer = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        if (requireComplete && document.readyState !== 'complete') {
+          armIdleTimer();
+          return;
+        }
+        finish('stable');
+      }, idleDuration);
+    };
+
+    const observer = new MutationObserver(() => {
+      armIdleTimer();
+    });
+    try {
+      observer.observe(document, {
+        subtree: true,
+        childList: true,
+        attributes: true
+      });
+    } catch (error) {
+      console.warn('等待页面稳定时无法观察 DOM:', error);
+    }
+
+    const onReadyStateChange = () => {
+      if (document.readyState === 'complete') {
+        armIdleTimer();
+      }
+    };
+
+    const onWindowLoad = () => {
+      armIdleTimer();
+    };
+
+    document.addEventListener('readystatechange', onReadyStateChange);
+    window.addEventListener('load', onWindowLoad, { once: true });
+
+    timeoutTimer = setTimeout(() => finish('timeout'), timeout);
+
+    if (document.readyState === 'complete') {
+      setTimeout(() => armIdleTimer(), Math.max(0, initialDelay));
+    } else if (document.readyState === 'interactive') {
+      armIdleTimer();
+    } else {
+      setTimeout(() => armIdleTimer(), Math.max(200, initialDelay));
+    }
+  });
+
+  return activePageStableWait;
+}
 
 /**
  * 捕获当前可见标签页的屏幕截图并发送到侧边栏。

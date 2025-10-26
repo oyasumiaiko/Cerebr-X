@@ -230,6 +230,23 @@ let isComputerUseInputActive = false;
     currentInstructionEntryId = entry.id;
   }
 
+  function waitForExternalStability() {
+    return new Promise((resolve) => {
+      const handler = (event) => {
+        if (event?.data?.type === 'PAGE_STABLE') {
+          window.removeEventListener('message', handler);
+          resolve(event.data?.info || {});
+        }
+      };
+      window.addEventListener('message', handler);
+      window.parent.postMessage({ type: 'REQUEST_PAGE_STABLE' }, '*');
+      setTimeout(() => {
+        window.removeEventListener('message', handler);
+        resolve({ status: 'timeout' });
+      }, 8000);
+    });
+  }
+
   function startFollowupRound(label) {
     currentRoundId = generateRequestId('round');
     if (label) {
@@ -1307,6 +1324,7 @@ let isComputerUseInputActive = false;
     }
 
     const status = state.status || 'active';
+    const navStatus = state.navStatus || 'unknown';
     const pendingResponses = Array.isArray(state.pendingResponses) ? state.pendingResponses : [];
     lastPendingResponsesSnapshot = cloneForTransport(pendingResponses) || [];
     updateStatusBadge({ status });
@@ -1338,10 +1356,17 @@ let isComputerUseInputActive = false;
           syncSessionState({ status: 'error', note: 'restore-failed' });
         });
       } else if (pendingActionQueue.length > 0 && isAutoMode) {
-        setStatus('导航完成，继续执行自动操作...', 'info');
-        setTimeout(() => {
-          runActionsSequence();
-        }, 0);
+        if (navStatus !== 'stable') {
+          setStatus('页面仍在加载，等待稳定后继续...', 'info');
+          waitForExternalStability().then(() => {
+            runActionsSequence();
+          });
+        } else {
+          setStatus('导航完成，继续执行自动操作...', 'info');
+          setTimeout(() => {
+            runActionsSequence();
+          }, 0);
+        }
       } else {
         setStatus('页面正在重新加载，稍后将尝试恢复会话。', 'info');
       }
