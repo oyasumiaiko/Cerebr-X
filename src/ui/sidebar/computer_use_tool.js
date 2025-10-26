@@ -35,6 +35,7 @@ let historyEntries = [];
 let currentRoundId = null;
 let currentInstructionEntryId = null;
 let currentRequestAbortController = null;
+let lastPendingResponsesSnapshot = [];
 let chatInputDraft = { text: '', images: '' };
 let computerUseDraft = { text: '', images: '' };
 let originalPlaceholder = '';
