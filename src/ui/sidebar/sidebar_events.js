@@ -15,6 +15,7 @@ export function registerSidebarEventHandlers(appContext) {
   setupEmptyStateHandlers(appContext);
   setupRepomixButton(appContext);
   setupGlobalEscapeHandler(appContext);
+  setupSlashFocusShortcut(appContext);
   setupClickAwayHandler(appContext);
   setupFullscreenToggle(appContext);
   setupScreenshotButton(appContext);
@@ -395,6 +396,35 @@ function setupClickAwayHandler(appContext) {
     if (!clickInsideManagedElement) {
       appContext.services.uiManager.closeExclusivePanels();
     }
+  });
+}
+
+function setupSlashFocusShortcut(appContext) {
+  // 处理侧栏全局“/”快捷键，未聚焦输入框时快速聚焦到输入框
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '/') return;
+    if (appContext.state.isComposing) return;
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+
+    const inputEl = appContext.dom.messageInput;
+    if (!inputEl) return;
+    if (document.activeElement === inputEl) return;
+
+    const target = e.target;
+    const isEditableTarget = (
+      target &&
+      (
+        target.isContentEditable ||
+        target.closest?.('[contenteditable="true"]') ||
+        ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+      )
+    );
+    if (isEditableTarget) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    appContext.services.inputController?.focusToEnd?.();
   });
 }
 
