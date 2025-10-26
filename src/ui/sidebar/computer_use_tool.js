@@ -32,6 +32,11 @@ let actionSettleDelayMs = normalizeDelay(
 let isAutoMode = true;
 let pendingStateRestore = false;
 let historyEntries = [];
+let currentRoundId = null;
+let chatInputDraft = { text: '', images: '' };
+let computerUseDraft = { text: '', images: '' };
+let originalPlaceholder = '';
+let isComputerUseInputActive = false;
 
   function getPageInfo() {
     const info = appContext.state?.pageInfo;
@@ -74,6 +79,142 @@ let historyEntries = [];
     }
   }
 
+  function getMainInputElement() {
+    return dom.messageInput || null;
+  }
+
+  function getImageContainer() {
+    return dom.imageContainer || null;
+  }
+
+  function dispatchInputUpdate() {
+    const inputEl = getMainInputElement();
+    if (!inputEl) return;
+    const event = new Event('input', { bubbles: true });
+    inputEl.dispatchEvent(event);
+  }
+
+  function getRawInputText() {
+    const inputEl = getMainInputElement();
+    if (!inputEl) return '';
+    return inputEl.textContent || '';
+  }
+
+  function getInstructionTextFromInput() {
+    if (services.inputController?.getInputText) {
+      return services.inputController.getInputText() || '';
+    }
+    return getRawInputText().trim();
+  }
+
+  function setInstructionTextToInput(text) {
+    if (services.inputController?.setInputText) {
+      services.inputController.setInputText(text || '');
+    } else {
+      const inputEl = getMainInputElement();
+      if (inputEl) inputEl.textContent = text || '';
+    }
+    dispatchInputUpdate();
+    services.uiManager?.resetInputHeight?.();
+  }
+
+  function clearInputImages() {
+    const imageContainer = getImageContainer();
+    if (!imageContainer) return;
+    imageContainer.innerHTML = '';
+  }
+
+  function setInputImages(html) {
+    const imageContainer = getImageContainer();
+    if (!imageContainer) return;
+    imageContainer.innerHTML = html || '';
+  }
+
+  function captureInputDraft() {
+    return {
+      text: getRawInputText(),
+      images: getImageContainer()?.innerHTML || ''
+    };
+  }
+
+  function applyInputDraft(draft, { focus = false, allowImages = true } = {}) {
+    const safeDraft = draft || { text: '', images: '' };
+    setInstructionTextToInput(safeDraft.text || '');
+    if (allowImages) {
+      setInputImages(safeDraft.images || '');
+    } else {
+      clearInputImages();
+    }
+    if (focus) {
+      focusInstructionInput();
+    }
+  }
+
+  function focusInstructionInput() {
+    if (services.inputController?.focusToEnd) {
+      services.inputController.focusToEnd();
+      return;
+    }
+    const inputEl = getMainInputElement();
+    if (!inputEl) return;
+    try {
+      inputEl.focus();
+      const selection = window.getSelection();
+      if (!selection) return;
+      const range = document.createRange();
+      range.selectNodeContents(inputEl);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch (error) {
+      console.warn('聚焦电脑操作输入框失败:', error);
+    }
+  }
+
+  function setComputerUsePlaceholder() {
+    const inputEl = getMainInputElement();
+    if (!inputEl) return;
+    if (!originalPlaceholder) {
+      originalPlaceholder = inputEl.getAttribute('placeholder') || '';
+    }
+    inputEl.setAttribute('placeholder', '输入电脑操作指令...');
+    inputEl.dataset.inputMode = 'computer-use';
+  }
+
+  function restoreChatPlaceholder() {
+    const inputEl = getMainInputElement();
+    if (!inputEl) return;
+    if (originalPlaceholder) {
+      inputEl.setAttribute('placeholder', originalPlaceholder);
+    } else {
+      inputEl.setAttribute('placeholder', '输入消息...');
+    }
+    delete inputEl.dataset.inputMode;
+  }
+
+  function startInstructionRound(instruction) {
+    currentRoundId = generateRequestId('round');
+    appendHistoryEntry({
+      type: 'instruction',
+      title: '用户指令',
+      role: 'user',
+      content: instruction,
+      roundId: currentRoundId
+    });
+  }
+
+  function startFollowupRound(label) {
+    currentRoundId = generateRequestId('round');
+    if (label) {
+      appendHistoryEntry({
+        type: 'note',
+        title: label,
+        roundId: currentRoundId
+      });
+    }
+  }
+
+
   function cloneForTransport(value) {
     if (value === undefined) return undefined;
     if (typeof structuredClone === 'function') {
@@ -101,8 +242,13 @@ let historyEntries = [];
 
   function clearSessionState(reason = 'clear') {
     postToParent('COMPUTER_USE_CLEAR_STATE', { reason });
-    historyEntries = [];
-    renderHistory();
+    if (reason && reason !== 'restart') {
+      historyEntries = [];
+      currentRoundId = null;
+      renderHistory();
+    } else {
+      currentRoundId = null;
+    }
   }
 
   function ensureSessionKey() {
@@ -334,10 +480,33 @@ let historyEntries = [];
   }
 
   function openPanel() {
+    if (!dom.computerUsePanel) return;
+    const willActivateInput = !isComputerUseInputActive;
+    if (willActivateInput) {
+      chatInputDraft = captureInputDraft();
+      applyInputDraft(computerUseDraft.text ? computerUseDraft : { text: currentInstruction || '', images: '' }, {
+        focus: true,
+        allowImages: false
+      });
+      clearInputImages();
+      setComputerUsePlaceholder();
+      isComputerUseInputActive = true;
+      state.inputMode = 'computerUse';
+    }
     dom.computerUsePanel.classList.add('visible');
+    if (willActivateInput) focusInstructionInput();
   }
 
   function closePanel() {
+    if (!dom.computerUsePanel) return;
+    if (isComputerUseInputActive) {
+      computerUseDraft = captureInputDraft();
+      applyInputDraft(chatInputDraft, { focus: false, allowImages: true });
+      restoreChatPlaceholder();
+      isComputerUseInputActive = false;
+      state.inputMode = 'chat';
+      dispatchInputUpdate();
+    }
     dom.computerUsePanel.classList.remove('visible');
   }
 
@@ -419,11 +588,16 @@ let historyEntries = [];
     const enriched = {
       id: generateRequestId('hist'),
       timestamp: Date.now(),
+      roundId: entry?.roundId || currentRoundId || generateRequestId('round'),
       ...entry
     };
+    currentRoundId = enriched.roundId;
     historyEntries.push(enriched);
     limitHistory();
     renderHistory();
+    if (entry?.type === 'model_response' || entry?.endRound) {
+      currentRoundId = null;
+    }
   }
 
   function renderHistory() {
@@ -442,82 +616,124 @@ let historyEntries = [];
       const entry = document.createElement('div');
       entry.className = 'computer-use-history-entry';
 
-      const header = document.createElement('div');
-      header.className = 'history-entry-header';
+      renderHistoryEntry(entry, item, index);
+      list.appendChild(entry);
+    });
+    list.scrollTop = list.scrollHeight;
+  }
 
-      const title = document.createElement('span');
-      title.className = 'history-entry-title';
-      title.textContent = item.title || (item.type === 'model_response' ? '模型响应' : item.type === 'action_result' ? '动作执行' : '事件');
-      header.appendChild(title);
+  function renderHistoryEntry(entryEl, item, index) {
+    entryEl.className = `computer-use-history-entry entry-${item.type || 'event'}`;
 
-      const time = document.createElement('span');
-      time.className = 'history-entry-meta';
-      time.textContent = new Date(item.timestamp).toLocaleTimeString();
-      header.appendChild(time);
-
-      entry.appendChild(header);
-
-      const body = document.createElement('div');
-      body.className = 'history-entry-body';
-
-      if (item.narration) {
-        const p = document.createElement('div');
-        p.textContent = item.narration;
-        body.appendChild(p);
-      }
-
+    if (item.type === 'instruction') {
+      const bubble = createHistoryBubble({
+        role: 'user',
+        title: '指令',
+        content: item.content,
+        time: item.timestamp
+      });
+      entryEl.appendChild(bubble);
+    } else if (item.type === 'model_response') {
+      const bubble = createHistoryBubble({
+        role: 'assistant',
+        title: '模型响应',
+        content: item.narration,
+        time: item.timestamp
+      });
       if (Array.isArray(item.actions) && item.actions.length) {
-        const ul = document.createElement('ul');
-        ul.className = 'history-entry-actions';
-        item.actions.forEach((action) => {
+        const actionList = document.createElement('ul');
+        actionList.className = 'history-entry-actions';
+        item.actions.forEach((action, idx) => {
           const li = document.createElement('li');
           const argsText = action.args ? ` ${JSON.stringify(action.args)}` : '';
-          li.textContent = `${action.name}${argsText}`;
-          ul.appendChild(li);
+          li.textContent = `${idx + 1}. ${action.name}${argsText}`;
+          actionList.appendChild(li);
         });
-        body.appendChild(ul);
+        bubble.appendChild(actionList);
       }
-
-      if (item.action) {
-        const actionInfo = document.createElement('div');
-        actionInfo.textContent = `动作：${item.action.name}`;
-        body.appendChild(actionInfo);
-      }
-
-      if (item.url) {
-        const urlInfo = document.createElement('div');
-        urlInfo.className = 'history-entry-meta';
-        urlInfo.textContent = item.url;
-        body.appendChild(urlInfo);
-      }
-
       if (item.screenshot) {
         const img = document.createElement('img');
         img.className = 'history-entry-screenshot';
         img.src = item.screenshot;
-        img.alt = '截图';
-        body.appendChild(img);
+        img.alt = '最新截图';
+        bubble.appendChild(img);
       }
-
-      if (item.note) {
-        const note = document.createElement('div');
-        note.className = 'history-entry-meta';
-        note.textContent = item.note;
-        body.appendChild(note);
+      entryEl.appendChild(bubble);
+    } else if (item.type === 'action_result') {
+      const bubble = createHistoryBubble({
+        role: 'system',
+        title: `执行：${item.action?.name || '动作'}`,
+        content: item.result ? JSON.stringify(item.result, null, 2) : '',
+        time: item.timestamp
+      });
+      if (item.screenshot) {
+        const img = document.createElement('img');
+        img.className = 'history-entry-screenshot';
+        img.src = item.screenshot;
+        img.alt = '动作截图';
+        bubble.appendChild(img);
       }
-
-      entry.appendChild(body);
-
-      const nextItem = historyEntries[index + 1];
-      if (nextItem && nextItem.type === 'model_response') {
-        const divider = document.createElement('div');
-        divider.className = 'history-entry-divider';
-        entry.appendChild(divider);
+      entryEl.appendChild(bubble);
+    } else if (item.type === 'screenshot') {
+      const bubble = createHistoryBubble({
+        role: 'system',
+        title: item.title || '页面截图',
+        content: item.url || '',
+        time: item.timestamp
+      });
+      if (item.screenshot) {
+        const img = document.createElement('img');
+        img.className = 'history-entry-screenshot';
+        img.src = item.screenshot;
+        img.alt = item.title || '截图';
+        bubble.appendChild(img);
       }
+      entryEl.appendChild(bubble);
+    } else {
+      const bubble = createHistoryBubble({
+        role: 'system',
+        title: item.title || '事件',
+        content: item.note || item.narration || item.content || '',
+        time: item.timestamp
+      });
+      entryEl.appendChild(bubble);
+    }
 
-      list.appendChild(entry);
-    });
-    list.scrollTop = list.scrollHeight;
+    const next = historyEntries[index + 1];
+    if (!next || next.roundId !== item.roundId) {
+      const divider = document.createElement('div');
+      divider.className = 'history-entry-divider';
+      entryEl.appendChild(divider);
+    }
+  }
+
+  function createHistoryBubble({ role, title, content, time }) {
+    const bubble = document.createElement('div');
+    bubble.className = `history-entry-bubble bubble-${role || 'system'}`;
+
+    const header = document.createElement('div');
+    header.className = 'history-entry-header';
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'history-entry-title';
+    titleSpan.textContent = title || '';
+    header.appendChild(titleSpan);
+
+    if (time) {
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'history-entry-meta';
+      timeSpan.textContent = new Date(time).toLocaleTimeString();
+      header.appendChild(timeSpan);
+    }
+    bubble.appendChild(header);
+
+    if (content) {
+      const body = document.createElement('div');
+      body.className = 'history-entry-body';
+      body.textContent = content;
+      bubble.appendChild(body);
+    }
+
+    return bubble;
   }
 
   function renderActionsList() {
@@ -614,10 +830,11 @@ let historyEntries = [];
       return;
     }
 
-    const instruction = (dom.computerUseInstruction?.value || '').trim();
+    computerUseDraft = captureInputDraft();
+    const instruction = getInstructionTextFromInput().trim();
     if (!instruction) {
       setStatus('请先输入要执行的指令', 'warning');
-      dom.computerUseInstruction?.focus();
+      focusInstructionInput();
       return;
     }
 
@@ -639,12 +856,23 @@ let historyEntries = [];
       latestNarration = '';
       updatePendingActions([]);
       clearSessionState('restart');
+      computerUseDraft = { text: '', images: '' };
+      setInstructionTextToInput('');
+      clearInputImages();
+      dispatchInputUpdate();
+      startInstructionRound(instruction);
 
       setLoading(true, '正在更新截图...');
       await refreshScreenshot({ silent: true });
       const screenshot = latestScreenshot;
       if (!screenshot) throw new Error('截图失败，无法构建请求');
-
+      appendHistoryEntry({
+        type: 'screenshot',
+        title: '页面截图',
+        screenshot,
+        url: getPageUrl(),
+        roundId: currentRoundId
+      });
       setLoading(true, '正在向 Gemini 请求操作...');
       const startResult = await computerUseApi.startSession({ instruction, screenshotDataUrl: screenshot });
       currentSession = startResult.session;
@@ -658,7 +886,8 @@ let historyEntries = [];
         narration: latestNarration,
         actions: initialActions,
         url: getPageUrl(),
-        screenshot: latestScreenshot
+        screenshot: latestScreenshot,
+        roundId: currentRoundId
       });
       syncSessionState({ status: 'active', pendingResponses: [] });
 
@@ -770,21 +999,23 @@ let historyEntries = [];
         responsePayload.safety_acknowledgement = true;
       }
 
-      const functionResponse = {
-        name: workingAction.name,
-        id: workingAction.callId || workingAction.id || workingAction.call_id || null,
-        response: responsePayload,
-        parts: base64 ? [{ inline_data: { mime_type: 'image/png', data: base64 } }] : []
-      };
-
+      currentRoundId = generateRequestId('round');
       appendHistoryEntry({
         type: 'action_result',
         title: `动作：${workingAction.name}`,
         action: workingAction,
         result: responsePayload,
         url: responsePayload.url,
-        screenshot: latestScreenshot
+        screenshot: latestScreenshot,
+        roundId: currentRoundId
       });
+
+      const functionResponse = {
+        name: workingAction.name,
+        id: workingAction.callId || workingAction.id || workingAction.call_id || null,
+        response: responsePayload,
+        parts: base64 ? [{ inline_data: { mime_type: 'image/png', data: base64 } }] : []
+      };
 
       syncSessionState({
         status: result.navigation ? 'waiting-navigation' : 'pending-response',
@@ -829,6 +1060,9 @@ let historyEntries = [];
   async function advanceSessionWithResponses(responses, { triggerAuto = isAutoMode } = {}) {
     if (!currentSession) return;
     try {
+      if (!currentRoundId) {
+        startFollowupRound(triggerAuto ? '自动继续' : '手动继续');
+      }
       setLoading(true, '正在请求下一步动作...');
       const next = await computerUseApi.continueSession({
         session: currentSession,
@@ -844,7 +1078,9 @@ let historyEntries = [];
         title: '模型响应',
         narration: latestNarration,
         actions: newActions,
-        url: getPageUrl()
+        url: getPageUrl(),
+        screenshot: latestScreenshot,
+        roundId: currentRoundId
       });
       syncSessionState({ status: 'active', pendingResponses: [] });
 
@@ -926,19 +1162,7 @@ let historyEntries = [];
   }
 
   function setupInstructionShortcuts() {
-    if (!dom.computerUseInstruction) return;
-    dom.computerUseInstruction.addEventListener('keydown', (event) => {
-      if (
-        event.key === 'Enter' &&
-        !event.shiftKey &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.metaKey
-      ) {
-        event.preventDefault();
-        if (!isLoading) handleRunRequest();
-      }
-    });
+    // 统一改用主输入框，快捷键逻辑在全局事件中处理，这里保持空实现以兼容旧接口。
   }
 
   function setupSessionBridge() {
@@ -976,9 +1200,13 @@ let historyEntries = [];
     latestScreenshotAt = state.latestScreenshotAt || latestScreenshotAt;
     historyEntries = Array.isArray(state.history) ? state.history : [];
     renderHistory();
+    currentRoundId = historyEntries.length ? historyEntries[historyEntries.length - 1].roundId : null;
 
-    if (dom.computerUseInstruction && currentInstruction) {
-      dom.computerUseInstruction.value = currentInstruction;
+    if (isComputerUseInputActive) {
+      setInstructionTextToInput(currentInstruction || '');
+      dispatchInputUpdate();
+    } else {
+      computerUseDraft = { text: currentInstruction || '', images: '' };
     }
     if (dom.computerUseDelaySlider) {
       dom.computerUseDelaySlider.value = String(actionSettleDelayMs);
@@ -1045,6 +1273,8 @@ let historyEntries = [];
     closePanel,
     handleSnapshotResult,
     handleActionResult,
-    handleSessionState
+    handleSessionState,
+    submitInstruction: handleRunRequest,
+    isInputActive: () => isComputerUseInputActive
   };
 }

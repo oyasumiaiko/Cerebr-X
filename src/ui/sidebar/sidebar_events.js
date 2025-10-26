@@ -579,6 +579,24 @@ function setupMessageInputHandlers(appContext) {
   input.addEventListener('compositionend', () => { appContext.state.isComposing = false; });
 
   input.addEventListener('keydown', async function (e) {
+    const computerUseTool = appContext.services.computerUseTool;
+    const usingComputerUse = computerUseTool?.isInputActive?.();
+    if (usingComputerUse) {
+      if (
+        e.key === 'Enter' &&
+        !e.shiftKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.metaKey
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+        computerUseTool.submitInstruction?.();
+      }
+      return;
+    }
+
     if (e.key !== 'Enter') return;
     if (e.shiftKey) return;
     if (appContext.state.isComposing) return;
@@ -676,7 +694,13 @@ function setupChatActionButtons(appContext) {
   });
 
   appContext.dom.quickSummary.addEventListener('click', () => appContext.services.messageSender.performQuickSummary());
-  appContext.dom.sendButton.addEventListener('click', () => appContext.services.messageSender.sendMessage());
+  appContext.dom.sendButton.addEventListener('click', () => {
+    if (appContext.services.computerUseTool?.isInputActive?.()) {
+      appContext.services.computerUseTool.submitInstruction?.();
+      return;
+    }
+    appContext.services.messageSender.sendMessage();
+  });
 
   if (appContext.dom.chatHistoryMenuItem) {
     appContext.dom.chatHistoryMenuItem.addEventListener('click', () => {

@@ -91,7 +91,6 @@ export function createSidebarAppContext(isStandalone) {
     computerUseMenuItem: document.getElementById('computer-use-tool'),
     computerUsePanel: document.getElementById('computer-use-panel'),
     computerUseBackButton: document.querySelector('#computer-use-panel .back-button'),
-    computerUseInstruction: document.getElementById('computer-use-instruction'),
     computerUseRunButton: document.getElementById('computer-use-run'),
     computerUseCaptureButton: document.getElementById('computer-use-capture'),
     computerUseSnapshotLabel: document.getElementById('computer-use-snapshot-label'),
@@ -118,6 +117,7 @@ export function createSidebarAppContext(isStandalone) {
       isStandalone,
       isFullscreen: false,
       isComposing: false,
+      inputMode: 'chat',
       pageInfo: isStandalone ? { url: '', title: '独立聊天', standalone: true } : null,
       memoryManagement: {
         IDLE_CLEANUP_INTERVAL: 5 * 60 * 1000,
