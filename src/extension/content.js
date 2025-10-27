@@ -1911,66 +1911,62 @@ function getClickableTarget(clientX, clientY) {
 }
 
 function performNormalizedClick(normalizedX, normalizedY) {
-  return withSidebarHidden(() => {
-    const point = getViewportPoint(normalizedX, normalizedY);
-    if (!point) {
-      return { success: false, error: '无法获取视口尺寸' };
-    }
-    const { clientX, clientY } = point;
-    const target = getClickableTarget(clientX, clientY);
-    if (!target) {
-      return { success: false, error: '未找到可点击元素' };
-    }
-    const eventInit = {
-      bubbles: true,
-      cancelable: true,
-      clientX,
-      clientY,
-      view: window,
-      button: 0
-    };
-    try {
-      target.dispatchEvent(new MouseEvent('mousemove', eventInit));
-      target.dispatchEvent(new MouseEvent('mousedown', eventInit));
-      target.dispatchEvent(new MouseEvent('mouseup', eventInit));
-      target.dispatchEvent(new MouseEvent('click', eventInit));
-      flashClickOverlay(clientX, clientY);
-      return { success: true, selector: buildCssSelector(target) };
-    } catch (error) {
-      console.error('执行归一化点击失败:', error);
-      return { success: false, error: error.message || '执行点击失败' };
-    }
-  });
+  const point = getViewportPoint(normalizedX, normalizedY);
+  if (!point) {
+    return { success: false, error: '无法获取视口尺寸' };
+  }
+  const { clientX, clientY } = point;
+  const target = getClickableTarget(clientX, clientY);
+  if (!target) {
+    return { success: false, error: '未找到可点击元素' };
+  }
+  const eventInit = {
+    bubbles: true,
+    cancelable: true,
+    clientX,
+    clientY,
+    view: window,
+    button: 0
+  };
+  try {
+    target.dispatchEvent(new MouseEvent('mousemove', eventInit));
+    target.dispatchEvent(new MouseEvent('mousedown', eventInit));
+    target.dispatchEvent(new MouseEvent('mouseup', eventInit));
+    target.dispatchEvent(new MouseEvent('click', eventInit));
+    flashClickOverlay(clientX, clientY);
+    return { success: true, selector: buildCssSelector(target) };
+  } catch (error) {
+    console.error('执行归一化点击失败:', error);
+    return { success: false, error: error.message || '执行点击失败' };
+  }
 }
 
 function performHoverAt(normalizedX, normalizedY) {
-  return withSidebarHidden(() => {
-    const point = getViewportPoint(normalizedX, normalizedY);
-    if (!point) {
-      return { success: false, error: '无法获取视口尺寸' };
-    }
-    const { clientX, clientY } = point;
-    const target = getClickableTarget(clientX, clientY);
-    if (!target) {
-      return { success: false, error: '未找到目标元素' };
-    }
-    const eventInit = {
-      bubbles: true,
-      cancelable: true,
-      clientX,
-      clientY,
-      view: window
-    };
-    try {
-      target.dispatchEvent(new MouseEvent('mousemove', eventInit));
-      target.dispatchEvent(new MouseEvent('mouseover', eventInit));
-      target.dispatchEvent(new MouseEvent('mouseenter', eventInit));
-      return { success: true, selector: buildCssSelector(target) };
-    } catch (error) {
-      console.error('执行 hover 失败:', error);
-      return { success: false, error: error.message || '执行 hover 失败' };
-    }
-  });
+  const point = getViewportPoint(normalizedX, normalizedY);
+  if (!point) {
+    return { success: false, error: '无法获取视口尺寸' };
+  }
+  const { clientX, clientY } = point;
+  const target = getClickableTarget(clientX, clientY);
+  if (!target) {
+    return { success: false, error: '未找到目标元素' };
+  }
+  const eventInit = {
+    bubbles: true,
+    cancelable: true,
+    clientX,
+    clientY,
+    view: window
+  };
+  try {
+    target.dispatchEvent(new MouseEvent('mousemove', eventInit));
+    target.dispatchEvent(new MouseEvent('mouseover', eventInit));
+    target.dispatchEvent(new MouseEvent('mouseenter', eventInit));
+    return { success: true, selector: buildCssSelector(target) };
+  } catch (error) {
+    console.error('执行 hover 失败:', error);
+    return { success: false, error: error.message || '执行 hover 失败' };
+  }
 }
 
 function setValueForElement(element, text, clearBefore) {
@@ -2011,34 +2007,32 @@ function performTypeTextAt(args = {}) {
   if (typeof x !== 'number' || typeof y !== 'number') {
     return { success: false, error: 'type_text_at 缺少坐标参数' };
   }
-  return withSidebarHidden(() => {
-    const point = getViewportPoint(x, y);
-    if (!point) {
-      return { success: false, error: '无法获取视口尺寸' };
+  const point = getViewportPoint(x, y);
+  if (!point) {
+    return { success: false, error: '无法获取视口尺寸' };
+  }
+  const { clientX, clientY } = point;
+  const target = getClickableTarget(clientX, clientY);
+  if (!target) {
+    return { success: false, error: '未找到目标元素' };
+  }
+  try {
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX, clientY }));
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX, clientY }));
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX, clientY }));
+    target.focus?.();
+    setValueForElement(target, text, clear_before_typing !== false);
+    if (press_enter !== false) {
+      const active = document.activeElement || target;
+      ['keydown', 'keypress', 'keyup'].forEach(type => {
+        active.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', bubbles: true }));
+      });
     }
-    const { clientX, clientY } = point;
-    const target = getClickableTarget(clientX, clientY);
-    if (!target) {
-      return { success: false, error: '未找到目标元素' };
-    }
-    try {
-      target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX, clientY }));
-      target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX, clientY }));
-      target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX, clientY }));
-      target.focus?.();
-      setValueForElement(target, text, clear_before_typing !== false);
-      if (press_enter !== false) {
-        const active = document.activeElement || target;
-        ['keydown', 'keypress', 'keyup'].forEach(type => {
-          active.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', bubbles: true }));
-        });
-      }
-      return { success: true, selector: buildCssSelector(target) };
-    } catch (error) {
-      console.error('执行 type_text_at 失败:', error);
-      return { success: false, error: error.message || '输入文本失败' };
-    }
-  });
+    return { success: true, selector: buildCssSelector(target) };
+  } catch (error) {
+    console.error('执行 type_text_at 失败:', error);
+    return { success: false, error: error.message || '输入文本失败' };
+  }
 }
 
 function parseKeySequence(keys) {
@@ -2054,7 +2048,7 @@ function performKeyCombination(args = {}) {
   if (!sequence.length) {
     return { success: false, error: 'key_combination 缺少 keys 参数' };
   }
-  return withSidebarHidden(() => {
+  try {
     const active = document.activeElement || document.body;
     const modifiers = ['control', 'ctrl', 'alt', 'shift', 'meta', 'command'];
     const down = new Set();
@@ -2102,13 +2096,16 @@ function performKeyCombination(args = {}) {
       console.error('执行快捷键失败:', error);
       return { success: false, error: error.message || '执行快捷键失败' };
     }
-  });
+  } catch (error) {
+    console.error('执行快捷键失败:', error);
+    return { success: false, error: error.message || '执行快捷键失败' };
+  }
 }
 
 function performScrollDocument(direction = 'down') {
   const distance = 800;
   const normalized = String(direction || '').toLowerCase();
-  return withSidebarHidden(() => {
+  try {
     switch (normalized) {
       case 'up':
         window.scrollBy(0, -distance);
@@ -2126,7 +2123,10 @@ function performScrollDocument(direction = 'down') {
         return { success: false, error: `未知的滚动方向: ${direction}` };
     }
     return { success: true };
-  });
+  } catch (error) {
+    console.error('滚动页面失败:', error);
+    return { success: false, error: error.message || '滚动页面失败' };
+  }
 }
 
 function performScrollAt(args = {}) {
@@ -2135,7 +2135,7 @@ function performScrollAt(args = {}) {
   if (!point) {
     return { success: false, error: '无法获取视口尺寸' };
   }
-  return withSidebarHidden(() => {
+  try {
     const { clientX, clientY } = point;
     const target = getClickableTarget(clientX, clientY);
     if (!target) {
@@ -2173,7 +2173,10 @@ function performScrollAt(args = {}) {
       console.error('局部滚动失败:', error);
       return { success: false, error: error.message || '局部滚动失败' };
     }
-  });
+  } catch (error) {
+    console.error('局部滚动失败:', error);
+    return { success: false, error: error.message || '局部滚动失败' };
+  }
 }
 
 function performDragAndDrop(args = {}) {
@@ -2183,7 +2186,7 @@ function performDragAndDrop(args = {}) {
   if (!startPoint || !endPoint) {
     return { success: false, error: '拖拽坐标无效' };
   }
-  return withSidebarHidden(() => {
+  try {
     const source = getClickableTarget(startPoint.clientX, startPoint.clientY);
     if (!source) {
       return { success: false, error: '未找到拖拽起始元素' };
@@ -2200,7 +2203,10 @@ function performDragAndDrop(args = {}) {
       console.error('拖拽失败:', error);
       return { success: false, error: error.message || '拖拽失败' };
     }
-  });
+  } catch (error) {
+    console.error('拖拽失败:', error);
+    return { success: false, error: error.message || '拖拽失败' };
+  }
 }
 
 function delay(ms) {
