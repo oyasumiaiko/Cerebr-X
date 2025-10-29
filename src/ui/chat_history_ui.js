@@ -293,6 +293,46 @@ export function createChatHistoryUI(appContext) {
   // --- 置顶功能结束 ---
 
   /**
+   * 删除会话记录并同步清理缓存、状态
+   * @param {string} conversationId - 要删除的会话ID
+   * @returns {Promise<void>}
+   */
+  async function deleteConversationRecord(conversationId) {
+    if (!conversationId) return;
+    try {
+      await deleteConversation(conversationId);
+    } catch (error) {
+      console.error('删除会话记录失败:', error);
+    }
+
+    try {
+      await unpinConversation(conversationId);
+    } catch (error) {
+      console.error('取消会话置顶失败:', error);
+    }
+
+    if (loadedConversations.has(conversationId)) {
+      loadedConversations.delete(conversationId);
+    }
+    if (conversationUsageTimestamp.has(conversationId)) {
+      conversationUsageTimestamp.delete(conversationId);
+    }
+    if (activeConversation?.id === conversationId) {
+      activeConversation = null;
+    }
+
+    if (currentConversationId === conversationId) {
+      currentConversationId = null;
+      services.messageSender.setCurrentConversationId(null);
+      services.chatHistoryManager.clearHistory();
+      chatContainer.innerHTML = '';
+    }
+
+    invalidateMetadataCache();
+    refreshChatHistory();
+  }
+
+  /**
    * 提取消息的纯文本内容
    * @param {Object} msg - 消息对象
    * @returns {string} 纯文本内容
@@ -349,14 +389,21 @@ export function createChatHistoryUI(appContext) {
    * @returns {Promise<void>}
    */
   async function saveCurrentConversation(isUpdate = false) {
-    if (services.chatHistoryManager.chatHistory.messages.length === 0) return;
-    const messages = services.chatHistoryManager.chatHistory.messages.slice();
-    const timestamps = messages.map(msg => msg.timestamp);
+    const chatHistory = services.chatHistoryManager.chatHistory;
+    const messages = chatHistory.messages;
+    if (messages.length === 0) {
+      if (isUpdate && currentConversationId) {
+        await deleteConversationRecord(currentConversationId);
+      }
+      return;
+    }
+    const messagesCopy = messages.slice();
+    const timestamps = messagesCopy.map(msg => msg.timestamp);
     const startTime = Math.min(...timestamps);
     const endTime = Math.max(...timestamps);
 
     // 提取第一条消息的纯文本内容
-    const firstMessageTextContent = extractMessagePlainText(messages.find(msg => extractMessagePlainText(msg) !== ''));
+    const firstMessageTextContent = extractMessagePlainText(messagesCopy.find(msg => extractMessagePlainText(msg) !== ''));
     
     let summary = '';
     if (firstMessageTextContent) {
@@ -431,9 +478,9 @@ export function createChatHistoryUI(appContext) {
       title: titleToSave,
       startTime,
       endTime,
-      messages,
+      messages: messagesCopy,
       summary: summaryToSave,
-      messageCount: messages.length
+      messageCount: messagesCopy.length
     };
 
     // 使用 IndexedDB 存储对话记录
@@ -907,23 +954,10 @@ export function createChatHistoryUI(appContext) {
 
     deleteOption.addEventListener('click', async (e) => {
       e.stopPropagation(); // <--- 添加阻止冒泡
-      await deleteConversation(conversationId);
-      invalidateMetadataCache();
-      menu.remove();
-
-      // 从缓存中移除
-      if (loadedConversations.has(conversationId)) {
-        loadedConversations.delete(conversationId);
-        conversationUsageTimestamp.delete(conversationId);
-      }
-      // 如果删除的是置顶对话，也从置顶列表中移除
-      await unpinConversation(conversationId); 
-
-      // 刷新聊天记录面板
-      const panel = document.getElementById('chat-history-panel');
-      if (panel) {
-        const filterInput = panel.querySelector('input[type="text"]');
-        loadConversationHistories(panel, filterInput ? filterInput.value : '');
+      try {
+        await deleteConversationRecord(conversationId);
+      } finally {
+        menu.remove();
       }
     });
 
