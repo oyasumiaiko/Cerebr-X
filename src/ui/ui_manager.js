@@ -230,17 +230,67 @@ export function createUIManager(appContext) {
    */
   function setupChatContainerEventListeners() {
     // 移除外层条件检查，如果 chatContainer 或 messageSender 无效，将直接报错
+    const AUTO_SCROLL_THRESHOLD = 100;
+    const ALT_SCROLL_MULTIPLIER = 3; // 按住 Alt 时的滚动加速度
+
+    /**
+     * 将滚轮事件的 delta 值统一转换为像素单位
+     * @param {number} value - 原始 delta 数值
+     * @param {number} mode - deltaMode 常量
+     * @returns {number} 像素值
+     */
+    const normalizeWheelDelta = (value, mode) => {
+      if (!value) return 0;
+      if (mode === 1) { // DOM_DELTA_LINE
+        const computedStyle = window.getComputedStyle(chatContainer);
+        const lineHeight = parseFloat(computedStyle.lineHeight);
+        if (Number.isFinite(lineHeight)) {
+          return value * lineHeight;
+        }
+        const fontSize = parseFloat(computedStyle.fontSize) || 16;
+        return value * fontSize * 1.2;
+      }
+      if (mode === 2) { // DOM_DELTA_PAGE
+        return value * chatContainer.clientHeight;
+      }
+      return value;
+    };
+
+    // 按住 Alt 时使用加速滚动，提高浏览长对话的效率
     chatContainer.addEventListener('wheel', (e) => {
-      if (e.deltaY < 0) { // Scrolling up
-        messageSender.setShouldAutoScroll(false);
-      } else if (e.deltaY > 0) { // Scrolling down
-        const threshold = 100; // Px from bottom to re-enable auto-scroll
-        const distanceFromBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
-        if (distanceFromBottom < threshold) {
-          messageSender.setShouldAutoScroll(true);
+      let effectiveDeltaY = e.deltaY;
+
+      if (e.altKey) {
+        e.preventDefault();
+        const acceleratedDeltaY = normalizeWheelDelta(e.deltaY, e.deltaMode) * ALT_SCROLL_MULTIPLIER;
+        const acceleratedDeltaX = normalizeWheelDelta(e.deltaX, e.deltaMode) * ALT_SCROLL_MULTIPLIER;
+
+        if (acceleratedDeltaY) {
+          chatContainer.scrollTop += acceleratedDeltaY;
+          effectiveDeltaY = acceleratedDeltaY;
+        } else {
+          effectiveDeltaY = 0;
+        }
+
+        if (acceleratedDeltaX) {
+          chatContainer.scrollLeft += acceleratedDeltaX;
         }
       }
-    }, { passive: true });
+
+      if (effectiveDeltaY < 0) {
+        messageSender.setShouldAutoScroll(false);
+        return;
+      }
+
+      if (effectiveDeltaY > 0) {
+        const distanceFromBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
+        if (distanceFromBottom < AUTO_SCROLL_THRESHOLD) {
+          messageSender.setShouldAutoScroll(true);
+        } else if (e.altKey) {
+          messageSender.setShouldAutoScroll(false);
+        }
+      }
+    }, { passive: false });
 
     chatContainer.addEventListener('mousedown', (e) => {
       if (e.offsetX < chatContainer.clientWidth) { 
