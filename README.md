@@ -3,6 +3,6 @@
 </p>
 
 # 🧠 Cerebr - Intelligent AI Assistant
-# Moved to https://github.com/oyasumiaiko/Cerebr-v2
+# Moved to https://github.com/oyasumiaiko/Cerebr
 
 ![screenshot](./statics/image.png)
