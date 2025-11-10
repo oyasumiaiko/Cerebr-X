@@ -102,6 +102,7 @@ class CerebrSidebar {
     this.lastUrl = window.location.href;
     this.isFullscreen = false;
     this.sidebarPosition = 'right'; // 默认侧边栏位置为右侧
+    this.lastFocusedElement = null;
     // console.log('CerebrSidebar 实例创建');
     this.initializeSidebar();
     this.setupUrlChangeListener();
@@ -528,6 +529,59 @@ class CerebrSidebar {
       iframe.contentWindow.postMessage({ type: 'FOCUS_INPUT' }, '*');
     }
   }
+
+  // 记录开启侧栏前宿主页面的焦点元素
+  captureHostFocusTarget() {
+    const activeElement = document.activeElement;
+    if (!activeElement) {
+      this.lastFocusedElement = null;
+      return;
+    }
+    if (this.sidebar?.contains(activeElement)) {
+      this.lastFocusedElement = null;
+      return;
+    }
+    this.lastFocusedElement = activeElement;
+  }
+
+  // 恢复宿主页面的焦点，确保关闭侧栏后键盘输入回到原页面
+  restoreHostFocus() {
+    const target = this.getHostFocusFallback();
+    if (target && typeof target.focus === 'function') {
+      try {
+        target.focus({ preventScroll: true });
+      } catch (_) {
+        target.focus();
+      }
+    } else if (typeof window.focus === 'function') {
+      window.focus();
+    }
+    this.lastFocusedElement = null;
+  }
+
+  // 提供一个稳定的焦点回退目标
+  getHostFocusFallback() {
+    if (
+      this.lastFocusedElement &&
+      document.contains(this.lastFocusedElement) &&
+      typeof this.lastFocusedElement.focus === 'function'
+    ) {
+      return this.lastFocusedElement;
+    }
+
+    const activeElement = document.activeElement;
+    if (
+      activeElement &&
+      activeElement !== document.body &&
+      activeElement !== document.documentElement &&
+      typeof activeElement.focus === 'function' &&
+      !this.sidebar?.contains(activeElement)
+    ) {
+      return activeElement;
+    }
+
+    return document.body || document.documentElement;
+  }
   /**
    * 切换侧边栏的显示状态
    * @param {boolean|null} forceShow - 明确指定显示(true)或隐藏(false)，或为null时取反当前状态
@@ -548,12 +602,18 @@ class CerebrSidebar {
       }
 
       // 如果之前和现在都是显示状态，无需操作
-      if (wasVisible && this.isVisible && !this.isFullscreen) return;
+      if (wasVisible && this.isVisible && !this.isFullscreen) {
+        this.focusInput();
+        return;
+      }
 
       // console.log(`切换侧边栏: ${wasVisible} -> ${this.isVisible}, 位置: ${this.sidebarPosition}`);
 
       // 根据当前显示状态更新侧边栏
       if (this.isVisible) {
+        if (!wasVisible) {
+          this.captureHostFocusTarget();
+        }
         // 显示侧边栏前，先将 display 设为 'block'
         this.sidebar.style.display = 'block';
         // 强制重排（读取 offsetWidth ）以确保初始状态被应用
@@ -565,10 +625,8 @@ class CerebrSidebar {
           document.documentElement.style.overflow = 'hidden';
         }
 
-        // 如果之前是隐藏状态，则聚焦输入框
-        if (!wasVisible) {
-          this.focusInput();
-        }
+        // 每次开启侧栏都确保输入框获得焦点
+        this.focusInput();
       } else {
         // 隐藏侧边栏：先移除 visible 类
         this.sidebar.classList.remove('visible');
@@ -590,6 +648,7 @@ class CerebrSidebar {
         if (iframe) {
           iframe.contentWindow.postMessage({ type: 'BLUR_INPUT' }, '*');
         }
+        this.restoreHostFocus();
         // 当动画过渡结束后，再把 display 设置为 none
         this.sidebar.addEventListener('transitionend', (e) => {
           if (!this.sidebar.classList.contains('visible')) {

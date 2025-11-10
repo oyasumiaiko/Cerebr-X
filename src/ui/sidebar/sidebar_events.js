@@ -508,6 +508,11 @@ function setupWindowMessageHandlers(appContext) {
       case 'FOCUS_INPUT':
         appContext.services.inputController.focusToEnd();
         break;
+      case 'BLUR_INPUT':
+        if (appContext.dom.messageInput) {
+          appContext.dom.messageInput.blur();
+        }
+        break;
       case 'URL_CHANGED':
         if (appContext.state.isStandalone) {
           break;
