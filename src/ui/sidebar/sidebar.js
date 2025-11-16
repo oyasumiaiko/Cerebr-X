@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const appContext = createSidebarAppContext(isStandalone);
   registerSidebarUtilities(appContext);
   setupLayoutObservers(appContext);
+  setupSidebarSelectionBroadcast(isStandalone);
   exposeGlobals(appContext, isStandalone);
 
   await initializeSidebarServices(appContext);
@@ -68,6 +69,43 @@ function setupLayoutObservers(appContext) {
   const resizeObserver = new ResizeObserver(() => appContext.utils.updateInputContainerHeightVar());
   const inputEl = document.getElementById('input-container');
   if (inputEl) resizeObserver.observe(inputEl);
+}
+
+/**
+ * 在嵌入模式下，将侧栏内部的选中文本通过 postMessage 同步给宿主页面。
+ * 这样内容脚本可以像感知网页选区一样感知侧栏选区，用于快捷总结等功能。
+ * @param {boolean} isStandalone - 是否独立页面模式
+ */
+function setupSidebarSelectionBroadcast(isStandalone) {
+  // 独立页面无需向外同步选区
+  if (isStandalone) return;
+
+  let lastSelection = '';
+
+  window.addEventListener('selectionchange', () => {
+    try {
+      const selection = window.getSelection();
+      const text = (selection && !selection.isCollapsed)
+        ? selection.toString().trim()
+        : '';
+
+      // 文本未变化时不广播，避免产生噪音
+      if (text === lastSelection) return;
+      lastSelection = text;
+
+      // 将当前选中文本同步给宿主页面（内容脚本所在环境）
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          source: 'cerebr-sidebar',
+          type: 'SIDEBAR_SELECTION_CHANGED',
+          text
+        }, '*');
+      }
+    } catch (e) {
+      // 同步选区失败不应影响主流程，仅记录日志
+      console.warn('同步侧栏选区失败:', e);
+    }
+  });
 }
 
 /**

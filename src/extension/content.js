@@ -2,7 +2,7 @@ console.log('Cerebr content script loaded at:', new Date().toISOString());
 console.log('Window location:', window.location.href);
 console.log('Document readyState:', document.readyState);
 
-// 全局变量，用于存储当前选中的文本
+// 全局变量，用于存储当前选中的文本（网页 + 侧栏）
 let currentSelection = "";
 // 存储已附加监听器的 iframe 窗口，防止重复操作
 const monitoredFrames = new WeakSet();
@@ -517,6 +517,18 @@ class CerebrSidebar {
             // console.log('已发送当前页面信息到侧边栏');
           }
           break;
+      }
+    });
+
+    // 接收来自侧栏内部的选区同步消息，更新全局选区缓存
+    window.addEventListener('message', (event) => {
+      try {
+        const data = event.data || {};
+        if (data.type !== 'SIDEBAR_SELECTION_CHANGED') return;
+        if (data.source && data.source !== 'cerebr-sidebar') return;
+        currentSelection = (data.text || '').toString().trim();
+      } catch (e) {
+        console.warn('[Cerebr Selection] 处理侧栏选区消息失败:', e);
       }
     });
   }
