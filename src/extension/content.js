@@ -374,12 +374,21 @@ class CerebrSidebar {
       // 设置侧边栏位置 - 在添加到DOM之后设置
       this.updatePosition(this.sidebarPosition);
 
-      // 添加 ResizeObserver 监听大小变化
-      const scaleObserver = new ResizeObserver(entries => {
-        this.updateScale();
+      // 初始化缩放设置：根据当前设备像素比和用户缩放因子计算一次
+      this.updateScale();
+      // 记录当前 DPR，用于后续检测浏览器缩放变化（Ctrl + / Ctrl -）
+      this._lastDevicePixelRatio = window.devicePixelRatio || 1;
+      // 当浏览器缩放比例变化时（通常会伴随 DPR 变化），重新应用一次缩放，保持侧栏视觉尺寸稳定
+      window.addEventListener('resize', () => {
+        try {
+          const currentDpr = window.devicePixelRatio || 1;
+          if (currentDpr === this._lastDevicePixelRatio) return;
+          this._lastDevicePixelRatio = currentDpr;
+          this.updateScale();
+        } catch (e) {
+          console.warn('更新侧边栏缩放时出错:', e);
+        }
       });
-
-      scaleObserver.observe(content);
 
       // 使用MutationObserver确保我们的元素不会被移除
       let restoreTimeoutId = null;
