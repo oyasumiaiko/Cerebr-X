@@ -531,9 +531,10 @@ export function createContextMenuManager(appContext) {
       textarea.style.height = baseHeight + 'px';
     }
     textarea.style.overflow = 'auto';
-    // 宽度：以原消息宽度为基准，并设置最小 70vw，上限 100%
+    // 宽度：以原消息宽度为基准，额外增加 2em，并设置最小宽度 10em，上限 100%
+    textarea.style.minWidth = '10em';
     if (baseWidth > 0) {
-      textarea.style.width = baseWidth + 'px';
+      textarea.style.width = `calc(${baseWidth}px + 2em)`;
     } else {
       textarea.style.width = '';
     }
