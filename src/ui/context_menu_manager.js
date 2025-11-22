@@ -690,9 +690,21 @@ export function createContextMenuManager(appContext) {
           // 用户消息：保持原始文本展示，不进行 Markdown 渲染
           textDiv.innerText = newText;
         } else {
-          // AI 消息：使用 Markdown 渲染
+          // AI 消息：使用与初始渲染相同的 Markdown + 数学渲染管线（包含 $/$ 过滤逻辑）
           const processed = appContext.services.messageProcessor.processMathAndMarkdown(newText);
           textDiv.innerHTML = processed;
+          // 复用 appendMessage 中的后处理逻辑：链接与代码高亮
+          textDiv
+            .querySelectorAll('a:not(.reference-number)')
+            .forEach(link => {
+              link.target = '_blank';
+              link.rel = 'noopener noreferrer';
+            });
+          textDiv
+            .querySelectorAll('pre code')
+            .forEach(block => {
+              try { hljs.highlightElement(block); } catch (_) {}
+            });
         }
       }
       // 存储原始文本以便复制功能
