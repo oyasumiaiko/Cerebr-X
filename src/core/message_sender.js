@@ -597,10 +597,19 @@ export function createMessageSender(appContext) {
         }
         if (!label) label = (nodeLike.apiDisplayName || '').trim();
         if (!label) label = (nodeLike.apiModelId || '').trim();
-        footer.textContent = label || '';
+        const hasThoughtSignature = !!nodeLike.thoughtSignature;
+
+        // footer：带 Thought Signature 的消息使用 "signatured · 模型名" 文本标记
+        let displayLabel = label || '';
+        if (hasThoughtSignature) {
+          displayLabel = label ? `signatured · ${label}` : 'signatured';
+        }
+        footer.textContent = displayLabel;
+
         const titleDisplayName = matchedConfig?.displayName || nodeLike.apiDisplayName || '-';
         const titleModelId = matchedConfig?.modelName || nodeLike.apiModelId || '-';
-        footer.title = `API uuid: ${nodeLike.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}`;
+        const thoughtFlag = hasThoughtSignature ? ' | thought_signature: stored' : '';
+        footer.title = `API uuid: ${nodeLike.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}${thoughtFlag}`;
       } catch (e) {
         console.warn('渲染API footer失败:', e);
       }
@@ -643,13 +652,17 @@ export function createMessageSender(appContext) {
       }
     }
 
-    // 流式响应结束后，如果是 Gemini 且解析到了思维链签名，则写入当前 AI 消息节点
+    // 流式响应结束后，如果是 Gemini 且解析到了思维链签名，则写入当前 AI 消息节点，并刷新 footer 标记
     if (isGeminiApi && currentAiMessageId && latestGeminiThoughtSignature) {
       try {
         const node = chatHistoryManager.chatHistory.messages.find(m => m.id === currentAiMessageId);
         if (node) {
           // 在历史节点上记录 Thought Signature，供后续多轮对话回传使用
           node.thoughtSignature = latestGeminiThoughtSignature;
+          const el = chatContainer.querySelector(`[data-message-id="${currentAiMessageId}"]`);
+          if (el) {
+            renderApiFooter(el, node);
+          }
         }
       } catch (e) {
         console.warn('记录 Gemini 思维链签名失败（流式）:', e);
@@ -961,10 +974,19 @@ export function createMessageSender(appContext) {
         }
         if (!label) label = (nodeLike.apiDisplayName || '').trim();
         if (!label) label = (nodeLike.apiModelId || '').trim();
-        footer.textContent = label || '';
+        const hasThoughtSignature = !!nodeLike.thoughtSignature;
+
+        // footer：带 Thought Signature 的消息使用 "signatured · 模型名" 文本标记
+        let displayLabel = label || '';
+        if (hasThoughtSignature) {
+          displayLabel = label ? `signatured · ${label}` : 'signatured';
+        }
+        footer.textContent = displayLabel;
+
         const titleDisplayName = matchedConfig?.displayName || nodeLike.apiDisplayName || '-';
         const titleModelId = matchedConfig?.modelName || nodeLike.apiModelId || '-';
-        footer.title = `API uuid: ${nodeLike.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}`;
+        const thoughtFlag = hasThoughtSignature ? ' | thought_signature: stored' : '';
+        footer.title = `API uuid: ${nodeLike.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}${thoughtFlag}`;
       } catch (e) {
         console.warn('渲染API footer失败:', e);
       }
@@ -1084,12 +1106,13 @@ export function createMessageSender(appContext) {
     if (newAiMessageDiv) {
       const messageId = newAiMessageDiv.getAttribute('data-message-id');
       applyApiMetaToMessage(messageId, usedApiConfig, newAiMessageDiv);
-      // 在历史节点上记录 Gemini 思维链签名，供后续多轮对话回传使用
+      // 在历史节点上记录 Gemini 思维链签名，供后续多轮对话回传使用，并刷新 footer 标记
       if (isGeminiApi && thoughtSignature) {
         try {
           const node = chatHistoryManager.chatHistory.messages.find(m => m.id === messageId);
           if (node) {
             node.thoughtSignature = thoughtSignature;
+            renderApiFooter(newAiMessageDiv, node);
           }
         } catch (e) {
           console.warn('记录 Gemini 思维链签名失败（非流式）:', e);

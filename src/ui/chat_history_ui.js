@@ -635,9 +635,14 @@ export function createChatHistoryUI(appContext) {
       }
       
       messageElem.setAttribute('data-message-id', msg.id);
-      // 渲染 API footer（按优先级：uuid->displayName->modelId）
+      // 渲染 API footer（按优先级：uuid->displayName->modelId），带 Thought Signature 的消息用文字标记
       try {
-        const footer = messageElem.querySelector('.api-footer') || (() => { const f = document.createElement('div'); f.className = 'api-footer'; messageElem.appendChild(f); return f; })();
+        const footer = messageElem.querySelector('.api-footer') || (() => {
+          const f = document.createElement('div');
+          f.className = 'api-footer';
+          messageElem.appendChild(f);
+          return f;
+        })();
         const allConfigs = appContext.services.apiManager.getAllConfigs?.() || [];
         let label = '';
         let matchedConfig = null;
@@ -652,10 +657,23 @@ export function createChatHistoryUI(appContext) {
         }
         if (!label) label = (msg.apiDisplayName || '').trim();
         if (!label) label = (msg.apiModelId || '').trim();
-        footer.textContent = (role === 'ai') ? (label || '') : footer.textContent;
+        const hasThoughtSignature = !!msg.thoughtSignature;
+
+        if (role === 'ai') {
+          // footer：带 Thought Signature 的消息使用 "signatured · 模型名" 文本标记
+          let displayLabel = label || '';
+          if (hasThoughtSignature) {
+            displayLabel = label ? `signatured · ${label}` : 'signatured';
+          }
+          footer.textContent = displayLabel;
+        }
+
         const titleDisplayName = matchedConfig?.displayName || msg.apiDisplayName || '-';
         const titleModelId = matchedConfig?.modelName || msg.apiModelId || '-';
-        footer.title = (role === 'ai') ? `API uuid: ${msg.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}` : footer.title;
+        const thoughtFlag = hasThoughtSignature ? ' | thought_signature: stored' : '';
+        footer.title = (role === 'ai')
+          ? `API uuid: ${msg.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}${thoughtFlag}`
+          : footer.title;
       } catch (_) {}
     });
     // 恢复加载的对话历史到聊天管理器
