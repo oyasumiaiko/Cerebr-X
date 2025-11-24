@@ -759,10 +759,12 @@ export function createMessageProcessor(appContext) {
    * @returns {string} 处理后的HTML
    */
   function processMathAndMarkdown(text) {
+    const settingsManager = appContext.services.settingsManager;
+    const enableDollarMath = settingsManager?.getSetting?.('enableDollarMath');
     // 折叠“搜索过程/思考过程”等自定义片段
     const foldedText = foldMessageContent(text || '');
     // 使用纯函数式渲染管线（禁用内联 HTML、支持 KaTeX、严格 DOMPurify）
-    return renderMarkdownSafe(foldedText, { allowDetails: true });
+    return renderMarkdownSafe(foldedText, { allowDetails: true, enableDollarMath });
   }
 
   /**

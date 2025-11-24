@@ -91,7 +91,9 @@ export function createSettingsManager(appContext) {
     scaleFactor: 1, // Added default scaleFactor
     backgroundImageUrl: '',
     backgroundImageIntensity: 0.6,
-    backgroundOverallOpacity: 1
+    backgroundOverallOpacity: 1,
+    // 是否启用 $ / $$ 作为数学公式分隔符（默认开启以保持兼容）
+    enableDollarMath: true
   };
 
   // 当前设置
@@ -197,6 +199,13 @@ export function createSettingsManager(appContext) {
       label: '自动重试',
       defaultValue: DEFAULT_SETTINGS.autoRetry,
       apply: (v) => applyAutoRetry(v)
+    },
+    // 数学公式：是否使用 $ / $$ 作为分隔符
+    {
+      key: 'enableDollarMath',
+      type: 'toggle',
+      label: '使用 $ / $$ 作为公式分隔符',
+      defaultValue: DEFAULT_SETTINGS.enableDollarMath
     },
     // 显示引用标记
     {
