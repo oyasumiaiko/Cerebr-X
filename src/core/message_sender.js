@@ -485,9 +485,9 @@ export function createMessageSender(appContext) {
 
       // 消息处理完成后，自动保存会话
       if (currentConversationId) {
-        await chatHistoryUI.saveCurrentConversation(true); // 更新现有会话记录
+        await chatHistoryUI.saveCurrentConversation(true); // 更新现有会话记录（包含自动图片下载逻辑）
       } else {
-        await chatHistoryUI.saveCurrentConversation(false); // 新会话，生成新的 conversation id
+        await chatHistoryUI.saveCurrentConversation(false); // 新会话，生成新的 conversation id（包含自动图片下载逻辑）
         // 获取新创建的会话ID并更新本地变量
         currentConversationId = chatHistoryUI.getCurrentConversationId();
       }

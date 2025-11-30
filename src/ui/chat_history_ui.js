@@ -313,6 +313,13 @@ export function createChatHistoryUI(appContext) {
             part.image_url.url = localUrl;
             index[fingerprint] = localUrl;
             indexChanged = true;
+            // 同步更新当前聊天窗口中的 DOM，避免仍然显示 base64，
+            // 以便后续编辑消息时直接复用本地 file:// 路径
+            try {
+              updateMessageImagesInDom(msg.id, currentUrl, localUrl);
+            } catch (syncErr) {
+              console.warn('更新消息 DOM 图片 URL 失败:', syncErr);
+            }
           }
         } catch (e) {
           console.warn('自动下载图片失败，跳过该图片:', e);
@@ -322,6 +329,45 @@ export function createChatHistoryUI(appContext) {
 
     if (indexChanged) {
       await saveImageDownloadIndex(index);
+    }
+  }
+
+  /**
+   * 将指定消息元素中的图片 URL 从 fromUrl 更新为 toUrl，
+   * 覆盖 .image-tag 的 data-image 和 <img>，以及内联 img.ai-inline-image。
+   * 这样可以保证编辑消息时读取到的就是本地 URL，而不是旧的 base64。
+   * @param {string} messageId
+   * @param {string} fromUrl
+   * @param {string} toUrl
+   */
+  function updateMessageImagesInDom(messageId, fromUrl, toUrl) {
+    if (!messageId || !fromUrl || !toUrl) return;
+    try {
+      const messageElement = chatContainer.querySelector(`[data-message-id="${messageId}"]`);
+      if (!messageElement) return;
+
+      // 用户 / 历史图片标签：.image-tag 中的 data-image 与内部 <img> src
+      const tagNodes = messageElement.querySelectorAll('.image-tag');
+      tagNodes.forEach(tag => {
+        const dataImage = tag.getAttribute('data-image') || '';
+        if (dataImage === fromUrl) {
+          tag.setAttribute('data-image', toUrl);
+        }
+        const img = tag.querySelector('img');
+        if (img && img.src === fromUrl) {
+          img.src = toUrl;
+        }
+      });
+
+      // AI 内联图片：img.ai-inline-image
+      const inlineImgs = messageElement.querySelectorAll('img.ai-inline-image');
+      inlineImgs.forEach(img => {
+        if (img.src === fromUrl) {
+          img.src = toUrl;
+        }
+      });
+    } catch (e) {
+      console.warn('同步 DOM 图片 URL 出错:', e);
     }
   }
 
@@ -590,9 +636,12 @@ export function createChatHistoryUI(appContext) {
   /**
    * 保存或更新当前对话至持久存储
    * @param {boolean} [isUpdate=false] - 是否为更新操作
+   * @param {Object} [options] - 额外选项
+   * @param {boolean} [options.skipAutoDownloadImages=false] - 是否跳过自动下载图片（用于纯文本编辑等场景）
    * @returns {Promise<void>}
    */
-  async function saveCurrentConversation(isUpdate = false) {
+  async function saveCurrentConversation(isUpdate = false, options = {}) {
+    const { skipAutoDownloadImages = false } = options || {};
     const chatHistory = services.chatHistoryManager.chatHistory;
     const messages = chatHistory.messages;
     if (messages.length === 0) {
@@ -607,7 +656,10 @@ export function createChatHistoryUI(appContext) {
     const endTime = Math.max(...timestamps);
 
     // 在持久化前，根据设置尝试将 AI 返回的 data:image 图片下载到本地，并替换为去重后的本地路径
-    await maybeAutoDownloadImagesInMessages(messagesCopy);
+    // 但在仅编辑文本/用户消息等场景，可通过 skipAutoDownloadImages 跳过，避免重复触发下载逻辑
+    if (!skipAutoDownloadImages) {
+      await maybeAutoDownloadImagesInMessages(messagesCopy);
+    }
 
     // 提取第一条消息的纯文本内容
     const firstMessageTextContent = extractMessagePlainText(messagesCopy.find(msg => extractMessagePlainText(msg) !== ''));

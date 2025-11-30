@@ -946,8 +946,8 @@ export function createContextMenuManager(appContext) {
       // 存储原始文本以便复制功能
       messageElement.setAttribute('data-original-text', newText);
 
-      // 保存会话
-      await chatHistoryUI.saveCurrentConversation(true);
+      // 保存会话：此处仅更新文本/结构，避免触发自动图片下载逻辑导致重复下载
+      await chatHistoryUI.saveCurrentConversation(true, { skipAutoDownloadImages: true });
     } catch (e) {
       console.error('应用编辑结果失败:', e);
     }
