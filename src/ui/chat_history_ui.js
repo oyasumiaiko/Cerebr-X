@@ -2061,6 +2061,13 @@ export function createChatHistoryUI(appContext) {
       backupButton.textContent = '备份';
       backupButton.addEventListener('click', backupConversations);
 
+      const importButton = document.createElement('button');
+      importButton.textContent = '导入';
+      importButton.title = '从剪贴板导入一条新的聊天记录';
+      importButton.addEventListener('click', () => {
+        importConversationFromClipboard();
+      });
+
       const restoreButton = document.createElement('button');
       restoreButton.textContent = '还原';
       restoreButton.addEventListener('click', restoreConversations);
@@ -2071,6 +2078,7 @@ export function createChatHistoryUI(appContext) {
 
       headerActions.appendChild(refreshButton);
       headerActions.appendChild(backupButton);
+      headerActions.appendChild(importButton);
       headerActions.appendChild(restoreButton);
       headerActions.appendChild(closeBtn);
 
@@ -2987,6 +2995,94 @@ export function createChatHistoryUI(appContext) {
     }
     
     // console.log('内存缓存已清理');
+  }
+
+  /**
+   * 从剪贴板导入一条新的聊天记录
+   * 剪贴板内容格式要求为纯字符串数组 JSON，例如：["第一条用户消息","第一条AI回复"]
+   * 假定消息从用户开始，用户/AI 交替排列
+   */
+  async function importConversationFromClipboard() {
+    const showNotificationSafe = typeof showNotification === 'function' ? showNotification : null;
+
+    // 由于 Permissions Policy 限制，直接调用 Clipboard API 可能被阻止，这里改为让用户手动粘贴 JSON
+    const hint = '请粘贴聊天 JSON 字符串数组，例如 ["第一条用户消息","第一条AI回复"]';
+    let rawText = window.prompt(hint, '');
+
+    if (rawText === null) {
+      // 用户取消，不视为错误
+      return;
+    }
+
+    rawText = (rawText || '').trim();
+    if (!rawText) {
+      showNotificationSafe?.({
+        message: '未输入任何内容，已取消导入',
+        type: 'warning',
+        duration: 2000
+      });
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch (error) {
+      console.error('解析导入 JSON 失败:', error);
+      showNotificationSafe?.({
+        message: '内容不是有效的 JSON，请确认格式如 ["用户消息","AI回复"]',
+        type: 'error',
+        duration: 2800
+      });
+      return;
+    }
+
+    if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every(item => typeof item === 'string')) {
+      showNotificationSafe?.({
+        message: '导入 JSON 必须是字符串数组，例如 ["第一条用户消息","第一条AI回复"]',
+        type: 'warning',
+        duration: 3200
+      });
+      return;
+    }
+
+    try {
+      // 先清空当前会话（内部会自动保存已有内容）
+      await clearChatHistory();
+
+      // 按“用户-助手-用户-助手”顺序构建新会话
+      let isUserTurn = true;
+      for (const text of parsed) {
+        const content = typeof text === 'string' ? text : String(text);
+        const sender = isUserTurn ? 'user' : 'ai';
+        appendMessage(content, sender, false, null, null, null, null);
+        isUserTurn = !isUserTurn;
+      }
+
+      // 保存为新的持久化会话，使用当前页面信息作为元数据
+      await saveCurrentConversation(false);
+
+      // 通知消息发送器当前会话 ID 已更新，后续继续聊天时可以接在导入记录之后
+      if (currentConversationId) {
+        services.messageSender.setCurrentConversationId(currentConversationId);
+      }
+
+      showNotificationSafe?.({
+        message: '已从剪贴板导入一条新的聊天记录',
+        type: 'success',
+        duration: 2200
+      });
+
+      // 关闭历史面板，让用户直接回到聊天界面
+      closeChatHistoryPanel();
+    } catch (error) {
+      console.error('导入聊天记录失败:', error);
+      showNotificationSafe?.({
+        message: '导入聊天记录失败，请检查剪贴板内容或稍后重试',
+        type: 'error',
+        duration: 3200
+      });
+    }
   }
 
   // ---- 自动备份调度 ----
