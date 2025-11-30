@@ -1750,6 +1750,41 @@ input:checked + .slider::before {
   cursor: not-allowed;
 }
 
+/* 右键菜单：带子菜单的多次生成入口 */
+.context-menu-item.has-submenu {
+    position: relative;
+    justify-content: space-between;
+}
+
+.context-menu-item.has-submenu .submenu-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.context-submenu {
+    position: absolute;
+    top: 0;
+    left: 100%;
+    margin-left: 6px;
+    background: var(--cerebr-bg-color);
+    border-radius: 8px;
+    padding: 4px;
+    min-width: 120px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+    z-index: 2001;
+    display: none;
+}
+
+.context-menu-item.has-submenu:hover .context-submenu {
+    display: block;
+}
+
+.context-submenu .context-menu-item {
+    margin: 2px 0;
+    gap: 6px;
+}
+
 /* 链接样式 */
 .message a {
     color: #0366d6;

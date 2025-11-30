@@ -43,6 +43,9 @@ export function createContextMenuManager(appContext) {
   const forkConversationButton = dom.forkConversationButton;
   const copyAsImageButton = dom.copyAsImageButton; // 复制整条消息为图片
   const downloadImageButton = dom.downloadImageButton; // 新增：下载单张图片
+  const multiRegenerateMenu = dom.multiRegenerateMenu;
+  const multiRegenerate3Button = dom.multiRegenerate3Button;
+  const multiRegenerate5Button = dom.multiRegenerate5Button;
   const editMessageButton = document.getElementById('edit-message');
 
   // Services from appContext.services
@@ -132,6 +135,14 @@ export function createContextMenuManager(appContext) {
       messageElement === aiMessages[aiMessages.length - 1]
     );
     regenerateButton.style.display = isLastMessage ? 'flex' : 'none';
+    // 只在最后一条消息时显示“多次生成”子菜单入口
+    if (multiRegenerateMenu) {
+      multiRegenerateMenu.style.display = isLastMessage ? 'flex' : 'none';
+    }
+    // 只在最后一条消息时显示“多次生成”子菜单入口
+    if (multiRegenerateMenu) {
+      multiRegenerateMenu.style.display = isLastMessage ? 'flex' : 'none';
+    }
     // 始终显示创建分支对话按钮，但只有在有足够消息时才可用
     if (forkConversationButton) {
       const messageCount = chatContainer.querySelectorAll('.message').length;
@@ -242,9 +253,9 @@ export function createContextMenuManager(appContext) {
           const prompts = appContext.services.promptSettingsManager.getPrompts();
           let apiParam = 'follow_current';
           try {
-            const promptType = appContext.services.messageProcessor.getPromptTypeFromContent(originalMessageText, prompts) || 'none';
-            const modelPref = (prompts[promptType]?.model || '').trim();
-            apiParam = modelPref || 'follow_current';
+          const promptType = appContext.services.messageProcessor.getPromptTypeFromContent(originalMessageText, prompts) || 'none';
+          const modelPref = (prompts[promptType]?.model || '').trim();
+          apiParam = modelPref || 'follow_current';
           } catch (_) { apiParam = 'follow_current'; }
 
           messageSender.sendMessage({
@@ -387,6 +398,107 @@ export function createContextMenuManager(appContext) {
           hideContextMenu();
         }, 1000);
       }
+    }
+  }
+
+  /**
+   * 基于最后一条用户消息，连续生成多条 AI 回复并追加到对话末尾。
+   * 不删除现有回复，每次调用 sendMessage 都会追加一条新的 AI 消息。
+   * @param {number} times - 需要生成的次数（例如 3 或 5）
+   */
+  async function regenerateMessageMulti(times) {
+    const n = Number(times);
+    if (!Number.isFinite(n) || n <= 0) return;
+
+    try {
+      const messages = chatContainer.querySelectorAll('.message');
+      if (!messages.length) return;
+
+      // 找到最后一条用户消息
+      let lastUserMessage = null;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].classList.contains('user-message')) {
+          lastUserMessage = messages[i];
+          break;
+        }
+      }
+      if (!lastUserMessage) {
+        console.warn('多次生成失败：未找到用户消息');
+        return;
+      }
+
+      const messageId = lastUserMessage.getAttribute('data-message-id');
+      const originalMessageText = lastUserMessage.getAttribute('data-original-text');
+      const imageHTML = lastUserMessage.querySelector('.image-previews-container')?.innerHTML || '';
+
+      if (!messageId || !chatHistory?.messages) {
+        console.error('多次生成失败：未找到消息ID或聊天历史');
+        return;
+      }
+      const messageNode = chatHistory.messages.find(msg => msg.id === messageId);
+      if (!messageNode) {
+        console.error('多次生成失败：在聊天历史中未找到对应消息');
+        return;
+      }
+
+      // 选择 API：尽量复用当前提示词对应的偏好模型，否则跟随当前配置
+      const prompts = appContext.services.promptSettingsManager.getPrompts();
+      let apiParam = 'follow_current';
+      try {
+        const promptType = appContext.services.messageProcessor.getPromptTypeFromContent(originalMessageText, prompts) || 'none';
+        const modelPref = (prompts[promptType]?.model || '').trim();
+        apiParam = modelPref || 'follow_current';
+      } catch (_) {
+        apiParam = 'follow_current';
+      }
+
+      let successCount = 0;
+      let failCount = 0;
+
+      // 顺序调用 sendMessage，避免内部 activeAttempt 相互打断
+      for (let i = 0; i < n; i++) {
+        try {
+          const result = await messageSender.sendMessage({
+            originalMessageText,
+            imageHTML,
+            regenerateMode: true,
+            messageId,
+            api: apiParam
+          });
+
+          if (result && result.ok) {
+            successCount += 1;
+          } else if (result && !result.ok && typeof result.retry === 'function') {
+            // 对于失败的请求，额外尝试一次局部重试（与全局 autoRetry 解耦）
+            try {
+              const retryResult = await result.retry(600);
+              if (retryResult && retryResult.ok) {
+                successCount += 1;
+              } else {
+                failCount += 1;
+              }
+            } catch (retryErr) {
+              console.warn('多次生成重试失败:', retryErr);
+              failCount += 1;
+            }
+          } else {
+            failCount += 1;
+          }
+        } catch (err) {
+          console.error('多次生成单次调用异常:', err);
+          failCount += 1;
+        }
+      }
+
+      if (typeof utils.showNotification === 'function') {
+        utils.showNotification({
+          message: `多次生成完成：成功 ${successCount} 次，失败 ${failCount} 次`,
+          type: failCount ? 'warning' : 'success',
+          duration: 2800
+        });
+      }
+    } finally {
+      hideContextMenu();
     }
   }
 
@@ -539,6 +651,14 @@ export function createContextMenuManager(appContext) {
     // 添加下载图片按钮点击事件（仅在右键图片时显示）
     if (downloadImageButton) {
       downloadImageButton.addEventListener('click', downloadCurrentImage);
+    }
+
+    // 多次生成子菜单：生成 3 次 / 5 次
+    if (multiRegenerate3Button) {
+      multiRegenerate3Button.addEventListener('click', () => regenerateMessageMulti(3));
+    }
+    if (multiRegenerate5Button) {
+      multiRegenerate5Button.addEventListener('click', () => regenerateMessageMulti(5));
     }
 
     // 添加创建分支对话按钮点击事件
