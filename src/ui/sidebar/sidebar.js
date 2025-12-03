@@ -55,7 +55,10 @@ function applyStandaloneClasses(isStandalone) {
     document.body.classList.toggle('standalone-mode', isStandalone);
   }
   if (document?.documentElement) {
-    document.documentElement.classList.toggle('standalone-mode', isStandalone);
+    const root = document.documentElement;
+    root.classList.toggle('standalone-mode', isStandalone);
+    // 独立聊天页面默认使用与网页「全屏模式」相同的布局（背景与输入框宽度等）
+    root.classList.toggle('fullscreen-mode', isStandalone);
   }
 }
 
