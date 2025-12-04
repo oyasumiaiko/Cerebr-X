@@ -276,47 +276,91 @@ export function createImageHandler(appContext) {
 
   /**
    * 处理图片标签，将内容和图片HTML转换为消息格式
-   * @param {string} content - 文本内容
+   *
+   * 设计目标：
+   * - 统一抽取「需要持久化」的图片为 OpenAI 风格的 image_url 结构；
+   * - 避免在文本内容中重复保存 <img> 标签，尤其是包含 data:...;base64,... 的长字符串，
+   *   以减小 IndexedDB 占用；
+   * - 支持三类图片来源：
+   *   1) 输入框中的 .image-tag（用户上传，data-image 始终是 base64）；
+   *   2) AI 输出中由 message_sender 注入的 <img class="ai-inline-image">（通常为 file:// 或 data:）；
+   *   3) Markdown 渲染生成的 <img>，当 src 为 file:// 或 data:image/...;base64 时一并抽取。
+   *
+   * 注意：
+   * - 对于 http/https 等普通远程图片，这里不会转换为 image_url，避免不必要的历史膨胀；
+   * - 当 imagesHTML 非空时，认为图片 HTML 与文本 content 已经分离，
+   *   文本部分直接使用 content，本函数只解析 imagesHTML 中的图片。
+   *
+   * @param {string} content - 文本内容（可能包含内联图片）
    * @param {string} imagesHTML - 图片HTML内容；若为空则尝试从 content 中解析内联图片
-   * @returns {Array|string} 处理后的消息格式
+   * @returns {Array|string} 处理后的消息格式：有图片时返回 [{image_url...}, {text...}]，否则返回原始 content
    */
   function processImageTags(content, imagesHTML) {
     const tempDiv = document.createElement('div');
     const hasSeparateImages = !!(imagesHTML && imagesHTML.trim());
+
     // 优先解析单独传入的图片容器；否则解析内容中的内联图片
     tempDiv.innerHTML = hasSeparateImages ? imagesHTML : (content || '');
-    const imageNodes = tempDiv.querySelectorAll('.image-tag, img.ai-inline-image');
 
-    if (imageNodes.length > 0) {
-      const result = [];
-      // 先添加图片（支持 image-tag 和内联 img.ai-inline-image）
-      imageNodes.forEach(node => {
-        let base64Data = '';
-        if (node.classList.contains('image-tag')) {
-          base64Data = node.getAttribute('data-image') || '';
-        } else {
-          base64Data = node.getAttribute('src') || '';
+    // 说明性：这里同时选择
+    // - .image-tag            输入框/历史中的图片标签（data-image 存原始 base64）
+    // - img.ai-inline-image   Gemini 等模型返回的内联图片（src 通常为 file:// 或 data:）
+    // - 普通 img              仅在 src 是 file:// 或 data:image/...;base64, 时参与抽取
+    const imageNodes = Array.from(
+      tempDiv.querySelectorAll('.image-tag, img.ai-inline-image, img')
+    );
+
+    if (imageNodes.length === 0) {
+      // 没有图片时，直接返回原始文本内容，保持向后兼容
+      return content;
+    }
+
+    const result = [];
+
+    imageNodes.forEach(node => {
+      let url = '';
+
+      if (node.classList.contains('image-tag')) {
+        // 用户上传图片：data-image 始终保存原始 base64
+        url = node.getAttribute('data-image') || '';
+      } else {
+        const src = node.getAttribute('src') || '';
+        // 只抽取本地文件或 data:image/...;base64, 的图片；
+        // 对 http/https 等远程图片保留在正文中，不计入 image_url。
+        if (src.startsWith('file://') || src.startsWith('data:image/')) {
+          url = src;
         }
-        if (base64Data) {
-          result.push({
-            type: "image_url",
-            image_url: {
-              url: base64Data
-            }
-          });
-        }
-      });
-      // 后添加文本内容
-      let textPart = content;
-      if (textPart) {
+      }
+
+      if (url) {
         result.push({
-          type: "text",
-          text: textPart
+          type: 'image_url',
+          image_url: { url }
         });
       }
-      return result;
+
+      // 从临时 DOM 中移除图片节点，避免文本部分残留巨大的 dataURL 或重复 <img>
+      node.remove();
+    });
+
+    // 构造文本部分：
+    // - 若图片来自单独的 imagesHTML 容器，则正文文本直接使用 content；
+    // - 否则使用「移除图片标签后」的 HTML，保留其它 Markdown/链接结构。
+    let textPart = '';
+    if (hasSeparateImages) {
+      textPart = content || '';
+    } else {
+      textPart = tempDiv.innerHTML || '';
     }
-    return content;
+
+    if (textPart && textPart.trim()) {
+      result.push({
+        type: 'text',
+        text: textPart
+      });
+    }
+
+    return result;
   }
 
   /**
