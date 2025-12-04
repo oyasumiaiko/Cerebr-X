@@ -80,7 +80,7 @@ export function createContextMenuManager(appContext) {
     }
     // 每次打开菜单时刷新 click 处理，保证调用最新的 messageSender.abortCurrentRequest()
     stopUpdateButton.onclick = () => {
-      if (messageSender) messageSender.abortCurrentRequest();
+      if (messageSender) messageSender.abortCurrentRequest(currentMessageElement || messageElement);
       hideContextMenu();
     };
 
@@ -406,7 +406,7 @@ export function createContextMenuManager(appContext) {
     });
     // 修复：使用 messageSender.abortCurrentRequest()，避免未定义的 abortCurrentRequest 引发错误
     stopUpdateButton.addEventListener('click', () => {
-      if (messageSender) messageSender.abortCurrentRequest();
+      if (messageSender) messageSender.abortCurrentRequest(currentMessageElement);
       hideContextMenu();
     });
     deleteMessageButton.addEventListener('click', () => {

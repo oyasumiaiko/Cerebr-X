@@ -173,7 +173,16 @@ export function createMessageSender(appContext) {
   // 私有状态
   let isProcessingMessage = false;
   let shouldAutoScroll = true;
-  let activeAttempt = null;
+  /**
+   * 当前所有进行中的请求尝试集合（支持并行生成）
+   * key 为内部 attemptId，value 为尝试状态对象：
+   * { id, controller, manualAbort, finished, loadingMessage, aiMessageId }
+   * 
+   * 设计说明：
+   * - 之前只维护单一 activeAttempt，无法区分多路并行流式响应；
+   * - 现在将每一路请求视为独立 attempt，便于实现“按消息粒度的停止生成 / 自动重试”。
+   */
+  const activeAttempts = new Map();
   let isTemporaryMode = false;
   let pageContent = null;
   let shouldSendChatHistory = true;
@@ -189,8 +198,6 @@ export function createMessageSender(appContext) {
     return Math.min(AUTO_RETRY_MAX_DELAY_MS, Math.round(rawDelay));
   }
   let currentConversationId = null;
-  let aiThoughtsRaw = '';
-  let currentAiMessageId = null;
 
   /**
    * 检测 Gemini 返回中「HTTP 200 但因安全原因被拦截」的场景，并给出统一的错误消息
@@ -352,14 +359,19 @@ export function createMessageSender(appContext) {
   }
 
   /**
-   * 准备和发送消息（带可选 API 选择参数）
-   * @public
+   * 核心发送逻辑（单路请求），不处理 [xN] 并行语法。
+   *
+   * 说明：
+   * - 对外暴露的 API 请使用 sendMessage（见下方），sendMessage 会在需要时解析 [xN] 并发起多路并行请求；
+   * - sendMessageCore 始终只处理“一次对话请求”，方便自动重试逻辑直接复用，而不会重复拆分并行。
+   *
+   * @private
    * @param {Object} [options] - 可选参数对象
    * @param {Array<string>} [options.injectedSystemMessages] - 重新生成时保留的系统消息
    * @param {string} [options.specificPromptType] - 指定使用的提示词类型
    * @param {string} [options.originalMessageText] - 原始消息文本，用于恢复输入框内容
    * @param {boolean} [options.regenerateMode] - 是否为重新生成模式
-   * @param {string} [options.messageId] - 重新生成模式下的消息ID
+   * @param {string} [options.messageId] - 重新生成模式下的消息ID（通常是用户消息的ID）
    * @param {Object|string} [options.api] - API 选择参数：可为完整配置对象、配置 id/displayName/modelName、'selected'、或 {favoriteIndex}
    * @param {Object} [options.resolvedApiConfig] - 已解析好的 API 配置（优先于 api 参数，完全绕过内部选择策略）
    * @param {boolean} [options.forceSendFullHistory] - 是否强制发送完整历史
@@ -367,13 +379,9 @@ export function createMessageSender(appContext) {
    * @param {Array<Object>|null} [options.conversationSnapshot] - 若提供则使用该会话历史快照（数组 of nodes）构建消息
    * @returns {Promise<{ ok: true, apiConfig: Object } | { ok: false, error: Error, apiConfig: Object, retryHint: Object, retry: (delayMs?: number, override?: Object) => Promise<any> }>} 结果对象（供外部无状态重试）
    */
-  async function sendMessage(options = {}) {
+  async function sendMessageCore(options = {}) {
     // 验证API配置
     if (!validateApiConfig()) return;
-
-    // !!! 重置累积的思考内容和当前AI消息ID !!!
-    aiThoughtsRaw = ''; 
-    currentAiMessageId = null;
 
     // 从options中提取重新生成所需的变量
     const {
@@ -422,36 +430,49 @@ export function createMessageSender(appContext) {
     let effectiveApiConfig = null;
 
     const beginAttempt = () => {
-      if (activeAttempt) {
-        activeAttempt.manualAbort = true;
-        try { activeAttempt.controller.abort(); } catch (_) {}
-      }
+      // 为当前请求创建独立的取消控制器与状态对象
       const attemptState = {
+        id: `attempt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         controller: new AbortController(),
         manualAbort: false,
         finished: false,
-        loadingMessage: null
+        loadingMessage: null,
+        aiMessageId: null
       };
-      activeAttempt = attemptState;
+      activeAttempts.set(attemptState.id, attemptState);
+
+      // 如果这是第一个进行中的请求，开启全局“正在处理”状态与自动滚动
+      if (activeAttempts.size === 1) {
+        isProcessingMessage = true;
+        shouldAutoScroll = true;
+        GetInputContainer().classList.add('auto-scroll-glow');
+      }
+
       return attemptState;
     };
 
     const finalizeAttempt = (attemptState) => {
       if (!attemptState || attemptState.finished) return;
       attemptState.finished = true;
+      activeAttempts.delete(attemptState.id);
 
-      const isStillActive = activeAttempt === attemptState;
-      if (isStillActive) {
-        activeAttempt = null;
+      const hasOtherAttempts = activeAttempts.size > 0;
+      if (!hasOtherAttempts) {
+        // 所有请求都已结束，恢复静止状态
         isProcessingMessage = false;
         shouldAutoScroll = false;
         GetInputContainer().classList.remove('auto-scroll-glow');
         GetInputContainer().classList.remove('auto-scroll-glow-active');
-        const lastMessage = chatContainer.querySelector('.ai-message:last-child');
-        if (lastMessage) {
-          lastMessage.classList.remove('updating');
+      }
+
+      // 清理与本次尝试相关的 UI 状态
+      if (attemptState.aiMessageId) {
+        const aiEl = chatContainer.querySelector(`[data-message-id="${attemptState.aiMessageId}"]`);
+        if (aiEl) {
+          aiEl.classList.remove('updating');
         }
       } else if (attemptState.loadingMessage && attemptState.loadingMessage.parentNode) {
+        // 尚未产生正式 AI 消息，仅存在 loading 占位
         attemptState.loadingMessage.remove();
       }
     };
@@ -459,15 +480,9 @@ export function createMessageSender(appContext) {
     let attempt = null;
 
     try {
-      // 开始处理消息
-      isProcessingMessage = true;
-      shouldAutoScroll = true;
-
+      // 开始处理消息：为本次请求注册 attempt，并在必要时开启全局“正在处理”状态
       attempt = beginAttempt();
       const signal = attempt.controller.signal;
-
-      // 当开始生成时，给聊天容器添加 glow 效果
-      GetInputContainer().classList.add('auto-scroll-glow');
 
       // 如果已有注入的系统消息，则使用它；否则从消息文本中提取
       const injectedSystemMessages = existingInjectedSystemMessages.length > 0 ? 
@@ -611,9 +626,9 @@ export function createMessageSender(appContext) {
         : !!(requestBody && requestBody.stream);
 
       if (useStreaming) {
-        await handleStreamResponse(response, loadingMessage, effectiveApiConfig);
+        await handleStreamResponse(response, loadingMessage, effectiveApiConfig, attempt);
       } else {
-        await handleNonStreamResponse(response, loadingMessage, effectiveApiConfig);
+        await handleNonStreamResponse(response, loadingMessage, effectiveApiConfig, attempt);
       }
 
       // 消息处理完成后，自动保存会话
@@ -655,7 +670,8 @@ export function createMessageSender(appContext) {
       };
       const retry = (delayMs = 0, override = {}) => new Promise((resolve) => {
         setTimeout(async () => {
-          resolve(await sendMessage({ ...retryHint, ...override }));
+          // 注意：自动重试直接调用核心发送逻辑，避免再次触发 [xN] 并行拆分
+          resolve(await sendMessageCore({ ...retryHint, ...override }));
         }, Math.max(0, delayMs));
       });
 
@@ -738,16 +754,158 @@ export function createMessageSender(appContext) {
     return sendMessage({ ...rest, resolvedApiConfig: apiConfig });
   }
 
+  /**
+   * 解析消息末尾的并行生成标记，例如 "...问题文本[x3]"。
+   * @param {string} text - 原始消息文本
+   * @returns {{ baseText: string, parallelCount: number }} - 去除标记后的文本与并行次数（默认 1）
+   */
+  function parseParallelMultiplier(text) {
+    const raw = (text || '').trimEnd();
+    const MAX_PARALLEL_COUNT = 10;
+    // 匹配形如 "[x2]" "[x3]" "[x5]" 的后缀（不区分大小写）
+    const match = raw.match(/^(.*)\[x(\d+)\]\s*$/i);
+    if (!match) {
+      return { baseText: raw, parallelCount: 1 };
+    }
+    const base = match[1].trimEnd();
+    const n = parseInt(match[2], 10);
+    // 仅允许 2~10 路并行，超过范围视为 max 路并行但仍移除后缀，避免污染提示词
+    if (!Number.isFinite(n) || n < 2 ) {
+      return { baseText: base, parallelCount: 1 };
+    }
+    if (n > MAX_PARALLEL_COUNT) {
+      return { baseText: base, parallelCount: MAX_PARALLEL_COUNT };
+    }
+    return { baseText: base, parallelCount: n };
+  }
+
+  /**
+   * 对外暴露的发送接口：
+   * - 负责解析用户输入中的 [xN] 并行生成语法；
+   * - 根据是否为重新生成模式，调度多路 sendMessageCore 并行执行；
+   * - 自动确保用户消息只插入一次，其余视作对同一用户消息的“并行重新生成”。
+   *
+   * @public
+   * @param {Object} [options] - 参见 sendMessageCore 的参数说明
+   * @returns {Promise<any>} - 单路时返回 sendMessageCore 的结果；并行时返回 Promise.allSettled 的结果数组
+   */
+  async function sendMessage(options = {}) {
+    const opts = options || {};
+
+    // 应用层有时会显式跳过并行解析（例如自动重试），此时直接走核心逻辑
+    if (opts.__skipParallelExpansion) {
+      const { __skipParallelExpansion, ...rest } = opts;
+      return sendMessageCore(rest);
+    }
+
+    // 推断本次要使用的原始文本：优先使用调用方传入的 originalMessageText，
+    // 否则从当前输入框中获取。
+    let rawText;
+    if (opts.originalMessageText !== null && opts.originalMessageText !== undefined) {
+      rawText = String(opts.originalMessageText);
+    } else {
+      try {
+        rawText = inputController ? inputController.getInputText() : (messageInput.textContent || '');
+      } catch (e) {
+        console.warn('读取输入文本失败，将按空文本处理:', e);
+        rawText = '';
+      }
+    }
+
+    const { baseText, parallelCount } = parseParallelMultiplier(rawText);
+    const hasImagesInInput = inputController
+      ? inputController.hasImages()
+      : !!imageContainer.querySelector('.image-tag');
+
+    // 无并行标记或空消息场景：直接走单路核心逻辑（这里仍会沿用去掉 [xN] 后的 baseText）
+    const isEmptyMessage = !baseText && !hasImagesInInput && !opts.forceSendFullHistory && !opts.regenerateMode;
+    if (parallelCount <= 1 || isEmptyMessage) {
+      const singleOpts = { ...opts };
+      // 如果原始文本来自输入框或调用方，我们用去掉 [xN] 的文本覆盖 originalMessageText
+      if (baseText !== rawText) {
+        singleOpts.originalMessageText = baseText;
+      }
+      return sendMessageCore(singleOpts);
+    }
+
+    // 并行生成：根据上下文选择不同策略
+    const tasks = [];
+
+    if (opts.regenerateMode) {
+      // 场景一：对已有用户消息的“编辑后重新生成”（包括 Ctrl+Enter）
+      // - 此时 messageId 为用户消息 ID；
+      // - 直接对同一消息发起多路重新生成即可。
+      for (let i = 0; i < parallelCount; i += 1) {
+        const taskOptions = {
+          ...opts,
+          originalMessageText: baseText,
+          regenerateMode: true
+        };
+        tasks.push(sendMessageCore(taskOptions));
+      }
+      return Promise.allSettled(tasks);
+    }
+
+    // 场景二：普通发送（从输入框发送一条新用户消息，末尾带 [xN]）
+    // 第一步：启动第一路核心请求，让它负责插入用户消息与第一条 AI 回复
+    const firstOptions = {
+      ...opts,
+      originalMessageText: baseText
+    };
+    const firstPromise = sendMessageCore(firstOptions);
+    tasks.push(firstPromise);
+
+    // 由于 sendMessageCore 在首次 await 之前会同步插入用户消息，
+    // 此处可以立即通过 chatHistoryManager 获取“当前最后一条用户消息”的 ID。
+    let baseUserMessageId = null;
+    try {
+      const history = chatHistoryManager.chatHistory;
+      const currentId = history?.currentNode;
+      const currentNode = history?.messages?.find(m => m.id === currentId);
+      if (currentNode && currentNode.role === 'user') {
+        baseUserMessageId = currentNode.id;
+      } else if (Array.isArray(history?.messages)) {
+        // 回退：从末尾向前查找最后一条用户消息
+        const reversed = history.messages.slice().reverse();
+        const lastUser = reversed.find(m => m.role === 'user');
+        baseUserMessageId = lastUser ? lastUser.id : null;
+      }
+    } catch (e) {
+      console.warn('解析并行生成的基准用户消息失败，将退回为单路生成:', e);
+      baseUserMessageId = null;
+    }
+
+    if (!baseUserMessageId) {
+      // 找不到基准用户消息时，保守地只保留第一路请求，避免插入多条重复用户消息
+      return firstPromise;
+    }
+
+    // 第二步：为其余 (parallelCount - 1) 路生成发起“对同一用户消息的重新生成”
+    for (let i = 1; i < parallelCount; i += 1) {
+      const extraOptions = {
+        ...opts,
+        originalMessageText: baseText,
+        regenerateMode: true,
+        messageId: baseUserMessageId
+      };
+      tasks.push(sendMessageCore(extraOptions));
+    }
+
+    return Promise.allSettled(tasks);
+  }
+
   // 消息构造逻辑已迁移到 message_composer.js 的纯函数 composeMessages
 
   /**
-   * 处理API的流式响应
+   * 处理API的流式响应（单路）
    * @private
    * @param {Response} response - Fetch API 响应对象
    * @param {HTMLElement} loadingMessage - 加载状态消息元素
+   * @param {Object} usedApiConfig - 本次使用的 API 配置
+   * @param {{id:string, aiMessageId?:string}|null} attemptState - 当前请求的 attempt 状态对象
    * @returns {Promise<void>}
    */
-  async function handleStreamResponse(response, loadingMessage, usedApiConfig) {
+  async function handleStreamResponse(response, loadingMessage, usedApiConfig, attemptState) {
     function applyApiMetaToMessage(messageId, apiConfig, messageDiv) {
       try {
         if (!messageId) return;
@@ -805,8 +963,10 @@ export function createMessageSender(appContext) {
     }
     const reader = response.body.getReader();
     let hasStartedResponse = false;
-    // 累积AI的主回答文本（仅文本部分，包含代码块、内联图片等 Markdown/HTML 内容）
+    // 累积 AI 的主回答文本（仅文本部分，包含代码块、内联图片等 Markdown/HTML 内容）
     let aiResponse = '';
+    // 累积当前流中的思考过程文本（Gemini / OpenAI reasoning）
+    let aiThoughtsRaw = '';
     // 标记是否为 Gemini 流式接口
     const isGeminiApi = response.url.includes('generativelanguage.googleapis.com') && !response.url.includes('openai');
     // SSE 行缓冲
@@ -815,6 +975,8 @@ export function createMessageSender(appContext) {
     let currentEventDataLines = []; // 当前事件中的所有 data: 行内容
     // 记录当前流式响应中最新的 Gemini 思维链签名（Thought Signature）
     let latestGeminiThoughtSignature = null;
+    // 当前流对应的 AI 消息 ID（与 attempt 绑定）
+    let currentAiMessageId = null;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -1042,6 +1204,10 @@ export function createMessageSender(appContext) {
 
         if (newAiMessageDiv) {
           currentAiMessageId = newAiMessageDiv.getAttribute('data-message-id');
+          // 将本次 AI 消息与 attempt 绑定，便于按消息粒度中止/清理
+          if (attemptState) {
+            attemptState.aiMessageId = currentAiMessageId;
+          }
           // 记录 API 元信息并渲染 footer
           applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
         }
@@ -1115,6 +1281,10 @@ export function createMessageSender(appContext) {
               // 从新创建的DOM元素中获取并保存 messageId
               if (newAiMessageDiv) {
                   currentAiMessageId = newAiMessageDiv.getAttribute('data-message-id');
+                  // 将本次 AI 消息与 attempt 绑定，便于按消息粒度中止/清理
+                  if (attemptState) {
+                    attemptState.aiMessageId = currentAiMessageId;
+                  }
                   // 记录 API 元信息并渲染 footer
                   applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
               }
@@ -1143,9 +1313,10 @@ export function createMessageSender(appContext) {
    * @param {Response} response - Fetch API 响应对象
    * @param {HTMLElement} loadingMessage - 加载状态消息元素
    * @param {Object} usedApiConfig - 本次使用的 API 配置
+   * @param {{id:string, aiMessageId?:string}|null} attemptState - 当前请求的 attempt 状态对象
    * @returns {Promise<void>}
    */
-  async function handleNonStreamResponse(response, loadingMessage, usedApiConfig) {
+  async function handleNonStreamResponse(response, loadingMessage, usedApiConfig, attemptState) {
     function applyApiMetaToMessage(messageId, apiConfig, messageDiv) {
       try {
         if (!messageId) return;
@@ -1333,6 +1504,10 @@ export function createMessageSender(appContext) {
     );
     if (newAiMessageDiv) {
       const messageId = newAiMessageDiv.getAttribute('data-message-id');
+      // 绑定本次 AI 消息到 attempt，便于按消息粒度中止/清理
+      if (attemptState) {
+        attemptState.aiMessageId = messageId;
+      }
       applyApiMetaToMessage(messageId, usedApiConfig, newAiMessageDiv);
       // 在历史节点上记录 Gemini 思维链签名，供后续多轮对话回传使用，并刷新 footer 标记
       if (isGeminiApi && thoughtSignature) {
@@ -1446,33 +1621,68 @@ export function createMessageSender(appContext) {
   /**
    * 中止当前请求
    * @public
+   * @param {HTMLElement|string} [target] - 可选：要中止的目标消息元素或其 data-message-id；缺省时中止所有请求
    */
-  function abortCurrentRequest() {
-    if (activeAttempt?.controller) {
-      activeAttempt.manualAbort = true;
-      try { activeAttempt.controller.abort(); } catch (e) { console.error('中止当前请求失败:', e); }
-      activeAttempt = null;
-      isProcessingMessage = false;
-      shouldAutoScroll = false;
-      // UI 清理：移除“正在更新”的占位消息与状态
-      try {
-        // 移除所有 loading 占位消息（尚未开始输出首字时存在）
-        const loadingMessages = chatContainer.querySelectorAll('.loading-message');
-        loadingMessages.forEach(el => el.remove());
+  function abortCurrentRequest(target) {
+    if (!activeAttempts.size) return false;
 
-        // 移除可能残留的 updating 状态，避免右键菜单误判
-        const updatingMessages = chatContainer.querySelectorAll('.ai-message.updating');
-        updatingMessages.forEach(el => el.classList.remove('updating'));
+    let abortedAny = false;
+    const isElementTarget = target && typeof target === 'object' && target.nodeType === 1;
+    const targetElement = isElementTarget ? target : null;
+    const targetId = typeof target === 'string'
+      ? target
+      : (isElementTarget ? target.getAttribute('data-message-id') : null);
 
-        // 同步移除输入容器 glow 效果
-        GetInputContainer().classList.remove('auto-scroll-glow');
-        GetInputContainer().classList.remove('auto-scroll-glow-active');
-      } catch (e) {
-        console.error('中止后清理占位消息失败:', e);
+    if (targetElement || targetId) {
+      // 按消息粒度中止：仅终止与指定消息/占位符绑定的那一路请求
+      for (const attempt of activeAttempts.values()) {
+        const matchesById = targetId && attempt.aiMessageId && attempt.aiMessageId === targetId;
+        const matchesByLoading = targetElement && attempt.loadingMessage === targetElement;
+        if (matchesById || matchesByLoading) {
+          attempt.manualAbort = true;
+          try { attempt.controller?.abort(); } catch (e) { console.error('中止当前请求失败:', e); }
+          abortedAny = true;
+        }
       }
-      return true;
+
+      // 如果未能定位到对应 attempt，则退回为中止最近一次请求（向后兼容旧行为）
+      if (!abortedAny) {
+        const lastAttempt = Array.from(activeAttempts.values()).slice(-1)[0];
+        if (lastAttempt) {
+          lastAttempt.manualAbort = true;
+          try { lastAttempt.controller?.abort(); } catch (e) { console.error('中止当前请求失败:', e); }
+          abortedAny = true;
+        }
+      }
+    } else {
+      // 无显式目标：用于“清空聊天”等场景，直接中止所有进行中的请求
+      for (const attempt of activeAttempts.values()) {
+        if (attempt.finished) continue;
+        attempt.manualAbort = true;
+        try { attempt.controller?.abort(); } catch (e) { console.error('中止当前请求失败:', e); }
+        abortedAny = true;
+      }
+
+      if (abortedAny) {
+        // 全局中止时，立即清理整体 UI 状态，防止残留 glow / updating
+        isProcessingMessage = false;
+        shouldAutoScroll = false;
+        try {
+          const loadingMessages = chatContainer.querySelectorAll('.loading-message');
+          loadingMessages.forEach(el => el.remove());
+
+          const updatingMessages = chatContainer.querySelectorAll('.ai-message.updating');
+          updatingMessages.forEach(el => el.classList.remove('updating'));
+
+          GetInputContainer().classList.remove('auto-scroll-glow');
+          GetInputContainer().classList.remove('auto-scroll-glow-active');
+        } catch (e) {
+          console.error('中止后清理占位消息失败:', e);
+        }
+      }
     }
-    return false;
+
+    return abortedAny;
   }
 
   /**
