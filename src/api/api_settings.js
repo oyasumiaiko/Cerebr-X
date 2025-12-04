@@ -1049,7 +1049,7 @@ export function createApiManager(appContext) {
           parts: [{ text: systemMessage.content }]
         };
       }
-       // 如果存在自定义参数，解析并合并到 generationConfig
+      // 如果存在自定义参数，解析并合并到 generationConfig
       if (config.customParams) {
         try {
           const allCustomParams = JSON.parse(config.customParams);
@@ -1068,6 +1068,17 @@ export function createApiManager(appContext) {
           }
         } catch (e) {
           console.error("解析自定义参数 JSON 失败 (Gemini)，请检查格式。", e);
+        }
+      }
+
+      // 再次应用 overrides，确保单次请求级别的覆盖（例如宽高比）优先于配置级自定义参数
+      if (overrides && typeof overrides === 'object') {
+        requestBody = { ...requestBody, ...overrides };
+        if (overrides.generationConfig) {
+          requestBody.generationConfig = {
+            ...(requestBody.generationConfig || {}),
+            ...overrides.generationConfig
+          };
         }
       }
 

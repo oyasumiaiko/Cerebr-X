@@ -564,10 +564,11 @@ export function createMessageSender(appContext) {
         maxHistory: configForMaxHistory?.maxChatHistory ?? 500
       });
 
-      // 在真正发给模型前，统一清理所有用户消息末尾的 [xN] 并行标记，避免模型看到这些内部控制语法
+      // 在真正发给模型前，统一清理所有用户消息末尾的控制标记
+      // 包括：[xN] 并行标记 和 [16:9]/[Auto] 等宽高比标记，避免模型看到这些内部控制语法
       const sanitizedMessages = messages.map((msg) => {
         if (msg && msg.role === 'user' && typeof msg.content === 'string') {
-          const { baseText } = parseParallelMultiplier(msg.content);
+          const { baseText } = extractTrailingControlMarkers(msg.content);
           if (baseText !== msg.content) {
             return { ...msg, content: baseText };
           }
@@ -609,10 +610,30 @@ export function createMessageSender(appContext) {
       // 更新加载状态：正在发送请求
       loadingMessage.textContent = '正在发送请求...';
 
-      // 构造API请求体（可能包含异步图片加载，例如从 file:// 读取本地文件后转为 Base64）
+      // 解析宽高比控制标记（如果存在），用于单次请求级别的图片配置覆盖
+      const aspectInfo = extractTrailingControlMarkers(
+        typeof messageText === 'string' ? messageText : ''
+      );
+      const aspectRatioOverride = aspectInfo.aspectRatio;
+
+      /** 构造 API 请求体（可能包含异步图片加载，例如本地文件转 Base64） */
+      const requestOverrides = {};
+      if (aspectRatioOverride) {
+        // 这里假定使用 Gemini 图像生成接口：
+        // - responseModalities: ['IMAGE'] 表示返回图片
+        // - imageConfig.aspectRatio 控制宽高比，imageSize 固定为 4K 以获得较高分辨率
+        requestOverrides.responseModalities = ['IMAGE'];
+        requestOverrides.imageConfig = {
+          ...(requestOverrides.imageConfig || {}),
+          aspectRatio: aspectRatioOverride,
+          imageSize: '4K'
+        };
+      }
+
       const requestBody = await apiManager.buildRequest({
         messages: sanitizedMessages,
-        config: config
+        config: config,
+        overrides: requestOverrides
       });
 
       // 发送API请求
@@ -766,28 +787,85 @@ export function createMessageSender(appContext) {
   }
 
   /**
-   * 解析消息末尾的并行生成标记，例如 "...问题文本[x3]"。
-   * @param {string} text - 原始消息文本
-   * @returns {{ baseText: string, parallelCount: number }} - 去除标记后的文本与并行次数（默认 1）
+   * 支持从消息末尾解析控制标记：
+   * - [xN]  并行次数
+   * - [16:9] / [Auto] 等图片宽高比
+   *
+   * 解析策略：
+   * - 从文本末尾开始，循环吃掉形如 "[...]" 的标记；
+   * - 顺序无关，直到遇到无法识别的标记为止；
+   * - 返回去掉所有已识别标记后的文本、并行次数与宽高比。
+   *
+   * @param {string} text
+   * @returns {{ baseText: string, parallelCount: number, aspectRatio: string|null }}
+   */
+  function extractTrailingControlMarkers(text) {
+    let raw = (text || '').trimEnd();
+    const MAX_PARALLEL_COUNT = 10;
+    /** 支持的宽高比（大小写不敏感） */
+    const SUPPORTED_RATIOS = [
+      'Auto',
+      '1:1', '9:16', '16:9',
+      '3:4', '4:3',
+      '3:2', '2:3',
+      '5:4', '4:5',
+      '21:9'
+    ];
+
+    let parallelCount = null;
+    let aspectRatio = null;
+
+    while (true) {
+      const match = raw.match(/\[([^\]]+)\]\s*$/i);
+      if (!match) break;
+
+      const token = match[1].trim();
+      const lower = token.toLowerCase();
+      let consumed = false;
+
+      // 1) [xN] 并行标记
+      const mX = /^x(\d+)$/.exec(lower);
+      if (mX && parallelCount == null) {
+        let n = parseInt(mX[1], 10);
+        if (Number.isFinite(n) && n >= 2) {
+          if (n > MAX_PARALLEL_COUNT) n = MAX_PARALLEL_COUNT;
+          parallelCount = n;
+        }
+        consumed = true;
+      } else if (aspectRatio == null) {
+        // 2) 宽高比标记（Auto / 16:9 / 1:1 等）
+        const found = SUPPORTED_RATIOS.find(
+          (r) => r.toLowerCase() === lower
+        );
+        if (found) {
+          aspectRatio = found; // 使用白名单里的规范写法
+          consumed = true;
+        }
+      }
+
+      if (!consumed) {
+        // 遇到未知标记，停止继续向前吃，避免误删用户自定义 [xxx]
+        break;
+      }
+
+      raw = raw.slice(0, match.index).trimEnd();
+    }
+
+    return {
+      baseText: raw,
+      parallelCount: parallelCount || 1,
+      aspectRatio: aspectRatio || null
+    };
+  }
+
+  /**
+   * 仅解析并行标记 [xN]，保持向后兼容旧接口。
+   * @param {string} text
+   * @returns {{ baseText: string, parallelCount: number }}
    */
   function parseParallelMultiplier(text) {
-    const raw = (text || '').trimEnd();
-    const MAX_PARALLEL_COUNT = 10;
-    // 简化且更鲁棒：只看“整条消息最后是否是 [xN]”这一段，不关心前面是否有换行/其他内容
-    const match = raw.match(/\[x(\d+)\]\s*$/i);
-    if (!match) {
-      return { baseText: raw, parallelCount: 1 };
-    }
-    const base = raw.slice(0, match.index).trimEnd();
-    const n = parseInt(match[1], 10);
-    // 仅允许 2~MAX 路并行，N<2 视作不并行，N>MAX 则钳制为 MAX
-    if (!Number.isFinite(n) || n < 2) {
-      return { baseText: base, parallelCount: 1 };
-    }
-    if (n > MAX_PARALLEL_COUNT) {
-      return { baseText: base, parallelCount: MAX_PARALLEL_COUNT };
-    }
-    return { baseText: base, parallelCount: n };
+    const info = extractTrailingControlMarkers(text);
+    return { baseText: info.baseText, parallelCount: info.parallelCount };
   }
 
   /**
