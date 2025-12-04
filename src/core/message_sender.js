@@ -564,6 +564,17 @@ export function createMessageSender(appContext) {
         maxHistory: configForMaxHistory?.maxChatHistory ?? 500
       });
 
+      // 在真正发给模型前，统一清理所有用户消息末尾的 [xN] 并行标记，避免模型看到这些内部控制语法
+      const sanitizedMessages = messages.map((msg) => {
+        if (msg && msg.role === 'user' && typeof msg.content === 'string') {
+          const { baseText } = parseParallelMultiplier(msg.content);
+          if (baseText !== msg.content) {
+            return { ...msg, content: baseText };
+          }
+        }
+        return msg;
+      });
+
       // 获取API配置：仅使用外部提供（resolvedApiConfig / api 解析）或当前选中。不再做任何内部推断
       let config;
       if (resolvedApiConfig) {
@@ -600,7 +611,7 @@ export function createMessageSender(appContext) {
 
       // 构造API请求体（可能包含异步图片加载，例如从 file:// 读取本地文件后转为 Base64）
       const requestBody = await apiManager.buildRequest({
-        messages: messages,
+        messages: sanitizedMessages,
         config: config
       });
 
@@ -762,15 +773,15 @@ export function createMessageSender(appContext) {
   function parseParallelMultiplier(text) {
     const raw = (text || '').trimEnd();
     const MAX_PARALLEL_COUNT = 10;
-    // 匹配形如 "[x2]" "[x3]" "[x5]" 的后缀（不区分大小写）
-    const match = raw.match(/^(.*)\[x(\d+)\]\s*$/i);
+    // 简化且更鲁棒：只看“整条消息最后是否是 [xN]”这一段，不关心前面是否有换行/其他内容
+    const match = raw.match(/\[x(\d+)\]\s*$/i);
     if (!match) {
       return { baseText: raw, parallelCount: 1 };
     }
-    const base = match[1].trimEnd();
-    const n = parseInt(match[2], 10);
-    // 仅允许 2~10 路并行，超过范围视为 max 路并行但仍移除后缀，避免污染提示词
-    if (!Number.isFinite(n) || n < 2 ) {
+    const base = raw.slice(0, match.index).trimEnd();
+    const n = parseInt(match[1], 10);
+    // 仅允许 2~MAX 路并行，N<2 视作不并行，N>MAX 则钳制为 MAX
+    if (!Number.isFinite(n) || n < 2) {
       return { baseText: base, parallelCount: 1 };
     }
     if (n > MAX_PARALLEL_COUNT) {
@@ -834,7 +845,29 @@ export function createMessageSender(appContext) {
       }
     }
 
-    const { baseText, parallelCount } = parseParallelMultiplier(rawText);
+    let { baseText, parallelCount } = parseParallelMultiplier(rawText);
+
+    // 兜底：如果当前原始文本中未检测到 [xN]，再尝试从最后一条用户消息中解析一次
+    // 这样可以覆盖一些边缘情况，例如重新生成时上下文传入的 originalMessageText 未及时更新等。
+    if (parallelCount <= 1) {
+      try {
+        const userMessages = chatContainer.querySelectorAll('.user-message');
+        if (userMessages.length > 0) {
+          const lastUser = userMessages[userMessages.length - 1];
+          const lastUserText =
+            lastUser.getAttribute('data-original-text') ||
+            lastUser.textContent ||
+            '';
+          const parsedLast = parseParallelMultiplier(lastUserText);
+          if (parsedLast.parallelCount > 1) {
+            baseText = parsedLast.baseText;
+            parallelCount = parsedLast.parallelCount;
+          }
+        }
+      } catch (e) {
+        console.warn('从最后一条用户消息解析并行标记失败:', e);
+      }
+    }
     const hasImagesInInput = inputController
       ? inputController.hasImages()
       : !!imageContainer.querySelector('.image-tag');
