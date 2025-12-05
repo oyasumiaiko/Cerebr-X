@@ -46,6 +46,7 @@ export async function initializeSidebarServices(appContext) {
   window.cerebr.repairRecentImages = (options) => appContext.services.chatHistoryUI?.repairRecentImages(options);
   window.cerebr.purgeOrphanImageContents = () => appContext.services.chatHistoryUI?.purgeOrphanImageContents?.();
   window.cerebr.migrateImagePathsToRelative = () => appContext.services.chatHistoryUI?.migrateImagePathsToRelative?.();
+  window.cerebr.setImageDownloadRoot = (rootPath) => appContext.services.chatHistoryUI?.setDownloadRootManual?.(rootPath);
 
   appContext.services.uiManager = createUIManager(appContext);
   appContext.services.contextMenuManager = createContextMenuManager(appContext);

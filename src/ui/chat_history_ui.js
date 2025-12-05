@@ -606,9 +606,9 @@ export function createChatHistoryUI(appContext) {
         for (const part of msg.content) {
           if (part.type === 'text') {
             combinedContent = part.text || '';
-          } else if (part.type === 'image_url' && part.image_url && part.image_url.url) {
+          } else if (part.type === 'image_url' && part.image_url) {
             const resolved = await resolveImageUrlForDisplay(part.image_url);
-            legacyImageUrls.push(resolved || part.image_url.url);
+            legacyImageUrls.push(resolved || part.image_url.url || '');
           }
         }
 
@@ -2875,6 +2875,11 @@ export function createChatHistoryUI(appContext) {
     } catch (_) {}
   }
 
+  async function setDownloadRootManual(rootPath) {
+    if (!rootPath || typeof rootPath !== 'string') return;
+    await saveDownloadRoot(rootPath);
+  }
+
   function deriveRootFromAbsolute(absPath, relPath) {
     const abs = normalizePath(absPath);
     const rel = normalizePath(relPath || '');
@@ -2895,7 +2900,10 @@ export function createChatHistoryUI(appContext) {
     if (!relPath) return null;
     const root = normalizePath(rootPath || downloadRootCache || '');
     const rel = normalizePath(relPath).replace(/^\/+/, '');
-    const full = root ? `${root}${rel}` : rel;
+    if (!root) {
+      return rel; // 无根路径时返回相对路径，避免生成 file:///Images/...
+    }
+    const full = `${root}${rel}`;
     let normalized = normalizePath(full);
     if (/^[A-Za-z]:\//.test(normalized)) {
       normalized = '/' + normalized;
@@ -2918,7 +2926,13 @@ export function createChatHistoryUI(appContext) {
       const marker = '/Images/';
       const idx = normalized.indexOf(marker);
       if (idx >= 0) {
-        return normalized.slice(idx + 1); // 保留 Images/ 开头
+        const rel = normalized.slice(idx + 1); // 保留 Images/ 开头
+        // 若未缓存根目录，则推断并保存
+        if (!downloadRootCache) {
+          const derivedRoot = normalized.slice(0, idx + 1);
+          saveDownloadRoot(derivedRoot);
+        }
+        return rel;
       }
       return null;
     } catch (_) {
@@ -2933,7 +2947,8 @@ export function createChatHistoryUI(appContext) {
     if (typeof rawUrl === 'string' && rawUrl.startsWith('file://')) return rawUrl;
     if (relPath) {
       const root = await loadDownloadRoot();
-      const fileUrl = buildFileUrlFromRelative(relPath, root);
+      // 如果没有 root，返回相对路径以避免生成错误的 file:///Images/...，需要用户手动设置根路径
+      const fileUrl = root ? buildFileUrlFromRelative(relPath, root) : null;
       return fileUrl || relPath;
     }
     return rawUrl || '';
@@ -3961,6 +3976,7 @@ export function createChatHistoryUI(appContext) {
     restartAutoBackupScheduler,
     repairRecentImages,
     purgeOrphanImageContents,
-    migrateImagePathsToRelative
+    migrateImagePathsToRelative,
+    setDownloadRootManual
   };
 }
