@@ -864,13 +864,14 @@ export function createApiManager(appContext) {
     });
   }
 
-  /**
-   * 辅助函数：将 image_url.url 转换为 Gemini 需要的 inline_data 结构
-   * 
-   * 设计目标：
-   * - 优先支持 dataURL（兼容现有逻辑）
-   * - 如果是本地文件链接 file://，在发送前临时读取文件并转为 Base64；
-   * - 读取失败时返回 null，由调用方决定是否忽略该图片。
+ /**
+  * 辅助函数：将 image_url.url 转换为 Gemini 需要的 inline_data 结构
+  * 
+  * 设计目标：
+  * - 优先支持 dataURL（兼容现有逻辑）
+  * - 如果是本地文件链接 file://，在发送前临时读取文件并转为 Base64；
+   * - 如果是相对路径（Images/...），结合已保存的下载根目录拼出 file://；
+  * - 读取失败时返回 null，由调用方决定是否忽略该图片。
    *
    * 注意：
    * - 这里仅在构造请求体时做一次性转换，不会把 Base64 写入 IndexedDB；
@@ -879,17 +880,43 @@ export function createApiManager(appContext) {
    * @param {string} url - image_url.url 字段值
    * @returns {Promise<{inline_data: { mime_type: string, data: string }}|null>}
    */
+  const IMAGE_DOWNLOAD_ROOT_KEY = 'image_download_root';
+  function normalizePath(p) {
+    return (p || '').replace(/\\/g, '/');
+  }
+  async function resolveToFileUrl(raw) {
+    if (!raw || typeof raw !== 'string') return null;
+    if (raw.startsWith('data:') || raw.startsWith('http')) return raw;
+    if (raw.startsWith('file://')) return raw;
+    // 处理相对路径：Images/...
+    const rel = normalizePath(raw).replace(/^\/+/, '');
+    try {
+      const res = await chrome.storage.local.get([IMAGE_DOWNLOAD_ROOT_KEY]);
+      const root = normalizePath(res[IMAGE_DOWNLOAD_ROOT_KEY] || '');
+      if (!root) return null;
+      let full = `${root.replace(/\/+$/, '')}/${rel}`;
+      full = normalizePath(full);
+      if (/^[A-Za-z]:\//.test(full)) full = '/' + full;
+      return `file://${full}`;
+    } catch (_) {
+      return null;
+    }
+  }
+
   async function buildGeminiInlinePartFromImageUrl(url) {
-    if (typeof url !== 'string' || !url) {
+    if (!url) {
       return null;
     }
 
     try {
+      const resolvedUrl = await resolveToFileUrl(url);
+      const finalUrl = resolvedUrl || url;
+
       // 1) 兼容原有 dataURL 格式：data:image/...;base64,XXXX
-      if (url.startsWith('data:')) {
-        const match = url.match(/^data:(image\/(?:jpeg|png|gif|webp));base64,(.*)$/);
+      if (typeof finalUrl === 'string' && finalUrl.startsWith('data:')) {
+        const match = finalUrl.match(/^data:(image\/(?:jpeg|png|gif|webp));base64,(.*)$/);
         if (!match) {
-          console.warn('不支持的 dataURL 图片格式 (Gemini):', url.substring(0, 48) + '...');
+          console.warn('不支持的 dataURL 图片格式 (Gemini):', finalUrl.substring(0, 48) + '...');
           return null;
         }
         return {
@@ -901,10 +928,10 @@ export function createApiManager(appContext) {
       }
 
       // 2) 本地文件链接：file:// 开头
-      if (url.startsWith('file://')) {
-        const response = await fetch(url);
+      if (typeof finalUrl === 'string' && finalUrl.startsWith('file://')) {
+        const response = await fetch(finalUrl);
         if (!response.ok) {
-          console.warn('读取本地图片失败 (Gemini):', url, response.status, response.statusText);
+          console.warn('读取本地图片失败 (Gemini):', finalUrl, response.status, response.statusText);
           return null;
         }
         const blob = await response.blob();
@@ -993,8 +1020,9 @@ export function createApiManager(appContext) {
           for (const item of msg.content) {
             if (item.type === 'text') {
               parts.push({ text: item.text });
-            } else if (item.type === 'image_url' && item.image_url && item.image_url.url) {
-              const inlinePart = await buildGeminiInlinePartFromImageUrl(item.image_url.url);
+            } else if (item.type === 'image_url' && item.image_url) {
+              const rawUrl = item.image_url.url || item.image_url.path || '';
+              const inlinePart = await buildGeminiInlinePartFromImageUrl(rawUrl);
               if (inlinePart) {
                 parts.push(inlinePart);
               }
