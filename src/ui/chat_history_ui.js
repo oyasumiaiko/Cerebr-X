@@ -3324,7 +3324,7 @@ export function createChatHistoryUI(appContext) {
   /**
    * 检查 image_url.path 与 image_url.url 的一致性，统计差异并给出示例
    * @param {number} [sampleLimit=20]
-   * @returns {Promise<{total:number, same:number, mismatch:number, pathOnly:number, urlOnly:number, samples:Array<Object>}>}
+   * @returns {Promise<{total:number, same:number, mismatch:number, pathOnly:number, urlOnly:number, samples:Array<Object>, urlOnlySamples:Array<Object>}>}
    */
   async function checkImagePathUrlMismatch(sampleLimit = 20) {
     const metas = await getAllConversationMetadata();
@@ -3334,6 +3334,7 @@ export function createChatHistoryUI(appContext) {
     let pathOnly = 0;
     let urlOnly = 0;
     const samples = [];
+    const urlOnlySamples = [];
 
     const normalizeRel = (p) => normalizePath(p || '').replace(/^\/+/, '');
     const normalizeUrl = (u) => {
@@ -3376,12 +3377,19 @@ export function createChatHistoryUI(appContext) {
             pathOnly += 1;
           } else if (!normPath && normUrl) {
             urlOnly += 1;
+            if (urlOnlySamples.length < sampleLimit) {
+              urlOnlySamples.push({
+                conversationId: conv.id,
+                messageId: msg.id,
+                url: rawUrl
+              });
+            }
           }
         }
       }
     }
 
-    return { total, same, mismatch, pathOnly, urlOnly, samples };
+    return { total, same, mismatch, pathOnly, urlOnly, samples, urlOnlySamples };
   }
 
   /**
