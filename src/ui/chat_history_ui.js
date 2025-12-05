@@ -398,6 +398,14 @@ export function createChatHistoryUI(appContext) {
       return;
     }
     const messagesCopy = messages.slice();
+    // 保存前先将消息中的 dataURL/远程图片落盘，防止 base64 继续写入 IndexedDB
+    try {
+      for (const msg of messagesCopy) {
+        await repairImagesInMessage(msg);
+      }
+    } catch (e) {
+      console.warn('保存会话时落盘图片失败，已跳过部分图片:', e);
+    }
     const timestamps = messagesCopy.map(msg => msg.timestamp);
     const startTime = Math.min(...timestamps);
     const endTime = Math.max(...timestamps);
