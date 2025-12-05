@@ -3138,20 +3138,21 @@ export function createChatHistoryUI(appContext) {
           const url = part.image_url.url;
           if (typeof url === 'string' && url.startsWith('data:image/')) {
             found += 1;
-            const saved = await getOrSaveDataUrlToLocalFile(url, roleFolder, { timestamp: ts });
-            if (saved?.relPath || saved?.fileUrl) {
-              const h = extractHashFromFileUrl(saved.fileUrl || '');
-              if (h) part.image_url.hash = h;
-              if (saved.relPath) {
-                part.image_url.path = saved.relPath;
-                part.image_url.url = saved.relPath;
-              } else if (saved.fileUrl) {
-                part.image_url.url = saved.fileUrl;
-              }
-              converted += 1;
-              changed = true;
-            } else {
-              failed += 1;
+          const saved = await getOrSaveDataUrlToLocalFile(url, roleFolder, { timestamp: ts });
+          if (saved?.relPath || saved?.fileUrl) {
+            const h = extractHashFromFileUrl(saved.fileUrl || '');
+            if (h) part.image_url.hash = h;
+            if (saved.relPath) {
+              part.image_url.path = saved.relPath;
+              delete part.image_url.url;
+            } else if (saved.fileUrl) {
+              // 保底：无相对路径时维持 url
+              part.image_url.url = saved.fileUrl;
+            }
+            converted += 1;
+            changed = true;
+          } else {
+            failed += 1;
             }
           } else if (typeof url === 'string' && url.startsWith('http')) {
             // 将 http/https 远程图片也落盘，避免后续备份重复拉取
@@ -3161,7 +3162,7 @@ export function createChatHistoryUI(appContext) {
               if (h) part.image_url.hash = h;
               if (saved.relPath) {
                 part.image_url.path = saved.relPath;
-                part.image_url.url = saved.relPath;
+                delete part.image_url.url;
               } else if (saved.fileUrl) {
                 part.image_url.url = saved.fileUrl;
               }
@@ -3181,7 +3182,7 @@ export function createChatHistoryUI(appContext) {
               const rel = fileUrlToRelative(url);
               if (rel) {
                 part.image_url.path = rel;
-                part.image_url.url = rel;
+                delete part.image_url.url;
                 changed = true;
               }
             }
@@ -3390,6 +3391,71 @@ export function createChatHistoryUI(appContext) {
     }
 
     return { total, same, mismatch, pathOnly, urlOnly, samples, urlOnlySamples };
+  }
+
+  /**
+   * 清理 image_url 中重复的 url 字段：
+   * - 尝试从 file:// 或相对 url 补全 path
+   * - 若 path 存在且 url 相同则移除 url
+   */
+  async function cleanImageUrlFields() {
+    await loadDownloadRoot();
+    const metas = await getAllConversationMetadata();
+    let updated = 0;
+    let removedUrl = 0;
+    let addedPath = 0;
+    const normalizeRel = (p) => normalizePath(p || '').replace(/^\/+/, '');
+
+    for (const meta of metas) {
+      const conv = await getConversationById(meta.id, true);
+      let convChanged = false;
+      if (!conv || !Array.isArray(conv.messages)) continue;
+
+      for (const msg of conv.messages) {
+        if (!Array.isArray(msg.content)) continue;
+        for (const part of msg.content) {
+          if (part?.type !== 'image_url') continue;
+          const img = part.image_url || {};
+          let relPath = normalizeRel(img.path);
+          const rawUrl = img.url || '';
+
+          if (!relPath && rawUrl) {
+            const derived = rawUrl.startsWith('file://')
+              ? fileUrlToRelative(rawUrl)
+              : normalizeRel(rawUrl);
+            if (derived) {
+              img.path = derived;
+              relPath = derived;
+              addedPath += 1;
+              convChanged = true;
+            }
+          }
+
+          if (relPath && rawUrl) {
+            const normUrl = rawUrl.startsWith('file://')
+              ? normalizeRel(fileUrlToRelative(rawUrl) || '')
+              : normalizeRel(rawUrl);
+            if (!normUrl || normUrl.endsWith(relPath)) {
+              delete img.url;
+              removedUrl += 1;
+              convChanged = true;
+            }
+          }
+
+          part.image_url = img;
+        }
+      }
+
+      if (convChanged) {
+        await putConversation(conv);
+        updateConversationInCache(conv);
+        if (activeConversation?.id === conv.id) activeConversation = conv;
+        updated += 1;
+      }
+    }
+
+    invalidateMetadataCache();
+    return { updatedConversations: updated, removedUrl, addedPath };
   }
 
   /**
@@ -4049,6 +4115,7 @@ export function createChatHistoryUI(appContext) {
     purgeOrphanImageContents,
     migrateImagePathsToRelative,
     setDownloadRootManual,
-    checkImagePathUrlMismatch
+    checkImagePathUrlMismatch,
+    cleanImageUrlFields
   };
 }
