@@ -1101,12 +1101,25 @@ export function createApiManager(appContext) {
 
       // 再次应用 overrides，确保单次请求级别的覆盖（例如宽高比）优先于配置级自定义参数
       if (overrides && typeof overrides === 'object') {
+        const originalGenerationConfig = requestBody.generationConfig || {};
         requestBody = { ...requestBody, ...overrides };
         if (overrides.generationConfig) {
-          requestBody.generationConfig = {
-            ...(requestBody.generationConfig || {}),
+          const mergedGenConfig = {
+            ...originalGenerationConfig,
             ...overrides.generationConfig
           };
+          // 深度合并 imageConfig，避免覆盖用户已配置的分辨率等字段
+          if (overrides.generationConfig.imageConfig || originalGenerationConfig.imageConfig) {
+            const mergedImageConfig = {
+              ...(originalGenerationConfig.imageConfig || {}),
+              ...(overrides.generationConfig.imageConfig || {})
+            };
+            if (!mergedImageConfig.imageSize) {
+              mergedImageConfig.imageSize = (originalGenerationConfig.imageConfig && originalGenerationConfig.imageConfig.imageSize) || '4K';
+            }
+            mergedGenConfig.imageConfig = mergedImageConfig;
+          }
+          requestBody.generationConfig = mergedGenConfig;
         }
       }
 

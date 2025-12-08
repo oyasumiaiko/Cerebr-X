@@ -394,7 +394,8 @@ export function createMessageSender(appContext) {
       api = null,
       resolvedApiConfig = null,
       pageContentSnapshot = null,
-      conversationSnapshot = null
+      conversationSnapshot = null,
+      aspectRatioOverride: externalAspectRatioOverride = null
     } = options;
 
     const autoRetrySetting = settingsManager?.getSetting?.('autoRetry');
@@ -405,6 +406,7 @@ export function createMessageSender(appContext) {
     const autoRetryAttempt = (typeof options.__autoRetryAttempt === 'number' && options.__autoRetryAttempt >= 0)
       ? options.__autoRetryAttempt
       : 0;
+    let aspectRatioOverride = externalAspectRatioOverride || null;
 
     const hasImagesInInput = inputController ? inputController.hasImages() : !!imageContainer.querySelector('.image-tag');
     // 如果是重新生成，使用原始消息文本；否则从输入框获取
@@ -611,22 +613,22 @@ export function createMessageSender(appContext) {
       loadingMessage.textContent = '正在发送请求...';
 
       // 解析宽高比控制标记（如果存在），用于单次请求级别的图片配置覆盖
-      const aspectInfo = extractTrailingControlMarkers(
-        typeof messageText === 'string' ? messageText : ''
-      );
-      const aspectRatioOverride = aspectInfo.aspectRatio;
+      if (!aspectRatioOverride) {
+        const aspectInfo = extractTrailingControlMarkers(
+          typeof messageText === 'string' ? messageText : ''
+        );
+        aspectRatioOverride = aspectInfo.aspectRatio;
+      }
 
       /** 构造 API 请求体（可能包含异步图片加载，例如本地文件转 Base64） */
       const requestOverrides = {};
-      if (aspectRatioOverride) {
-        // 这里假定使用 Gemini 图像生成接口：
-        // - responseModalities: ['IMAGE'] 表示返回图片
-        // - imageConfig.aspectRatio 控制宽高比，imageSize 固定为 4K 以获得较高分辨率
-        requestOverrides.responseModalities = ['IMAGE'];
-        requestOverrides.imageConfig = {
-          ...(requestOverrides.imageConfig || {}),
-          aspectRatio: aspectRatioOverride,
-          imageSize: '4K'
+      // 仅在 Gemini 场景下注入宽高比控制，保留 imageSize 由用户配置或后续默认值决定
+      if (aspectRatioOverride && config?.baseUrl === 'genai') {
+        requestOverrides.generationConfig = {
+          responseModalities: ['IMAGE'],
+          imageConfig: {
+            aspectRatio: aspectRatioOverride
+          }
         };
       }
 
@@ -696,6 +698,7 @@ export function createMessageSender(appContext) {
         forceSendFullHistory,
         pageContentSnapshot: pageContentResponse || null,
         conversationSnapshot: Array.isArray(conversationChain) ? conversationChain : null,
+        aspectRatioOverride,
         // 透传外部策略决定的API（若有）
         resolvedApiConfig,
         api
@@ -865,7 +868,11 @@ export function createMessageSender(appContext) {
    */
   function parseParallelMultiplier(text) {
     const info = extractTrailingControlMarkers(text);
-    return { baseText: info.baseText, parallelCount: info.parallelCount };
+    return {
+      baseText: info.baseText,
+      parallelCount: info.parallelCount,
+      aspectRatio: info.aspectRatio
+    };
   }
 
   /**
@@ -923,7 +930,7 @@ export function createMessageSender(appContext) {
       }
     }
 
-    let { baseText, parallelCount } = parseParallelMultiplier(rawText);
+    let { baseText, parallelCount, aspectRatio } = parseParallelMultiplier(rawText);
 
     // 兜底：如果当前原始文本中未检测到 [xN]，再尝试从最后一条用户消息中解析一次
     // 这样可以覆盖一些边缘情况，例如重新生成时上下文传入的 originalMessageText 未及时更新等。
@@ -940,6 +947,7 @@ export function createMessageSender(appContext) {
           if (parsedLast.parallelCount > 1) {
             baseText = parsedLast.baseText;
             parallelCount = parsedLast.parallelCount;
+            aspectRatio = aspectRatio || parsedLast.aspectRatio || null;
           }
         }
       } catch (e) {
@@ -958,6 +966,9 @@ export function createMessageSender(appContext) {
       if (baseText !== rawText) {
         singleOpts.originalMessageText = baseText;
       }
+      if (aspectRatio) {
+        singleOpts.aspectRatioOverride = aspectRatio;
+      }
       return sendMessageCore(singleOpts);
     }
 
@@ -972,7 +983,8 @@ export function createMessageSender(appContext) {
         const taskOptions = {
           ...opts,
           originalMessageText: baseText,
-          regenerateMode: true
+          regenerateMode: true,
+          aspectRatioOverride: aspectRatio || undefined
         };
         tasks.push(sendMessageCore(taskOptions));
       }
@@ -983,7 +995,8 @@ export function createMessageSender(appContext) {
     // 第一步：启动第一路核心请求，让它负责插入用户消息与第一条 AI 回复
     const firstOptions = {
       ...opts,
-      originalMessageText: baseText
+      originalMessageText: baseText,
+      aspectRatioOverride: aspectRatio || undefined
     };
     const firstPromise = sendMessageCore(firstOptions);
     tasks.push(firstPromise);
@@ -1019,7 +1032,8 @@ export function createMessageSender(appContext) {
         ...opts,
         originalMessageText: baseText,
         regenerateMode: true,
-        messageId: baseUserMessageId
+        messageId: baseUserMessageId,
+        aspectRatioOverride: aspectRatio || undefined
       };
       tasks.push(sendMessageCore(extraOptions));
     }
