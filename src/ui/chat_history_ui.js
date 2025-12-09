@@ -409,17 +409,27 @@ export function createChatHistoryUI(appContext) {
    */
   async function saveCurrentConversation(isUpdate = false) {
     const chatHistory = services.chatHistoryManager.chatHistory;
-    const messages = chatHistory.messages;
-    if (messages.length === 0) {
+    const rawMessages = chatHistory.messages;
+    if (rawMessages.length === 0) {
       if (isUpdate && currentConversationId) {
         await deleteConversationRecord(currentConversationId);
       }
       return;
     }
+    // 说明：后续的落盘流程会把 dataURL 转换为本地路径，为避免污染实时对话树，
+    // 这里先深拷贝一份消息列表，仅在副本上做持久化处理。
+    const cloneMessageSafely = (msg) => {
+      try {
+        return structuredClone(msg);
+      } catch (_) {
+        return JSON.parse(JSON.stringify(msg));
+      }
+    };
+    const messagesCopy = rawMessages.map(cloneMessageSafely);
+
     // 保存前确保 <think> 段落已转为 thoughtsRaw，避免思考内容混入正文
-    messages.forEach(normalizeThinkingForMessage);
-    const messagesCopy = messages.slice();
-    // 保存前先将消息中的 dataURL/远程图片落盘，防止 base64 继续写入 IndexedDB
+    messagesCopy.forEach(normalizeThinkingForMessage);
+    // 保存前先将消息中的 dataURL/远程图片落盘（仅操作副本），防止 base64 继续写入 IndexedDB
     try {
       for (const msg of messagesCopy) {
         await repairImagesInMessage(msg);

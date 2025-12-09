@@ -975,6 +975,32 @@ export function createApiManager(appContext) {
   }
 
   /**
+   * 将 image_url 的原始路径转换为 OpenAI 兼容的 dataURL：
+   * - data: 开头直接透传；
+   * - http/https 原样返回（OpenAI 支持远程地址）；
+   * - file:// 或相对路径复用 Gemini 的读取逻辑转为 Base64，避免把本地路径直接塞进请求体。
+   * @param {string} rawUrl 原始 image_url.url 或 path
+   * @returns {Promise<string|null>} 可发送的 dataURL/http 链接，失败返回 null
+   */
+  async function normalizeImageUrlForOpenAI(rawUrl) {
+    const url = typeof rawUrl === 'string' ? rawUrl : '';
+    if (!url) return null;
+    if (url.startsWith('data:')) return url;
+    if (/^https?:\/\//i.test(url)) return url;
+
+    try {
+      const inlinePart = await buildGeminiInlinePartFromImageUrl(url);
+      if (inlinePart?.inline_data?.mime_type && inlinePart.inline_data.data) {
+        return `data:${inlinePart.inline_data.mime_type};base64,${inlinePart.inline_data.data}`;
+      }
+    } catch (e) {
+      console.warn('转换图片为数据URL失败，已跳过问题图片:', e);
+    }
+    console.warn('无法解析的图片路径，已避免发送 file:// 链接:', url);
+    return null;
+  }
+
+  /**
    * 构建 API 请求
    * @param {Object} options - 请求选项
    * @param {Array} options.messages - 消息数组
@@ -1125,19 +1151,38 @@ export function createApiManager(appContext) {
 
     } else {
       // 其他 API (如 OpenAI) 请求格式
-      // 仅保留 OpenAI 兼容字段，剥离内部使用的 thoughtSignature 等扩展字段
-      const sanitizedMessages = normalizedMessages.map(msg => {
-        const base = {
-          role: msg.role,
-          content: msg.content
-        };
+      // 仅保留 OpenAI 兼容字段，并将本地/相对图片转回可发送的 dataURL
+      const sanitizedMessages = await Promise.all(normalizedMessages.map(async (msg) => {
+        const base = { role: msg.role };
         if (msg.name) base.name = msg.name;
         if (msg.tool_call_id) base.tool_call_id = msg.tool_call_id;
         if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
           base.tool_calls = msg.tool_calls;
         }
+
+        if (Array.isArray(msg.content)) {
+          const parts = [];
+          for (const item of msg.content) {
+            if (item.type === 'text') {
+              parts.push({ type: 'text', text: item.text });
+            } else if (item.type === 'image_url' && item.image_url) {
+              const rawUrl = item.image_url.url || item.image_url.path || '';
+              const resolvedUrl = await normalizeImageUrlForOpenAI(rawUrl);
+              if (resolvedUrl) {
+                parts.push({ type: 'image_url', image_url: { url: resolvedUrl } });
+              }
+            }
+          }
+          if (parts.length === 0) {
+            // 当图片解析失败时提供占位文本，避免发送空消息或携带 file:// 路径
+            parts.push({ type: 'text', text: '[图片无法读取]' });
+          }
+          base.content = parts;
+        } else {
+          base.content = msg.content;
+        }
         return base;
-      });
+      }));
 
       requestBody = {
         model: config.modelName,
