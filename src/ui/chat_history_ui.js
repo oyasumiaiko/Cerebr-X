@@ -3198,6 +3198,21 @@ export function createChatHistoryUI(appContext) {
       const hash16 = toHash16(fullHash);
       const baseName = `${dateStr}_${hash16 || Math.random().toString(36).slice(2, 8)}`;
       const relPath = `Images/${roleFolder}/${dateStr.slice(0,4)}/${dateStr.slice(4,6)}/${dateStr.slice(6,8)}/${baseName}.${ext}`;
+
+      // 优先尝试使用“预期文件路径”读取：若已存在同名文件则直接复用，避免重复下载
+      try {
+        const root = await loadDownloadRoot();
+        const expectedFileUrl = root ? buildFileUrlFromRelative(relPath, root) : null;
+        if (expectedFileUrl) {
+          const resp = await fetch(expectedFileUrl);
+          if (resp.ok) {
+            return { fileUrl: expectedFileUrl, relPath, hash: fullHash };
+          }
+        }
+      } catch (checkErr) {
+        console.warn('检测既有图片文件失败，将继续下载流程:', checkErr);
+      }
+
       const normalizedDataUrl = `data:${mimeType};base64,${base64Data}`;
       const filename = `Cerebr/${relPath}`;
       const downloadId = await new Promise((resolve, reject) => {
