@@ -4589,6 +4589,13 @@ html.fullscreen-mode::before {
   padding-right: max(15px, calc((100vw - var(--cerebr-sidebar-width)) / 2));
 }
 
+/* 全屏下同样需要扣掉滚动条（或 scrollbar-gutter 占位）的宽度，避免右侧出现“额外空白”。 */
+.fullscreen-mode #chat-container.has-scrollbar {
+  padding-right: calc(
+    max(15px, calc((100vw - var(--cerebr-sidebar-width)) / 2)) - var(--scrollbar-width, 0px)
+  );
+}
+
 /* 全屏下：AI 消息不再强制充满整行，避免超宽 */
 .fullscreen-mode .ai-message {
   width: auto;
