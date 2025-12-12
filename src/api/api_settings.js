@@ -1211,10 +1211,19 @@ export function createApiManager(appContext) {
    * @param {Object} options.requestBody - 请求体
    * @param {Object} options.config - API 配置
    * @param {AbortSignal} [options.signal] - 中止信号
+   * @param {(evt: {stage: string, [key: string]: any}) => void} [options.onStatus] - 状态回调（用于 UI 展示更细粒度的请求阶段；不得包含敏感信息）
    * @returns {Promise<Response>} Fetch 响应对象
    * @throws {Error} 如果 API Key 无效或缺失
    */
-  async function sendRequest({ requestBody, config, signal }) {
+  async function sendRequest({ requestBody, config, signal, onStatus }) {
+    // 说明：Fetch API 无法精确提供“上传进度/已上传完毕”的事件。
+    // 这里的阶段回调只基于我们能观测到的关键生命周期节点（开始发起请求/请求已发出/收到响应头/遇到限流切换 Key 等），
+    // 用于提升 UI 透明度，但不承诺网络层面的逐字节进度。
+    const emitStatus = (evt) => {
+      if (typeof onStatus !== 'function') return;
+      try { onStatus(evt); } catch (e) { console.warn('sendRequest onStatus 回调异常:', e); }
+    };
+
     const configId = getConfigIdentifier(config);
     // 确保黑名单已加载（若未调用过 loadAPIConfigs）
     if (!apiKeyBlacklist || typeof apiKeyBlacklist !== 'object') {
@@ -1271,6 +1280,16 @@ export function createApiManager(appContext) {
         throw new Error(`Selected API Key for ${config.displayName || config.modelName} is empty.`);
       }
 
+      emitStatus({
+        stage: 'api_key_selected',
+        keyIndex: selectedIndex,
+        keyCount: isArrayKeys ? (config.apiKey?.length || 0) : 1,
+        triedCount: tried.size,
+        isKeyRotation: isArrayKeys,
+        apiBase: config?.baseUrl || '',
+        modelName: config?.modelName || ''
+      });
+
       // 组装请求
       let endpointUrl = config.baseUrl;
       const headers = { 'Content-Type': 'application/json' };
@@ -1284,15 +1303,45 @@ export function createApiManager(appContext) {
         headers['Authorization'] = `Bearer ${selectedKey}`;
       }
 
-      const response = await fetch(endpointUrl, {
+      emitStatus({
+        stage: 'http_request_start',
+        apiBase: config?.baseUrl || '',
+        modelName: config?.modelName || '',
+        useStreaming: config?.baseUrl === 'genai' ? (config.useStreaming !== false) : !!requestBody?.stream
+      });
+
+      // 重要：先创建 fetch Promise 再 emit “已发出请求”，让 UI 可以在等待响应头阶段展示更明确的状态。
+      // 这里不向 onStatus 透出 endpointUrl，避免 Gemini 场景下 URL 携带 key 造成泄漏风险。
+      const fetchPromise = fetch(endpointUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody),
         signal
       });
 
+      emitStatus({
+        stage: 'http_request_sent',
+        apiBase: config?.baseUrl || '',
+        modelName: config?.modelName || ''
+      });
+
+      const response = await fetchPromise;
+      emitStatus({
+        stage: 'http_response_headers_received',
+        status: response?.status,
+        ok: response?.ok,
+        apiBase: config?.baseUrl || '',
+        modelName: config?.modelName || ''
+      });
+
       // 处理 429：加入黑名单并尝试下一个 key
       if (response.status === 429) {
+        emitStatus({
+          stage: 'http_429_rate_limited',
+          willRetry: !!isArrayKeys,
+          apiBase: config?.baseUrl || '',
+          modelName: config?.modelName || ''
+        });
         lastErrorResponse = response;
         try { await blacklistKey(selectedKey, 24 * 60 * 60 * 1000); } catch (_) {}
         tried.add(selectedKey);
@@ -1312,6 +1361,13 @@ export function createApiManager(appContext) {
 
       // 处理 400/403：标记 key 永久不可用
       if (response.status === 400 || response.status === 403) {
+        emitStatus({
+          stage: 'http_auth_or_bad_request_key_blacklisted',
+          status: response.status,
+          willRetry: !!isArrayKeys,
+          apiBase: config?.baseUrl || '',
+          modelName: config?.modelName || ''
+        });
         lastErrorResponse = response;
         tried.add(selectedKey);
         try { await blacklistKey(selectedKey, -1); } catch (_) {}

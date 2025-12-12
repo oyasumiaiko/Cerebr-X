@@ -202,6 +202,117 @@ export function createMessageSender(appContext) {
   }
 
   /**
+   * 安全更新“加载占位消息”的状态文案。
+   *
+   * 设计背景：
+   * - 流式输出在拿到首个 token 后会移除 loadingMessage 并创建正式 AI 消息；
+   * - 用户手动停止/自动重试/异常路径也可能提前移除或替换该元素；
+   * - 因此任何状态更新都必须先确认节点仍在 DOM 中，避免写入已失效的引用。
+   *
+   * @param {HTMLElement|null} loadingMessage
+   * @param {string} text - 需要展示的短文案（尽量一行可读）
+   * @param {Object|null} [meta] - 更细粒度的补充信息（仅用于 title 悬停提示；不得包含敏感数据）
+   */
+  function updateLoadingStatus(loadingMessage, text, meta = null) {
+    if (!loadingMessage || !loadingMessage.parentNode) return;
+    loadingMessage.textContent = text;
+
+    // 使用 title 提供“更细节但不打扰”的信息密度：鼠标悬停可查看。
+    // 注意：不要在这里拼接/透出任何 API Key 或包含 key 的 URL。
+    if (!meta || typeof meta !== 'object') {
+      loadingMessage.title = '';
+      return;
+    }
+    try {
+      const lines = [];
+      if (meta.stage) lines.push(`阶段: ${String(meta.stage)}`);
+      if (meta.apiBase) lines.push(`API: ${String(meta.apiBase)}`);
+      if (meta.modelName) lines.push(`模型: ${String(meta.modelName)}`);
+      if (Number.isFinite(meta.httpStatus)) lines.push(`HTTP: ${meta.httpStatus}`);
+      if (typeof meta.note === 'string' && meta.note.trim()) lines.push(meta.note.trim().slice(0, 300));
+      loadingMessage.title = lines.join('\n');
+    } catch (_) {
+      loadingMessage.title = '';
+    }
+  }
+
+  /**
+   * 将 apiManager.sendRequest 的“结构化阶段事件”映射为对用户可见的文案。
+   * 目的：把“正在发送请求...”细分为更贴近真实网络生命周期的多个阶段，提升透明度。
+   *
+   * 注意：Fetch API 不提供精确上传进度，因此这里的“上传/等待”只表示所处阶段，而非字节级进度。
+   *
+   * @param {HTMLElement|null} loadingMessage
+   * @returns {(evt: {stage: string, [key: string]: any}) => void}
+   */
+  function createRequestStatusHandler(loadingMessage) {
+    return (evt) => {
+      if (!loadingMessage || !loadingMessage.parentNode) return;
+      if (!evt || typeof evt !== 'object') return;
+
+      const stage = evt.stage;
+      switch (stage) {
+        case 'api_key_selected': {
+          const keyCount = Number(evt.keyCount) || 1;
+          const keyIndex = Number(evt.keyIndex);
+          const hasIndex = Number.isFinite(keyIndex) && keyIndex >= 0;
+          const text = keyCount > 1 && hasIndex
+            ? `正在选择可用的 API Key (${keyIndex + 1}/${keyCount})...`
+            : '正在校验 API Key...';
+          updateLoadingStatus(loadingMessage, text, {
+            stage,
+            apiBase: evt.apiBase || '',
+            modelName: evt.modelName || '',
+            note: keyCount > 1 ? '提示：检测到多 Key 配置，必要时会自动轮换以提升成功率。' : ''
+          });
+          break;
+        }
+        case 'http_request_start': {
+          updateLoadingStatus(loadingMessage, '正在建立连接并上传请求载荷...', {
+            stage,
+            apiBase: evt.apiBase || '',
+            modelName: evt.modelName || ''
+          });
+          break;
+        }
+        case 'http_request_sent': {
+          updateLoadingStatus(loadingMessage, '请求已发出，等待服务器响应...', {
+            stage,
+            apiBase: evt.apiBase || '',
+            modelName: evt.modelName || '',
+            note: '此阶段可能包含：上传剩余载荷、服务器排队、模型开始计算。'
+          });
+          break;
+        }
+        case 'http_429_rate_limited': {
+          const willRetry = !!evt.willRetry;
+          updateLoadingStatus(
+            loadingMessage,
+            willRetry ? '触发限流 (HTTP 429)，正在切换 API Key 重试...' : '触发限流 (HTTP 429)...',
+            { stage, apiBase: evt.apiBase || '', modelName: evt.modelName || '', httpStatus: 429 }
+          );
+          break;
+        }
+        case 'http_auth_or_bad_request_key_blacklisted': {
+          const httpStatus = Number(evt.status);
+          const willRetry = !!evt.willRetry;
+          updateLoadingStatus(
+            loadingMessage,
+            willRetry
+              ? `API Key 可能无效/受限 (HTTP ${Number.isFinite(httpStatus) ? httpStatus : '?'})，正在切换 Key 重试...`
+              : `API Key 可能无效/受限 (HTTP ${Number.isFinite(httpStatus) ? httpStatus : '?'})...`,
+            { stage, apiBase: evt.apiBase || '', modelName: evt.modelName || '', httpStatus }
+          );
+          break;
+        }
+        default:
+          // 其他阶段先不做 UI 文案映射，避免过度刷屏；需要时再逐步补充。
+          break;
+      }
+    };
+  }
+
+  /**
    * 将流式增量按 <think> 标签拆分到思考块与正文块。
    * 若已进入思考模式，则持续写入直到遇到闭合标签。
    * @param {string} delta - 本次增量文本
@@ -683,8 +794,8 @@ export function createMessageSender(appContext) {
         userMessageDiv.appendChild(footer);
       }
 
-      // 更新加载状态：正在发送请求
-      loadingMessage.textContent = '正在发送请求...';
+      // 更新加载状态：构造请求载荷（此阶段尚未发起网络请求，可能包含图片编码/自定义参数合并等耗时操作）
+      updateLoadingStatus(loadingMessage, '正在构造请求载荷...', { stage: 'build_request_body' });
 
       // 解析宽高比控制标记（如果存在），用于单次请求级别的图片配置覆盖
       if (!aspectRatioOverride) {
@@ -712,26 +823,37 @@ export function createMessageSender(appContext) {
         overrides: requestOverrides
       });
 
-      // 发送API请求
-      const response = await apiManager.sendRequest({
-        requestBody: requestBody,
-        config: effectiveApiConfig,
-        signal: signal
-      });
-      
-      // 更新加载状态：等待AI响应
-      loadingMessage.textContent = '正在等待回复...';
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`API错误 (${response.status}): ${error}`);
-      }
-
-      // 根据配置选择流式/非流式处理
+      // 根据配置选择流式/非流式处理（该判定不依赖 response，可提前计算，用于更准确的状态文案）
       const isGeminiApi = effectiveApiConfig?.baseUrl === 'genai';
       const useStreaming = isGeminiApi
         ? (effectiveApiConfig.useStreaming !== false)
         : !!(requestBody && requestBody.stream);
+
+      // 发送 API 请求（开始网络阶段）
+      updateLoadingStatus(loadingMessage, '正在发送请求（上传请求载荷）...', { stage: 'send_request' });
+      const response = await apiManager.sendRequest({
+        requestBody: requestBody,
+        config: effectiveApiConfig,
+        signal: signal,
+        onStatus: createRequestStatusHandler(loadingMessage)
+      });
+
+      if (!response.ok) {
+        updateLoadingStatus(
+          loadingMessage,
+          `服务器返回错误 (HTTP ${response.status})，正在读取错误详情...`,
+          { stage: 'read_error_body', httpStatus: response.status, apiBase: effectiveApiConfig?.baseUrl || '', modelName: effectiveApiConfig?.modelName || '' }
+        );
+        const error = await response.text();
+        throw new Error(`API错误 (${response.status}): ${error}`);
+      }
+
+      // 响应状态为 ok：此时已收到响应头，接下来进入“等待首 token / 下载完整正文”等阶段
+      updateLoadingStatus(
+        loadingMessage,
+        `已收到响应头 (HTTP ${response.status})，准备接收回复...`,
+        { stage: 'response_headers_received', httpStatus: response.status, apiBase: effectiveApiConfig?.baseUrl || '', modelName: effectiveApiConfig?.modelName || '' }
+      );
 
       if (useStreaming) {
         await handleStreamResponse(response, loadingMessage, effectiveApiConfig, attempt);
@@ -1127,6 +1249,14 @@ export function createMessageSender(appContext) {
    * @returns {Promise<void>}
    */
   async function handleStreamResponse(response, loadingMessage, usedApiConfig, attemptState) {
+    // 流式场景：此时已拿到响应头，但正文 token 尚未到达。
+    // 在首个 token 到达前维持占位消息，并展示“等待首 token”的细粒度状态。
+    updateLoadingStatus(
+      loadingMessage,
+      '已建立流式连接，等待首个 token...',
+      { stage: 'stream_wait_first_token', apiBase: usedApiConfig?.baseUrl || '', modelName: usedApiConfig?.modelName || '' }
+    );
+
     function applyApiMetaToMessage(messageId, apiConfig, messageDiv) {
       try {
         if (!messageId) return;
@@ -1493,7 +1623,7 @@ export function createMessageSender(appContext) {
 
           // 【关键逻辑】检查这是否是流式响应的第一个数据块
       if (!hasStartedResponse) {
-              // 如果是，则移除 "正在等待回复..." 等加载提示信息
+              // 首次收到可见内容：移除占位 loading 提示（此时 UI 状态已从“等待首 token”切换为正式输出）
               if (loadingMessage && loadingMessage.parentNode) loadingMessage.remove();
               
               // 标记响应已经开始，后续数据块将走更新逻辑
@@ -1552,6 +1682,13 @@ export function createMessageSender(appContext) {
    * @returns {Promise<void>}
    */
   async function handleNonStreamResponse(response, loadingMessage, usedApiConfig, attemptState) {
+    // 非流式场景：响应头已收到，但需要完整下载/解析 body，可能会明显等待。
+    updateLoadingStatus(
+      loadingMessage,
+      '正在下载并解析完整回复（非流式）...',
+      { stage: 'non_stream_read_body', apiBase: usedApiConfig?.baseUrl || '', modelName: usedApiConfig?.modelName || '' }
+    );
+
     function applyApiMetaToMessage(messageId, apiConfig, messageDiv) {
       try {
         if (!messageId) return;
