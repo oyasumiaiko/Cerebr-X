@@ -884,20 +884,75 @@ export function createApiManager(appContext) {
   function normalizePath(p) {
     return (p || '').replace(/\\/g, '/');
   }
+
+  /**
+   * 安全约束：
+   * - 扩展在具备读取 `file://` 的能力时，必须限制「仅允许读取 Cerebr/Images 目录下的图片」；
+   * - 否则用户消息里夹带任意 `<img src="file://...">` 都可能被读取并转成 Base64 上传到 API，造成隐私泄漏。
+   *
+   * 说明：
+   * - 这里不尝试做“完全可信”的路径校验（浏览器环境也很难做到），而是以最小代价实现明确的白名单：
+   *   1) 仅允许 `file://` 且路径包含 `/Cerebr/Images/` 目录段；
+   *   2) 仅允许相对路径且以 `Images/` 开头，并且需要已保存的下载根目录指向 Cerebr 目录。
+   */
+  function hasPathSegment(normalizedPathString, segment) {
+    const s = String(normalizedPathString || '');
+    const seg = String(segment || '');
+    if (!s || !seg) return false;
+    const re = new RegExp(`(^|/)${seg}(/|$)`, 'i');
+    return re.test(s);
+  }
+
+  function isCerebrRootPath(rootPath) {
+    const normalized = normalizePath(String(rootPath || ''));
+    return hasPathSegment(normalized.toLowerCase(), 'cerebr');
+  }
+
+  function normalizeFileUrlForCheck(fileUrl) {
+    const raw = String(fileUrl || '');
+    if (!raw.startsWith('file://')) return '';
+    try {
+      // 仅做“尽力而为”的解码：无法解码时保留原串，避免抛异常中断请求构建。
+      const decoded = decodeURIComponent(raw);
+      return normalizePath(decoded).toLowerCase();
+    } catch (_) {
+      return normalizePath(raw).toLowerCase();
+    }
+  }
+
+  function isAllowedCerebrImageFileUrl(fileUrl) {
+    const normalized = normalizeFileUrlForCheck(fileUrl);
+    if (!normalized) return false;
+    // 仅允许 Cerebr/Images 下的内容，避免误读 Cerebr 根目录中的备份/其他文件。
+    return /(^|\/)cerebr\/images(\/|$)/i.test(normalized);
+  }
+
+  function isAllowedCerebrRelativeImagePath(relPath) {
+    const rel = normalizePath(String(relPath || '')).replace(/^\/+/, '');
+    if (!rel) return false;
+    // 禁止路径穿越，避免通过 Images/../../ 逃逸出白名单目录
+    if (/(^|\/)\.\.(\/|$)/.test(rel)) return false;
+    return rel.toLowerCase().startsWith('images/');
+  }
+
   async function resolveToFileUrl(raw) {
     if (!raw || typeof raw !== 'string') return null;
     if (raw.startsWith('data:') || raw.startsWith('http')) return raw;
-    if (raw.startsWith('file://')) return raw;
+    if (raw.startsWith('file://')) {
+      return isAllowedCerebrImageFileUrl(raw) ? raw : null;
+    }
     // 处理相对路径：Images/...
     const rel = normalizePath(raw).replace(/^\/+/, '');
+    if (!isAllowedCerebrRelativeImagePath(rel)) return null;
     try {
       const res = await chrome.storage.local.get([IMAGE_DOWNLOAD_ROOT_KEY]);
       const root = normalizePath(res[IMAGE_DOWNLOAD_ROOT_KEY] || '');
-      if (!root) return null;
+      if (!root || !isCerebrRootPath(root)) return null;
       let full = `${root.replace(/\/+$/, '')}/${rel}`;
       full = normalizePath(full);
       if (/^[A-Za-z]:\//.test(full)) full = '/' + full;
-      return `file://${full}`;
+      const fileUrl = `file://${full}`;
+      return isAllowedCerebrImageFileUrl(fileUrl) ? fileUrl : null;
     } catch (_) {
       return null;
     }
@@ -929,6 +984,10 @@ export function createApiManager(appContext) {
 
       // 2) 本地文件链接：file:// 开头
       if (typeof finalUrl === 'string' && finalUrl.startsWith('file://')) {
+        if (!isAllowedCerebrImageFileUrl(finalUrl)) {
+          console.warn('已阻止读取非 Cerebr/Images 目录的本地图片 (Gemini):', finalUrl);
+          return null;
+        }
         const response = await fetch(finalUrl);
         if (!response.ok) {
           console.warn('读取本地图片失败 (Gemini):', finalUrl, response.status, response.statusText);

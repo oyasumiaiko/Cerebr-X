@@ -12,6 +12,7 @@ import {
   putConversation, 
   deleteConversation, 
   getConversationById,
+  loadMessageContent,
   releaseConversationMemory,
   getDatabaseStats,
   purgeOrphanMessageContents
@@ -4592,17 +4593,50 @@ export function createChatHistoryUI(appContext) {
         root: null,
         currentNode: null
       };
+
+      // 说明：
+      // - 这里必须“物化(materialize)”每条消息的 content，禁止把旧会话的 contentRef 直接带进新会话；
+      // - 否则新会话会与旧会话共享同一个 messageContents 记录：
+      //   1) 一旦删除分支会话，deleteConversation 会把共享 contentRef 删掉，导致原会话图片丢失；
+      //   2) 若分支消息仅有 contentRef 而无 content，putConversation 可能误判并清理引用，进一步造成丢失。
+      const cloneSafely = (obj) => {
+        try { return structuredClone(obj); } catch (_) {}
+        try { return JSON.parse(JSON.stringify(obj)); } catch (_) {}
+        return obj;
+      };
+
+      const resolveMessageContent = async (msg) => {
+        if (!msg) return '';
+        if (msg.content !== undefined && msg.content !== null) return cloneSafely(msg.content);
+        if (msg.content === null) return '';
+        if (msg.contentRef) {
+          try {
+            const loaded = await loadMessageContent(msg.contentRef);
+            return cloneSafely(loaded);
+          } catch (e) {
+            console.warn('创建分支对话：读取消息内容引用失败，将回退为空内容', msg.contentRef, e);
+            return '';
+          }
+        }
+        return '';
+      };
+
+      const generateForkMessageId = () => `fork_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
       // 复制截取的消息到新的ChatHistory
       let previousId = null;
       for (let i = 0; i <= targetIndex; i++) {
         const originalMsg = currentChain[i];
+        const resolvedContent = await resolveMessageContent(originalMsg);
         const newMsg = {
-          ...JSON.parse(JSON.stringify(originalMsg)), // 深拷贝
-          id: `fork_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          ...cloneSafely(originalMsg), // 深拷贝（尽量不共享引用，避免后续修改污染原会话）
+          id: generateForkMessageId(),
           parentId: previousId,
-          children: []
+          children: [],
+          content: resolvedContent
         };
+        // 永远不要复用旧会话的 contentRef（避免跨会话共享 messageContents 记录）
+        if (newMsg.contentRef) delete newMsg.contentRef;
         
         if (previousId) {
           const parentMsg = newChatHistory.messages.find(m => m.id === previousId);

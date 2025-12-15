@@ -610,19 +610,26 @@ export async function putConversation(conversation, separateContent = true) {
         // 删除原内容以减少内存使用
         delete messageToStore.content;
       } else {
-        // 不再是大型内容：如存在历史 contentRef，需要清理引用并删除旧的分离内容
+        // 不再是大型内容：如存在历史 contentRef，需要清理引用并删除旧的分离内容。
+        //
+        // 重要：当 msg.content 不存在（例如 UI/缓存为了省内存主动释放了 content，只保留 contentRef）时，
+        // 我们无法判定它是否“真的不再需要分离”，此时绝不能删除 messageContents 记录，否则会造成图片/大段内容丢失。
+        // 只有在“明确提供了 content 且判断为非大型内容”的情况下，才执行清理。
         if (messageToStore.contentRef) {
-          const refId = messageToStore.contentRef;
-          try {
-            await new Promise((resolve, reject) => {
-              const delReq = contentStore.delete(refId);
-              delReq.onsuccess = () => resolve();
-              delReq.onerror = () => reject(delReq.error);
-            });
-          } catch (e) {
-            console.warn('删除过期内容引用失败:', refId, e);
+          const contentMissing = (msg.content === undefined || msg.content === null);
+          if (!contentMissing) {
+            const refId = messageToStore.contentRef;
+            try {
+              await new Promise((resolve, reject) => {
+                const delReq = contentStore.delete(refId);
+                delReq.onsuccess = () => resolve();
+                delReq.onerror = () => reject(delReq.error);
+              });
+            } catch (e) {
+              console.warn('删除过期内容引用失败:', refId, e);
+            }
+            delete messageToStore.contentRef;
           }
-          delete messageToStore.contentRef;
         }
       }
       
