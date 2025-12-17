@@ -949,9 +949,73 @@ export function createChatHistoryUI(appContext) {
    * 显示聊天记录面板的右键菜单
    * @param {MouseEvent} e - 右键事件
    * @param {string} conversationId - 对话记录ID
+   * @param {string} [conversationUrl=''] - 对话记录关联的网页 URL（若调用方已知则传入，避免额外读取数据库）
    */
-  async function showChatHistoryItemContextMenu(e, conversationId) {
+  async function showChatHistoryItemContextMenu(e, conversationId, conversationUrl = '') {
     e.preventDefault();
+
+    /**
+     * 将会话记录中的 URL 规范化为可打开链接。
+     *
+     * 说明：
+     * - 历史会话的 url 字段由页面信息写入，可能为空、含空格，或为不可直接打开的协议；
+     * - 这里保持与既有逻辑一致：仅允许 http(s) 链接，避免误打开不受支持/不安全的协议。
+     *
+     * @param {unknown} rawUrl
+     * @returns {string} 可打开的 URL（不可用则返回空字符串）
+     */
+    function normalizeOpenableUrl(rawUrl) {
+      if (typeof rawUrl !== 'string') return '';
+      const trimmed = rawUrl.trim();
+      if (!trimmed) return '';
+      if (!/^https?:\/\//i.test(trimmed)) return '';
+      return trimmed;
+    }
+
+    /**
+     * 打开 URL（优先使用 chrome.tabs.create，避免在侧边栏/独立页中被 window.open 的弹窗策略影响）。
+     * @param {string} url
+     * @returns {Promise<boolean>} 是否成功触发打开动作
+     */
+    async function openUrlInNewTab(url) {
+      const safeUrl = normalizeOpenableUrl(url);
+      if (!safeUrl) return false;
+      try {
+        // 注意：这里必须先用 typeof 判断，避免在非扩展环境下直接引用 chrome 变量导致 ReferenceError。
+        if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+          await chrome.tabs.create({ url: safeUrl });
+          return true;
+        }
+      } catch (error) {
+        console.warn('使用 chrome.tabs.create 打开链接失败，将回退到 window.open:', error);
+      }
+      try {
+        window.open(safeUrl, '_blank', 'noopener');
+        return true;
+      } catch (error) {
+        console.error('使用 window.open 打开链接失败:', error);
+        return false;
+      }
+    }
+
+    /**
+     * 让右键菜单尽量完整显示在视口内（避免靠近边缘时菜单被裁切导致“看起来像没功能”）。
+     * @param {HTMLElement} menu
+     * @param {number} x
+     * @param {number} y
+     */
+    function clampMenuToViewport(menu, x, y) {
+      const margin = 6;
+      const menuWidth = menu.offsetWidth || 0;
+      const menuHeight = menu.offsetHeight || 0;
+      const maxLeft = Math.max(margin, window.innerWidth - menuWidth - margin);
+      const maxTop = Math.max(margin, window.innerHeight - menuHeight - margin);
+      const left = Math.min(Math.max(margin, x), maxLeft);
+      const top = Math.min(Math.max(margin, y), maxTop);
+      menu.style.left = `${left}px`;
+      menu.style.top = `${top}px`;
+    }
+
     // 如果已存在菜单，则删除
     const existingMenu = document.getElementById('chat-history-context-menu');
     if (existingMenu) {
@@ -960,7 +1024,7 @@ export function createChatHistoryUI(appContext) {
     // 创建菜单容器
     const menu = document.createElement('div');
     menu.id = 'chat-history-context-menu';
-    // 动态设置菜单位置
+    // 先按点击位置放置（随后在 append 后再做一次“视口内修正”）
     menu.style.top = e.clientY + 'px';
     menu.style.left = e.clientX + 'px';
     // 添加 CSS 类，设置其他样式
@@ -1014,29 +1078,33 @@ export function createChatHistoryUI(appContext) {
     });
     menu.appendChild(renameOption); // 添加重命名选项
 
-    // 转到对话 URL 选项
+    // 打开对话页面（会话关联 URL）选项
     const openUrlOption = document.createElement('div');
-    openUrlOption.textContent = '转到对话 URL';
+    openUrlOption.textContent = '打开对话页面';
     openUrlOption.classList.add('chat-history-context-menu-option');
     openUrlOption.addEventListener('click', async (event) => {
       event.stopPropagation();
       menu.remove();
       try {
-        const conversation = await getConversationFromCacheOrLoad(conversationId);
-        const url = typeof conversation?.url === 'string' ? conversation.url.trim() : '';
-        if (url && /^https?:\/\//i.test(url)) {
-          try {
-            window.open(url, '_blank', 'noopener');
-          } catch (err) {
-            console.error('打开对话 URL 失败:', err);
-            showNotification({ message: '无法打开链接，请检查浏览器设置', type: 'error', duration: 2200 });
-          }
-        } else {
+        // 优先使用列表元数据携带的 URL（无需读库）；若缺失再回退读取会话详情。
+        let urlToOpen = normalizeOpenableUrl(conversationUrl);
+        if (!urlToOpen) {
+          const conversation = await getConversationFromCacheOrLoad(conversationId);
+          urlToOpen = normalizeOpenableUrl(conversation?.url);
+        }
+
+        if (!urlToOpen) {
           showNotification({ message: '该对话没有关联 URL', duration: 2200 });
+          return;
+        }
+
+        const opened = await openUrlInNewTab(urlToOpen);
+        if (!opened) {
+          showNotification({ message: '无法打开链接，请检查浏览器设置', type: 'error', duration: 2200 });
         }
       } catch (error) {
-        console.error('获取对话 URL 失败:', error);
-        showNotification({ message: '无法打开对话 URL，请重试', type: 'error', duration: 2200 });
+        console.error('获取对话页面 URL 失败:', error);
+        showNotification({ message: '无法打开对话页面，请重试', type: 'error', duration: 2200 });
       }
     });
     menu.appendChild(openUrlOption);
@@ -1099,6 +1167,10 @@ export function createChatHistoryUI(appContext) {
     menu.appendChild(copyOption);
     menu.appendChild(deleteOption);
     document.body.appendChild(menu);
+    // append 后才能拿到菜单宽高，因此在这里做“视口内修正”
+    try {
+      clampMenuToViewport(menu, e.clientX, e.clientY);
+    } catch (_) {}
 
     // 点击其他地方时移除菜单
     document.addEventListener('click', function onDocClick() {
@@ -1723,7 +1795,7 @@ export function createChatHistoryUI(appContext) {
     
     item.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      showChatHistoryItemContextMenu(e, conv.id);
+      showChatHistoryItemContextMenu(e, conv.id, conv.url);
     });
 
     return item;
