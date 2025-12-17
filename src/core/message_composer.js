@@ -179,35 +179,40 @@ function mapRole(role) {
 }
 
 /**
- * 在连续的用户消息之间追加三个换行符，避免语义段落相互粘连。
- * @param {ConversationNode[]} chain - 已按时间排序的消息链
- * @returns {ConversationNode[]} - 内容已格式化的新数组
- */
-/**
- * 为连续的用户消息插入三个换行符，保证上下文可读性。
- * @param {Array<{role: string, content: string}>} messages - 已构造好的消息数组
- * @returns {Array<{role: string, content: string}>} - 处理后的消息数组
+ * 为连续的用户消息插入 Markdown 分隔线（---），保证上下文可读性。
+ *
+ * 背景：
+ * - 某些场景下用户会连续发送多条消息（例如补充信息/分段提问），会在会话链里形成 user->user 的连续片段；
+ * - 如果只用换行分隔，模型在阅读上下文时容易把多条用户消息“粘连”为同一段落，降低理解准确度；
+ * - 因为需求明确指出“只在发送时添加，不需要存储”，所以这里仅在 composeMessages 的最后一步做纯函数格式化，
+ *   不修改历史记录/不落库，避免副作用与技术债。
+ *
+ * 实现细节：
+ * - 分隔线插在“后一条 user 消息”的开头（即对第 2 条及之后的连续 user 消息做前置），形成：
+ *   「上一条 user ...」 + 「\n\n---\n\n下一条 user ...」。
+ * - 之所以选择“前置到后一条”，是为了不影响发送层对“消息末尾控制标记”的统一清理逻辑（如 [xN] 等）。
+ * - 使用 `\n\n---\n\n` 以满足 Markdown 对分隔线的常见解析要求（前后留空行）。
+ *
+ * @param {Array<{role: string, content: any}>} messages - 已构造好的消息数组（content 可能为 string 或旧格式 array）
+ * @returns {Array<{role: string, content: any}>} - 处理后的消息数组（原数组就地修改并返回）
  */
 function applyUserMessageSpacing(messages) {
   if (!Array.isArray(messages) || messages.length === 0) {
     return messages;
   }
 
-  let previousUserMessage = null;
+  const USER_MESSAGE_SEPARATOR = '\n\n---\n\n';
+  let previousIsUser = false;
   for (const message of messages) {
-    if (message.role === 'user' && typeof message.content === 'string') {
-      if (previousUserMessage && typeof previousUserMessage.content === 'string') {
-        if (!previousUserMessage.content.endsWith('\n\n\n')) {
-          previousUserMessage.content += '\n\n\n';
-        }
+    const isUser = message && message.role === 'user';
+    if (isUser && previousIsUser && typeof message.content === 'string') {
+      // 仅前置一次分隔符；正常情况下 composeMessages 每次都会生成新数组，不会累计叠加，但这里仍做兜底判断。
+      if (!message.content.startsWith(USER_MESSAGE_SEPARATOR)) {
+        message.content = USER_MESSAGE_SEPARATOR + message.content;
       }
-      previousUserMessage = message;
-    } else {
-      previousUserMessage = null;
     }
+    previousIsUser = !!isUser;
   }
 
   return messages;
 }
-
-
