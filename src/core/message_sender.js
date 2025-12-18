@@ -312,6 +312,9 @@ export function createMessageSender(appContext) {
     };
   }
 
+  //TODO:
+  //对于通过<think>标签传输的思考过程 只匹配开头的think标签到第一个<think/>结尾的部分作为思考过程，后续传输文本里如果再出现think就视为正文
+
   /**
    * 将流式增量按 <think> 标签拆分到思考块与正文块。
    * 若已进入思考模式，则持续写入直到遇到闭合标签。
