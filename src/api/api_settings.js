@@ -25,6 +25,8 @@ export function createApiManager(appContext) {
   // 私有状态
   let apiConfigs = [];
   let selectedConfigIndex = 0;
+  // 约定：当滑块设置为“无限制”时，使用一个极大值来表示（避免 Infinity 在 JSON 中丢失）
+  const MAX_CHAT_HISTORY_UNLIMITED = 2147483647;
   // 用于存储每个配置下次应使用的 API Key 索引 (内存中)
   const apiKeyUsageIndex = {};
   // API Key 黑名单（本地持久化），结构为 Map<key, expiresAtMs>
@@ -68,7 +70,11 @@ export function createApiManager(appContext) {
       temperature: c.temperature,
       useStreaming: (c.useStreaming !== false),
       isFavorite: !!c.isFavorite,
+      // 旧字段：单一条数上限（按“消息条目”计数）。保留以便向后兼容与降级回滚。
       maxChatHistory: c.maxChatHistory ?? 500,
+      // 新字段：分别限制历史 user / assistant 消息条数（便于长对话压缩 AI 输出）
+      maxChatHistoryUser: c.maxChatHistoryUser ?? null,
+      maxChatHistoryAssistant: c.maxChatHistoryAssistant ?? null,
       customParams: minifyJsonIfPossible(c.customParams || ''),
       customSystemPrompt: (c.customSystemPrompt || '').trim()
     }));
@@ -256,6 +262,31 @@ export function createApiManager(appContext) {
             config.useStreaming = true;
             needResave = true;
           }
+          // 兼容旧版本：将单一 maxChatHistory 迁移为按角色拆分的双上限
+          // 设计目标：尽量保持“总条数”接近旧行为（默认按 50%/50% 拆分）
+          const hasUserLimit = Number.isFinite(config.maxChatHistoryUser);
+          const hasAssistantLimit = Number.isFinite(config.maxChatHistoryAssistant);
+          if (!hasUserLimit || !hasAssistantLimit) {
+            const legacyMax = Number.isFinite(config.maxChatHistory) ? config.maxChatHistory : 500;
+            const legacy = Number(legacyMax);
+            const isUnlimited = Number.isFinite(legacy) && legacy >= 500;
+            const isDisabled = !Number.isFinite(legacy) ? false : legacy <= 0;
+
+            if (!hasUserLimit || !hasAssistantLimit) {
+              if (isUnlimited) {
+                if (!hasUserLimit) config.maxChatHistoryUser = MAX_CHAT_HISTORY_UNLIMITED;
+                if (!hasAssistantLimit) config.maxChatHistoryAssistant = MAX_CHAT_HISTORY_UNLIMITED;
+              } else if (isDisabled) {
+                if (!hasUserLimit) config.maxChatHistoryUser = 0;
+                if (!hasAssistantLimit) config.maxChatHistoryAssistant = 0;
+              } else {
+                const clamped = Math.min(499, Math.max(1, Math.floor(legacy)));
+                if (!hasUserLimit) config.maxChatHistoryUser = Math.ceil(clamped / 2);
+                if (!hasAssistantLimit) config.maxChatHistoryAssistant = Math.floor(clamped / 2);
+              }
+              needResave = true;
+            }
+          }
           // 初始化 apiKeyUsageIndex
           if (Array.isArray(config.apiKey) && config.apiKey.length > 0) {
              const configId = getConfigIdentifier(config); // 使用唯一标识符
@@ -280,7 +311,9 @@ export function createApiManager(appContext) {
           isFavorite: false, // 添加收藏状态字段
           customParams: '',
           customSystemPrompt: '',
-          maxChatHistory: 500
+          maxChatHistory: 500,
+          maxChatHistoryUser: 500,
+          maxChatHistoryAssistant: 500
         }];
         selectedConfigIndex = 0;
         await saveAPIConfigs();
@@ -299,7 +332,9 @@ export function createApiManager(appContext) {
         isFavorite: false,
         customParams: '',
         customSystemPrompt: '',
-        maxChatHistory: 500
+        maxChatHistory: 500,
+        maxChatHistoryUser: 500,
+        maxChatHistoryAssistant: 500
       }];
       selectedConfigIndex = 0;
     }
@@ -453,66 +488,93 @@ export function createApiManager(appContext) {
     const customParamsInput = template.querySelector('.custom-params');
     const customSystemPromptInput = template.querySelector('.custom-system-prompt');
 
-    // 在 temperature 设置后添加最大聊天历史设置
-    const maxHistoryGroup = document.createElement('div');
-    maxHistoryGroup.className = 'form-group';
-    
-    const maxHistoryHeader = document.createElement('div');
-    maxHistoryHeader.className = 'form-group-header';
-    
-    const maxHistoryLabel = document.createElement('label');
-    maxHistoryLabel.textContent = '最大聊天历史';
-    
-    const maxHistoryValue = document.createElement('span');
-    maxHistoryValue.className = 'max-history-value temperature-value';
-    
-    maxHistoryHeader.appendChild(maxHistoryLabel);
-    maxHistoryHeader.appendChild(maxHistoryValue);
-    
-    const maxHistoryInput = document.createElement('input');
-    maxHistoryInput.type = 'range';
-    maxHistoryInput.className = 'max-chat-history temperature';
-    maxHistoryInput.min = '0';
-    maxHistoryInput.max = '500';
-    maxHistoryInput.step = '5';
-
-    // 初始化值与显示：500 => 无限制；0 => 不发送；其余按条数显示
-    const currentMax = Number.isFinite(config.maxChatHistory) ? config.maxChatHistory : 500;
-    const isUnlimited = currentMax >= 500;
-    const clamped = Math.min(499, Math.max(0, isUnlimited ? 499 : currentMax));
-    maxHistoryInput.value = isUnlimited ? '500' : String(clamped);
-    maxHistoryValue.textContent = isUnlimited ? '无限制' : (clamped === 0 ? '不发送' : `${clamped}条`);
-    
-    maxHistoryGroup.appendChild(maxHistoryHeader);
-    maxHistoryGroup.appendChild(maxHistoryInput);
-
-    // 在自定义参数之前插入最大聊天历史设置
-    // 将“最大聊天历史”放在左侧（api-form-left 的末尾）
+    // 在 temperature 设置后添加“聊天历史裁剪”设置：分别控制 user / AI(assistant) 的历史消息条数
+    // 背景：超长对话时，AI 回复往往更长；允许只保留最近 N 条 AI，同时保留更多用户指令上下文。
     const formLeft = apiForm.querySelector('.api-form-left');
+
+    const formatHistoryLimitText = (v, zeroText) => {
+      if (v >= 500) return '无限制';
+      if (v === 0) return zeroText;
+      return `${v}条`;
+    };
+
+    const createHistoryLimitSlider = ({
+      label,
+      zeroText,
+      inputClassName,
+      getConfigValue,
+      setConfigValue
+    }) => {
+      const group = document.createElement('div');
+      group.className = 'form-group';
+
+      const header = document.createElement('div');
+      header.className = 'form-group-header';
+
+      const labelEl = document.createElement('label');
+      labelEl.textContent = label;
+
+      const valueEl = document.createElement('span');
+      valueEl.className = 'temperature-value';
+
+      header.appendChild(labelEl);
+      header.appendChild(valueEl);
+
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.className = `${inputClassName} temperature`;
+      input.min = '0';
+      input.max = '500';
+      input.step = '1';
+
+      // 初始化值与显示：500 => 无限制；0 => 不发送/仅当前；其余按条数显示
+      const raw = Number.isFinite(getConfigValue()) ? getConfigValue() : 500;
+      const isUnlimited = raw >= 500;
+      const clamped = Math.min(499, Math.max(0, isUnlimited ? 499 : raw));
+      const uiValue = isUnlimited ? 500 : clamped;
+      input.value = String(uiValue);
+      valueEl.textContent = formatHistoryLimitText(uiValue, zeroText);
+
+      input.addEventListener('input', () => {
+        const v = parseInt(input.value, 10);
+        valueEl.textContent = formatHistoryLimitText(v, zeroText);
+      });
+
+      input.addEventListener('change', () => {
+        const v = parseInt(input.value, 10);
+        // 500 代表关闭限制，保存为一个极大值；composeMessages 会按此视为“发送全部”
+        setConfigValue((v >= 500) ? MAX_CHAT_HISTORY_UNLIMITED : v);
+        saveAPIConfigs();
+      });
+
+      group.appendChild(header);
+      group.appendChild(input);
+      return group;
+    };
+
+    const userHistoryGroup = createHistoryLimitSlider({
+      label: '历史用户消息',
+      zeroText: '仅当前',
+      inputClassName: 'max-chat-history-user',
+      getConfigValue: () => config.maxChatHistoryUser,
+      setConfigValue: (v) => { apiConfigs[index].maxChatHistoryUser = v; }
+    });
+
+    const assistantHistoryGroup = createHistoryLimitSlider({
+      label: '历史AI消息',
+      zeroText: '不发送',
+      inputClassName: 'max-chat-history-assistant',
+      getConfigValue: () => config.maxChatHistoryAssistant,
+      setConfigValue: (v) => { apiConfigs[index].maxChatHistoryAssistant = v; }
+    });
+
     if (formLeft) {
-      formLeft.appendChild(maxHistoryGroup);
+      formLeft.appendChild(userHistoryGroup);
+      formLeft.appendChild(assistantHistoryGroup);
     } else {
-      apiForm.appendChild(maxHistoryGroup);
+      apiForm.appendChild(userHistoryGroup);
+      apiForm.appendChild(assistantHistoryGroup);
     }
-    
-    // 添加事件监听
-    maxHistoryInput.addEventListener('input', () => {
-      const v = parseInt(maxHistoryInput.value, 10);
-      if (v >= 500) {
-        maxHistoryValue.textContent = '无限制';
-      } else if (v === 0) {
-        maxHistoryValue.textContent = '不发送';
-      } else {
-        maxHistoryValue.textContent = `${v}条`;
-      }
-    });
-    
-    maxHistoryInput.addEventListener('change', () => {
-      const v = parseInt(maxHistoryInput.value, 10);
-      // 500 代表关闭限制，保存为一个极大值，message_sender 会按此视为“发送全部”
-      apiConfigs[index].maxChatHistory = (v >= 500) ? 2147483647 : v;
-      saveAPIConfigs();
-    });
 
     // 传输模式：流式/非流式 美观开关
     const streamingGroup = document.createElement('div');
@@ -1584,7 +1646,9 @@ export function createApiManager(appContext) {
       temperature: partialConfig.temperature ?? 1.0,
       customParams: partialConfig.customParams || '',
       customSystemPrompt: partialConfig.customSystemPrompt || '',
-      maxChatHistory: 500, // 添加默认值
+      maxChatHistory: 500, // 旧字段：保留默认值
+      maxChatHistoryUser: 500,
+      maxChatHistoryAssistant: 500,
       // isFavorite: false // 新创建的默认不收藏
     };
 
@@ -1698,7 +1762,9 @@ export function createApiManager(appContext) {
             isFavorite: false,
             customParams: '',
             customSystemPrompt: '',
-            maxChatHistory: 500, // 添加默认值
+            maxChatHistory: 500, // 旧字段：保留默认值
+            maxChatHistoryUser: 500,
+            maxChatHistoryAssistant: 500,
             ...config // 允许传入部分或完整配置覆盖默认值
         };
         // 处理传入的 apiKey 格式

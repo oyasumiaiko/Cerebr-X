@@ -841,7 +841,11 @@ export function createMessageSender(appContext) {
         messageId,
         conversationChain,
         sendChatHistory: sendChatHistoryFlag,
-        maxHistory: configForMaxHistory?.maxChatHistory ?? 500
+        // 旧字段：按总条目数裁剪（向后兼容）
+        maxHistory: configForMaxHistory?.maxChatHistory ?? 500,
+        // 新字段：按角色分别裁剪（超长对话更易控）
+        maxUserHistory: configForMaxHistory?.maxChatHistoryUser,
+        maxAssistantHistory: configForMaxHistory?.maxChatHistoryAssistant
       });
 
       // 在真正发给模型前，统一清理所有用户消息末尾的控制标记
