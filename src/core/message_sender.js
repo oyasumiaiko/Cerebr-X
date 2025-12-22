@@ -202,6 +202,85 @@ export function createMessageSender(appContext) {
   }
 
   /**
+   * 纯函数：从“模板替换后的完整提示词”中提取 <SELECTION> 对应的原文。
+   *
+   * 设计背景：
+   * - 对话标题/摘要需要展示“划词内容”，但过去的实现依赖模板前缀/正则去猜测，用户一旦把模板写成以
+   *   `<SELECTION>` 开头（前缀为空）就会出现误判（例如对所有对话都打上同一个标签）。
+   * - 这里不再依赖“前缀必须非空”的假设，而是严格基于模板的 prefix/suffix 定位被替换的那一段。
+   *
+   * 约束与兜底：
+   * - 只负责字符串定位与裁剪，不做任何业务判断；
+   * - 如果模板不包含 `<SELECTION>` 或定位失败，返回空字符串，由上层决定如何回退。
+   *
+   * @param {string} renderedPrompt - 实际发送给模型的完整用户消息（已将 <SELECTION> 替换为选中文本）
+   * @param {string} templatePrompt - 提示词模板（包含 <SELECTION> 占位符）
+   * @returns {string} 提取到的选中文本（可能为空字符串）
+   */
+  function extractSelectionTextFromRenderedPrompt(renderedPrompt, templatePrompt) {
+    if (typeof renderedPrompt !== 'string' || typeof templatePrompt !== 'string') return '';
+    const placeholder = '<SELECTION>';
+    const parts = templatePrompt.split(placeholder);
+    if (parts.length < 2) return '';
+
+    const prefix = parts[0] || '';
+    const suffix = parts[1] || '';
+
+    let startIndex = 0;
+    if (prefix) {
+      const prefixIndex = renderedPrompt.indexOf(prefix);
+      if (prefixIndex === -1) return '';
+      startIndex = prefixIndex + prefix.length;
+    }
+
+    let endIndex = renderedPrompt.length;
+    if (suffix) {
+      const suffixIndex = renderedPrompt.lastIndexOf(suffix);
+      if (suffixIndex !== -1 && suffixIndex >= startIndex) {
+        endIndex = suffixIndex;
+      }
+    }
+
+    return renderedPrompt.slice(startIndex, endIndex).trim();
+  }
+
+  /**
+   * 纯函数：构造要写入“用户消息节点”的 promptMeta。
+   *
+   * 设计目标：
+   * - promptType 是“当时的指令类型”的权威来源；promptMeta 只保存“标题/摘要”等需要的最小信息；
+   * - selection/query 优先使用调用方显式传入的 selectionText；缺失时再基于模板做一次确定性的提取；
+   * - 不在这里做任何“正则猜测”，避免逻辑分散且在用户自定义提示词时失效。
+   *
+   * @param {Object} args
+   * @param {string} args.promptType
+   * @param {Object|null} args.promptMeta
+   * @param {string} args.messageText
+   * @param {Object} args.promptsConfig
+   * @returns {Object|null}
+   */
+  function buildPromptMetaForHistory({ promptType, promptMeta, messageText, promptsConfig }) {
+    const safeType = typeof promptType === 'string' ? promptType : 'none';
+    const safeMeta = (promptMeta && typeof promptMeta === 'object') ? promptMeta : null;
+    const result = safeMeta ? { ...safeMeta } : {};
+
+    if (safeType === 'selection' || safeType === 'query') {
+      let selectionText = typeof safeMeta?.selectionText === 'string' ? safeMeta.selectionText.trim() : '';
+      if (!selectionText) {
+        const template = safeType === 'selection'
+          ? (promptsConfig?.selection?.prompt || '')
+          : (promptsConfig?.query?.prompt || '');
+        selectionText = extractSelectionTextFromRenderedPrompt(messageText || '', template);
+      }
+      if (selectionText) {
+        result.selectionText = selectionText;
+      }
+    }
+
+    return Object.keys(result).length > 0 ? result : null;
+  }
+
+  /**
    * 安全更新“加载占位消息”的状态文案。
    *
    * 设计背景：
@@ -557,6 +636,7 @@ export function createMessageSender(appContext) {
    * @param {Object} [options] - 可选参数对象
    * @param {Array<string>} [options.injectedSystemMessages] - 重新生成时保留的系统消息
    * @param {string} [options.specificPromptType] - 指定使用的提示词类型
+   * @param {Object|null} [options.promptMeta] - 与提示词类型相关的补充信息（例如 { selectionText }）
    * @param {string} [options.originalMessageText] - 原始消息文本，用于恢复输入框内容
    * @param {boolean} [options.regenerateMode] - 是否为重新生成模式
    * @param {string} [options.messageId] - 重新生成模式下的消息ID（通常是用户消息的ID）
@@ -575,6 +655,7 @@ export function createMessageSender(appContext) {
     const {
       injectedSystemMessages: existingInjectedSystemMessages = [],
       specificPromptType = null,
+      promptMeta: externalPromptMeta = null,
       originalMessageText = null,
       regenerateMode = false,
       messageId = null,
@@ -691,12 +772,21 @@ export function createMessageSender(appContext) {
       // 在重新生成模式下，不添加新的用户消息
       let userMessageDiv;
       if (!isEmptyMessage && !regenerateMode) {
+        const promptMetaForHistory = buildPromptMetaForHistory({
+          promptType: currentPromptType || 'none',
+          promptMeta: externalPromptMeta,
+          messageText,
+          promptsConfig
+        });
         userMessageDiv = messageProcessor.appendMessage(
           messageText,
           'user',
           false,
           null,
-          inputController ? inputController.getImagesHTML() : imageContainer.innerHTML
+          inputController ? inputController.getImagesHTML() : imageContainer.innerHTML,
+          null,
+          null,
+          { promptType: currentPromptType || 'none', promptMeta: promptMetaForHistory }
         );
       }
 
@@ -1962,7 +2052,12 @@ export function createMessageSender(appContext) {
         const promptType = forceQuery ? 'query' : 'selection';
         const prompt = prompts[promptType].prompt.replace('<SELECTION>', selectedText);
 
-        await sendMessage({ originalMessageText: prompt, specificPromptType: promptType, api: prompts[promptType]?.model });
+        await sendMessage({
+          originalMessageText: prompt,
+          specificPromptType: promptType,
+          promptMeta: { selectionText: selectedText },
+          api: prompts[promptType]?.model
+        });
       } else {
         if (wasTemporaryMode) {
           exitTemporaryMode();

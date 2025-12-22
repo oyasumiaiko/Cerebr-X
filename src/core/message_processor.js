@@ -105,15 +105,16 @@ export function createMessageProcessor(appContext) {
   /**
    * 添加消息到聊天窗口
    * @param {string} text - 消息文本内容
-   * @param {string} sender - 发送者 ('user' 或 'ai')
-   * @param {boolean} skipHistory - 是否不更新历史记录
-   * @param {DocumentFragment|null} fragment - 如使用文档片段则追加到此处，否则直接追加到聊天容器
-   * @param {string|null} imagesHTML - 图片部分的 HTML 内容（可为空）
-   * @param {string|null} [initialThoughtsRaw=null] - AI的初始思考过程文本 (可选)
-   * @param {string|null} [messageIdToUpdate=null] - 如果是更新现有消息，则提供其ID
+  * @param {string} sender - 发送者 ('user' 或 'ai')
+  * @param {boolean} skipHistory - 是否不更新历史记录
+  * @param {DocumentFragment|null} fragment - 如使用文档片段则追加到此处，否则直接追加到聊天容器
+  * @param {string|null} imagesHTML - 图片部分的 HTML 内容（可为空）
+  * @param {string|null} [initialThoughtsRaw=null] - AI的初始思考过程文本 (可选)
+  * @param {string|null} [messageIdToUpdate=null] - 如果是更新现有消息，则提供其ID
+   * @param {{promptType?: string|null, promptMeta?: Object|null}|null} [meta=null] - 可选：写入历史节点的附加元信息（主要用于用户消息）
    * @returns {HTMLElement} 新生成或更新的消息元素
   */
-  function appendMessage(text, sender, skipHistory = false, fragment = null, imagesHTML = null, initialThoughtsRaw = null, messageIdToUpdate = null) {
+  function appendMessage(text, sender, skipHistory = false, fragment = null, imagesHTML = null, initialThoughtsRaw = null, messageIdToUpdate = null, meta = null) {
     let messageDiv;
     let node;
     // 提前拆分 <think> 段落，确保正文与思考摘要分离
@@ -274,6 +275,16 @@ export function createMessageProcessor(appContext) {
         }
         if (node) {
           node.hasInlineImages = (!imagesHTML && typeof messageText === 'string' && /<img/i.test(messageText));
+        }
+        // 将“指令类型”等元信息写入历史节点（只对用户消息生效）
+        // 说明：这类信息一旦持久化，后续功能（例如对话标题生成）即可完全脱离“字符串/正则”猜测。
+        if (node && node.role === 'user' && meta && typeof meta === 'object') {
+          if (typeof meta.promptType === 'string') {
+            node.promptType = meta.promptType;
+          }
+          if (meta.promptMeta && typeof meta.promptMeta === 'object') {
+            node.promptMeta = meta.promptMeta;
+          }
         }
         messageDiv.setAttribute('data-message-id', node.id);
         // 初次创建 AI 消息时插入一个空的 API footer，占位以便样式稳定

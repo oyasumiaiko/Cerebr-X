@@ -19,6 +19,8 @@
  * @property {string} [apiDisplayName] - 创建消息时记录的 API 显示名称快照 (可选)
  * @property {string} [apiModelId] - 创建消息时记录的模型名（modelName）快照 (可选)
  * @property {boolean} [hasInlineImages] - 是否包含内联图片 (可选)
+ * @property {string|null} [promptType] - 发送时记录的“指令/提示词类型”（如 summary/selection/query 等，可选）
+ * @property {Object|null} [promptMeta] - 与 promptType 配套的元信息（例如 { selectionText }，可选）
  */
 
 /**
@@ -54,7 +56,13 @@ function createMessageNode(role, content, parentId = null) {
     apiUuid: null,
     apiDisplayName: '',
     apiModelId: '',
-    hasInlineImages: false
+    hasInlineImages: false,
+    // --- 指令元信息（用于“对话标题/摘要”等需要知道指令类型的场景）---
+    // 设计说明：
+    // - 过去通过“字符串/正则”去猜测 prompt 类型，容易被用户自定义提示词破坏（例如模板以 <SELECTION> 开头时前缀为空）。
+    // - 这里在发送时把类型与关键变量显式落在消息节点上，后续任何功能（标题、统计、过滤等）都可直接读取，避免重复解析。
+    promptType: null,
+    promptMeta: null
   };
 }
 

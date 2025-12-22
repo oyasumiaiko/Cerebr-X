@@ -20,6 +20,7 @@ import {
 import { storageService } from '../utils/storage_service.js';
 import { extractThinkingFromText, mergeThoughts } from '../utils/thoughts_parser.js';
 import { generateCandidateUrls } from '../utils/url_candidates.js';
+import { buildConversationSummaryFromMessages } from '../utils/conversation_title.js';
 
 /**
  * 创建聊天历史UI管理器
@@ -449,45 +450,13 @@ export function createChatHistoryUI(appContext) {
     const startTime = Math.min(...timestamps);
     const endTime = Math.max(...timestamps);
 
-    // 提取第一条消息的纯文本内容
-    const firstMessageTextContent = extractMessagePlainText(messagesCopy.find(msg => extractMessagePlainText(msg) !== ''));
-    
-    let summary = '';
-    if (firstMessageTextContent) {
-      // 使用 getPlainText 转换为字符串
-      let content = firstMessageTextContent;
-      const prompts = promptSettingsManager.getPrompts(); // New way: Call on instance
-      
-      // 替换预设模板为模板名称
-      const selectionPrompt = prompts.selection.prompt.split('<SELECTION>');
-      const selectionPromptPrefix = selectionPrompt[0].trim();
-      if (content.includes(selectionPromptPrefix)) {
-        content = content.replace(selectionPromptPrefix, '[搜索]');
-        if (selectionPrompt.length > 1) {
-          content = content.replace(selectionPrompt[1], '');
-        }
-      }
-      
-      const queryPrompt = prompts.query.prompt.split('<SELECTION>');
-      const queryPromptPrefix = queryPrompt[0].trim();
-      if (content.includes(queryPromptPrefix)) {
-        content = content.replace(queryPromptPrefix, '[解释]');
-        if (queryPrompt.length > 1) {
-          content = content.replace(queryPrompt[1], '');
-        }
-      }
-
-      if (content.includes(prompts.pdf.prompt)) {
-        content = content.replace(prompts.pdf.prompt, '[PDF总结]');
-      }
-      if (content.includes(prompts.summary.prompt)) {
-        content = content.replace(prompts.summary.prompt, '[总结]');
-      }
-      if (content.includes(prompts.image.prompt)) {
-        content = content.replace(prompts.image.prompt, '[解释图片]');
-      }
-      summary = content.substring(0, 50);
-    }
+    // 对话摘要（对话列表显示的标题）：
+    // - 优先使用发送时写入到消息节点的 promptType/promptMeta（避免基于字符串/正则猜测）；
+    // - 对于 selection/query：标题为「[划词解释] + 划词内容」；
+    // - 对于 summary/pdf/image：标题使用固定标签；
+    // - 其它情况回退为第一条用户消息的摘要。
+    const promptsConfig = promptSettingsManager.getPrompts();
+    const summary = buildConversationSummaryFromMessages(messagesCopy, { promptsConfig, maxLength: 50 });
 
     let urlToSave = '';
     let titleToSave = '';
@@ -4737,9 +4706,10 @@ export function createChatHistoryUI(appContext) {
       const startTime = Math.min(...timestamps);
       const endTime = Math.max(...timestamps);
       
-      // 提取第一条消息的纯文本内容作为摘要
-      const firstMessage = newChatHistory.messages.find(msg => msg.role === 'user');
-      const summary = firstMessage ? extractMessagePlainText(firstMessage).substring(0, 50) + ' (分支)' : '分支对话';
+      // 分支对话摘要：复用同一套“指令类型驱动”的标题逻辑，并保持旧行为（先截断再追加分支后缀）
+      const promptsConfig = promptSettingsManager.getPrompts();
+      const baseSummary = buildConversationSummaryFromMessages(newChatHistory.messages, { promptsConfig, maxLength: 50 });
+      const summary = baseSummary ? `${baseSummary} (分支)` : '分支对话';
       
       // 创建新的会话对象
       const newConversation = {

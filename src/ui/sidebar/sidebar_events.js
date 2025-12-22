@@ -751,7 +751,12 @@ function setupMessageInputHandlers(appContext) {
         const userMessageText = selectionPromptText.replace('<SELECTION>', text);
         const apiPref = (prompts.selection?.model || '').trim();
         const apiParam = apiPref || 'follow_current';
-        appContext.services.messageSender.sendMessage({ originalMessageText: userMessageText, specificPromptType: 'selection', api: apiParam });
+        appContext.services.messageSender.sendMessage({
+          originalMessageText: userMessageText,
+          specificPromptType: 'selection',
+          promptMeta: { selectionText: text },
+          api: apiParam
+        });
         return;
       }
     }
