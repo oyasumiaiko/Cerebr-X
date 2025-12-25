@@ -456,7 +456,11 @@ export function createChatHistoryUI(appContext) {
     // - 对于 summary/pdf/image：标题使用固定标签；
     // - 其它情况回退为第一条用户消息的摘要。
     const promptsConfig = promptSettingsManager.getPrompts();
-    const summary = buildConversationSummaryFromMessages(messagesCopy, { promptsConfig, maxLength: 50 });
+    const summary = buildConversationSummaryFromMessages(messagesCopy, {
+      promptsConfig,
+      pageTitle: state.pageInfo?.title || '',
+      maxLength: 50
+    });
 
     let urlToSave = '';
     let titleToSave = '';
@@ -4708,7 +4712,11 @@ export function createChatHistoryUI(appContext) {
       
       // 分支对话摘要：复用同一套“指令类型驱动”的标题逻辑，并保持旧行为（先截断再追加分支后缀）
       const promptsConfig = promptSettingsManager.getPrompts();
-      const baseSummary = buildConversationSummaryFromMessages(newChatHistory.messages, { promptsConfig, maxLength: 50 });
+      const baseSummary = buildConversationSummaryFromMessages(newChatHistory.messages, {
+        promptsConfig,
+        pageTitle: pageInfo?.title || '',
+        maxLength: 50
+      });
       const summary = baseSummary ? `${baseSummary} (分支)` : '分支对话';
       
       // 创建新的会话对象

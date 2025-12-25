@@ -128,19 +128,20 @@ function resolveSelectionText(message, promptsConfig, plainText) {
  * 根据第一条用户消息生成对话摘要（对话列表显示的“标题”）
  *
  * 规则（可按需扩展）：
- * - summary：`[总结]`
+ * - summary：`[总结] + 页面标题`（若可获取）
  * - pdf：`[PDF总结]`
  * - selection/query：`[划词解释] + 划词内容`
  * - image：`[解释图片]`
  * - 其它：使用第一条用户消息的摘要
  *
  * @param {Object|null} firstUserMessage
- * @param {{promptsConfig?: Object|null, maxLength?: number, suffix?: string}} [options]
+ * @param {{promptsConfig?: Object|null, pageTitle?: string, maxLength?: number, suffix?: string}} [options]
  * @returns {string}
  */
 export function buildConversationSummaryFromFirstUserMessage(firstUserMessage, options = {}) {
   if (!firstUserMessage) return '';
   const promptsConfig = options.promptsConfig || null;
+  const pageTitle = typeof options.pageTitle === 'string' ? options.pageTitle : '';
   const maxLength = Number.isFinite(options.maxLength) ? options.maxLength : DEFAULT_MAX_LENGTH;
   const suffix = typeof options.suffix === 'string' ? options.suffix : '';
 
@@ -149,7 +150,8 @@ export function buildConversationSummaryFromFirstUserMessage(firstUserMessage, o
 
   let summary = '';
   if (promptType === 'summary') {
-    summary = '[总结]';
+    const normalizedTitle = normalizeWhitespace(pageTitle);
+    summary = normalizedTitle ? `[总结] ${normalizedTitle}` : '[总结]';
   } else if (promptType === 'pdf') {
     summary = '[PDF总结]';
   } else if (promptType === 'image') {
@@ -167,7 +169,7 @@ export function buildConversationSummaryFromFirstUserMessage(firstUserMessage, o
 /**
  * 从消息数组生成对话摘要（会自动挑选第一条用户消息）
  * @param {Array<Object>} messages
- * @param {{promptsConfig?: Object|null, maxLength?: number, suffix?: string}} [options]
+ * @param {{promptsConfig?: Object|null, pageTitle?: string, maxLength?: number, suffix?: string}} [options]
  * @returns {string}
  */
 export function buildConversationSummaryFromMessages(messages, options = {}) {
