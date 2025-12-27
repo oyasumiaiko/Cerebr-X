@@ -6,14 +6,34 @@
  * 打开或创建 "ChatHistoryDB" 数据库以及 "conversations" 和 "messageContents" 对象存储
  * @returns {Promise<IDBDatabase>}
  */
+let cachedDbPromise = null;
 export function openChatHistoryDB() {
-  return new Promise((resolve, reject) => {
+  // 说明：
+  // - 全文搜索/历史列表会频繁调用 IndexedDB API；
+  // - 若每次都 indexedDB.open，会产生大量重复的打开请求与事件回调开销；
+  // - 这里缓存同一个连接（按上下文/页面粒度），显著降低高频读场景的额外开销。
+  if (cachedDbPromise) return cachedDbPromise;
+
+  cachedDbPromise = new Promise((resolve, reject) => {
     // v3: 为性能优化新增 conversations.endTime 与 conversations.url 索引
     // - endTime：用于快速按“最近对话”分页加载（避免全量扫描 + 排序）
     // - url：用于“按当前 URL 快速筛选历史会话”（按前缀范围查询）
     const request = indexedDB.open('ChatHistoryDB', 3);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => {
+      cachedDbPromise = null;
+      reject(request.error);
+    };
+    request.onsuccess = () => {
+      const db = request.result;
+
+      // 当数据库版本发生变化（例如扩展更新/多标签页同时打开）时，关闭旧连接并允许重新打开。
+      db.onversionchange = () => {
+        try { db.close(); } catch (_) {}
+        cachedDbPromise = null;
+      };
+
+      resolve(db);
+    };
     request.onupgradeneeded = event => {
       const db = event.target.result;
       const tx = event.target.transaction;
@@ -67,6 +87,8 @@ export function openChatHistoryDB() {
       }
     };
   });
+
+  return cachedDbPromise;
 }
 
 /**
@@ -101,8 +123,13 @@ function compactConversationToMetadata(conv) {
 }
 
 /**
- * 获取全部对话记录元数据（不包含消息内容）
- * @returns {Promise<Array<Object>>} 包含所有对话记录元数据的数组
+ * 获取全部对话记录元数据（列表/筛选用的“轻量字段”）。
+ *
+ * 注意：
+ * - 由于 conversations 记录本身包含 messages 大数组，IndexedDB 在读取时仍会结构化克隆整条记录；
+ * - 这里的“轻量化”主要是为了减少上层长期保留的 JS 对象体积（避免把 messages/messageIds 留在内存里）。
+ *
+ * @returns {Promise<Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, parentConversationId:string|null, forkedFromMessageId:string|null}>>}
  */
 export async function getAllConversationMetadata() {
   const db = await openChatHistoryDB();
@@ -115,16 +142,8 @@ export async function getAllConversationMetadata() {
     request.onsuccess = (event) => {
       const cursor = event.target.result;
       if (cursor) {
-        // 获取当前记录
         const conv = cursor.value;
-        
-        // 执行与之前相同的转换逻辑
-        const messageIds = conv.messages ? conv.messages.map(msg => msg.id) : [];
-        conversations.push({
-          ...conv, // 保留原始对话对象的所有属性
-          messageIds, // 添加处理过的 messageIds
-          messages: undefined // 显式移除原始的 messages 数组
-        });
+        conversations.push(compactConversationToMetadata(conv));
         
         cursor.continue(); // 继续到下一条记录
       } else {

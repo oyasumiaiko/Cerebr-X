@@ -13,7 +13,6 @@ import {
   deleteConversation, 
   getConversationById,
   loadMessageContent,
-  releaseConversationMemory,
   getDatabaseStats,
   purgeOrphanMessageContents
 } from '../storage/indexeddb_helper.js';
@@ -66,7 +65,6 @@ export function createChatHistoryUI(appContext) {
   let activeConversation = null;       // 当前活动的会话对象
   let maxLoadedConversations = 5;      // 最大加载到内存的会话数
   let loadedConversations = new Map(); // 已加载到内存的会话缓存
-  let conversationUsageTimestamp = new Map(); // 记录会话最后使用时间
   
   // 缓存数据库统计信息
   let cachedDbStats = null;
@@ -399,9 +397,6 @@ export function createChatHistoryUI(appContext) {
     if (loadedConversations.has(conversationId)) {
       loadedConversations.delete(conversationId);
     }
-    if (conversationUsageTimestamp.has(conversationId)) {
-      conversationUsageTimestamp.delete(conversationId);
-    }
     if (activeConversation?.id === conversationId) {
       activeConversation = null;
     }
@@ -422,14 +417,111 @@ export function createChatHistoryUI(appContext) {
    * @param {Object} msg - 消息对象
    * @returns {string} 纯文本内容
    */
-  function extractMessagePlainText(msg) {
-    if (!msg) return '';
-    if (typeof msg.content === 'string') {
-      return msg.content.trim();
-    } else if (Array.isArray(msg.content)) {
-      return msg.content.map(part => part.type === 'image_url' ? '[图片]' : part.text?.trim() || '').join(' ');
+  function extractPlainTextFromMessageContent(content) {
+    if (typeof content === 'string') return content.trim();
+    if (Array.isArray(content)) {
+      return content
+        .map(part => part?.type === 'image_url' ? '[图片]' : (part?.text?.trim() || ''))
+        .filter(Boolean)
+        .join(' ');
     }
     return '';
+  }
+
+  function extractMessagePlainText(msg) {
+    if (!msg) return '';
+    return extractPlainTextFromMessageContent(msg.content);
+  }
+
+  /**
+   * 全文搜索：按需从 IndexedDB 读取会话并扫描消息内容，返回匹配信息。
+   *
+   * 设计目标（关键性能点）：
+   * - 不污染 UI 的会话缓存（loadedConversations），避免搜索过程导致缓存暴涨/刷屏日志；
+   * - 优先只读取 conversations 表（loadFullContent=false），避免不必要地解引用 messageContents（图像等大对象）；
+   * - 仅当会话在“内联消息文本”中未命中，才按需解引用 contentRef（保证搜索正确性）。
+   *
+   * @param {string} conversationId
+   * @param {string} filterText - 原始搜索词（用于 excerpt 高亮）
+   * @param {string} lowerFilter - 小写后的搜索词
+   * @param {HTMLElement} panel - 用于 runId 取消判断
+   * @param {string} runId
+   * @returns {Promise<{messageId:string|null, excerpts:Array<Object>, reason:string}|null>}
+   */
+  async function scanConversationForTextMatch(conversationId, filterText, lowerFilter, panel, runId) {
+    if (!conversationId) return null;
+
+    let conversation = null;
+    try {
+      // 重要：这里显式禁止加载 messageContents，避免把图片等大对象拉进内存。
+      conversation = await getConversationById(conversationId, false);
+    } catch (error) {
+      console.error(`搜索会话 ${conversationId} 失败:`, error);
+      return null;
+    }
+
+    if (!conversation || !Array.isArray(conversation.messages)) return null;
+    if (panel?.dataset?.runId !== runId) return null;
+
+    const matchInfo = { messageId: null, excerpts: [], reason: 'message' };
+    const MAX_EXCERPTS = 20;
+    let matched = false;
+
+    // 先扫描“直接存在于 conversations 记录内”的文本（绝大多数对话都会命中这里）。
+    const pendingContentRefs = [];
+    for (const message of conversation.messages) {
+      if (panel?.dataset?.runId !== runId) return null;
+      if (!message) continue;
+
+      const plainText = extractMessagePlainText(message);
+      if (plainText) {
+        if (plainText.toLowerCase().includes(lowerFilter)) {
+          matched = true;
+          if (!matchInfo.messageId && message.id) matchInfo.messageId = message.id;
+          if (matchInfo.excerpts.length < MAX_EXCERPTS) {
+            const excerpt = buildExcerptSegments(plainText, filterText, lowerFilter);
+            if (excerpt) matchInfo.excerpts.push(excerpt);
+          }
+          if (matchInfo.excerpts.length >= MAX_EXCERPTS) break;
+        }
+        continue;
+      }
+
+      // contentRef：大型内容（例如图片消息）会被单独存入 messageContents。
+      if (message.contentRef) {
+        pendingContentRefs.push({ messageId: message.id || null, contentRef: message.contentRef });
+      }
+    }
+
+    // 只有在“内联文本没有命中”的情况下，才按需解引用 contentRef。
+    if (!matched && pendingContentRefs.length > 0) {
+      for (const ref of pendingContentRefs) {
+        if (panel?.dataset?.runId !== runId) return null;
+        if (!ref?.contentRef) continue;
+
+        let content = null;
+        try {
+          content = await loadMessageContent(ref.contentRef);
+        } catch (_) {
+          // contentRef 缺失时不阻断整个搜索流程，直接跳过。
+          continue;
+        }
+
+        const plainText = extractPlainTextFromMessageContent(content);
+        if (!plainText) continue;
+        if (!plainText.toLowerCase().includes(lowerFilter)) continue;
+
+        matched = true;
+        if (!matchInfo.messageId && ref.messageId) matchInfo.messageId = ref.messageId;
+        if (matchInfo.excerpts.length < MAX_EXCERPTS) {
+          const excerpt = buildExcerptSegments(plainText, filterText, lowerFilter);
+          if (excerpt) matchInfo.excerpts.push(excerpt);
+        }
+        if (matchInfo.excerpts.length >= MAX_EXCERPTS) break;
+      }
+    }
+
+    return matched ? matchInfo : null;
   }
 
   function buildExcerptSegments(sourceText, filterText, lowerFilter, contextLength = 32) {
@@ -596,35 +688,36 @@ export function createChatHistoryUI(appContext) {
    * @param {Object} conversation - 会话对象
    */
   function updateConversationInCache(conversation) {
-    // 更新会话缓存和使用时间戳
+    if (!conversation || !conversation.id) return;
+
+    // 说明：这里的缓存用于“快速打开最近使用的会话”，因此应当是一个真正的 LRU。
+    // 旧实现仅“释放消息内容”但依然把所有会话对象留在 Map 中，导致：
+    // 1) 搜索/遍历时缓存无限增长（Map 永远 > maxLoadedConversations）；
+    // 2) 每次插入都触发“释放会话内存”日志刷屏；
+    // 3) JS 堆仍保留大量 message 元对象，实际内存收益有限。
+    //
+    // 新策略：只保留最近使用的 N 条“完整会话对象”引用，超出上限直接淘汰（让 GC 回收）。
+    // activeConversation（正在聊天/刚打开）尽量不淘汰。
+    if (loadedConversations.has(conversation.id)) {
+      loadedConversations.delete(conversation.id);
+    }
     loadedConversations.set(conversation.id, conversation);
-    conversationUsageTimestamp.set(conversation.id, Date.now());
-    
-    // 如果已加载的会话超过最大限制，释放最久未使用的会话
-    if (loadedConversations.size > maxLoadedConversations) {
-      let oldestId = null;
-      let oldestTime = Date.now();
-      
-      // 找出最久未使用的会话
-      for (const [id, timestamp] of conversationUsageTimestamp.entries()) {
-        // 跳过当前活动会话
-        if (id === activeConversation?.id) continue;
-        
-        if (timestamp < oldestTime) {
-          oldestTime = timestamp;
-          oldestId = id;
-        }
-      }
-      
-      // 释放最久未使用的会话内存
-      if (oldestId) {
-        const oldConversation = loadedConversations.get(oldestId);
-        if (oldConversation) {
-          // 释放内存但保留在缓存中的引用
-          loadedConversations.set(oldestId, releaseConversationMemory(oldConversation));
-          console.log(`释放会话内存: ${oldestId}`);
-        }
-      }
+
+    const maxKeep = Math.max(1, Number(maxLoadedConversations) || 1);
+    if (loadedConversations.size <= maxKeep) return;
+
+    const activeId = activeConversation?.id || null;
+    for (const id of loadedConversations.keys()) {
+      if (loadedConversations.size <= maxKeep) break;
+      if (activeId && id === activeId) continue;
+      loadedConversations.delete(id);
+    }
+
+    // 极端兜底：如果 maxKeep 太小（例如被误设为 0）导致仍超限，则允许淘汰最旧项。
+    while (loadedConversations.size > maxKeep) {
+      const oldestId = loadedConversations.keys().next().value;
+      if (!oldestId) break;
+      loadedConversations.delete(oldestId);
     }
   }
 
@@ -635,30 +728,18 @@ export function createChatHistoryUI(appContext) {
    * @returns {Promise<Object>} 会话对象
    */
   async function getConversationFromCacheOrLoad(conversationId, forceReload = false) {
+    if (!conversationId) return null;
+
     if (forceReload || !loadedConversations.has(conversationId)) {
-      // 从数据库加载并更新缓存
-      const conversation = await getConversationById(conversationId);
-      if (conversation) {
-        updateConversationInCache(conversation);
-      }
-      return conversation;
-    } else {
-      // 从缓存获取并更新使用时间戳
-      const conversation = loadedConversations.get(conversationId);
-      conversationUsageTimestamp.set(conversationId, Date.now());
-      
-      // 检查是否需要从数据库加载完整内容
-      if (conversation && conversation.messages && conversation.messages.some(msg => msg.contentRef && !msg.content)) {
-        console.log(`从数据库加载部分内容: ${conversationId}`);
-        const fullConversation = await getConversationById(conversationId);
-        if (fullConversation) {
-          updateConversationInCache(fullConversation);
-        }
-        return fullConversation;
-      }
-      
-      return conversation;
+      // 从数据库加载并更新缓存（用于点击打开/恢复会话）
+      const conversation = await getConversationById(conversationId, true);
+      if (conversation) updateConversationInCache(conversation);
+      return conversation || null;
     }
+
+    const cached = loadedConversations.get(conversationId) || null;
+    if (cached) updateConversationInCache(cached); // touch -> LRU
+    return cached;
   }
 
   /**
@@ -1559,6 +1640,7 @@ export function createChatHistoryUI(appContext) {
 
           const PROGRESS_UPDATE_INTERVAL = 10;
           const CONCURRENCY = Math.min(6, Math.max(2, navigator?.hardwareConcurrency ? Math.floor(navigator.hardwareConcurrency / 2) : 4));
+          let lastYieldTime = performance.now();
 
           const updateProgress = (force = false) => {
             if (!force && processedCount - lastProgressUpdate < PROGRESS_UPDATE_INTERVAL) return;
@@ -1592,9 +1674,10 @@ export function createChatHistoryUI(appContext) {
               const historyMeta = allHistoriesMeta[currentIndex];
               const url = (historyMeta.url || '').toLowerCase();
               const summary = (historyMeta.summary || '').toLowerCase();
+              const title = (historyMeta.title || '').toLowerCase();
               let matched = false;
 
-              if (url.includes(lowerFilter) || summary.includes(lowerFilter)) {
+              if (url.includes(lowerFilter) || summary.includes(lowerFilter) || title.includes(lowerFilter)) {
                 matchedEntries.push({ index: currentIndex, data: historyMeta });
                 matchInfoMap.set(historyMeta.id, { messageId: null, excerpts: [], reason: 'meta' });
                 matched = true;
@@ -1602,36 +1685,15 @@ export function createChatHistoryUI(appContext) {
 
               if (!matched) {
                 try {
-                  const fullConversation = await getConversationFromCacheOrLoad(historyMeta.id);
+                  const matchInfo = await scanConversationForTextMatch(historyMeta.id, filterText, lowerFilter, panel, runId);
                   if (panel.dataset.runId !== runId) {
                     cancelled = true;
                     break;
                   }
-                  if (fullConversation && Array.isArray(fullConversation.messages)) {
-                    const matchInfo = matchInfoMap.get(historyMeta.id) || { messageId: null, excerpts: [], reason: 'message' };
-                    let conversationMatched = false;
-                    for (const message of fullConversation.messages) {
-                      const plainText = extractMessagePlainText(message);
-                      if (!plainText) continue;
-                      const lowerPlain = plainText.toLowerCase();
-                      if (lowerPlain.includes(lowerFilter)) {
-                        conversationMatched = true;
-                        if (!matchInfo.messageId && message.id) {
-                          matchInfo.messageId = message.id;
-                        }
-                        if (matchInfo.excerpts.length < 20) {
-                          const excerpt = buildExcerptSegments(plainText, filterText, lowerFilter);
-                          if (excerpt) {
-                            matchInfo.excerpts.push(excerpt);
-                          }
-                        }
-                      }
-                      if (matchInfo.excerpts.length >= 20) break;
-                    }
-                    if (conversationMatched) {
-                      matchInfoMap.set(historyMeta.id, matchInfo);
-                      matchedEntries.push({ index: currentIndex, data: fullConversation });
-                    }
+                  if (matchInfo) {
+                    matchInfoMap.set(historyMeta.id, matchInfo);
+                    // 重要：搜索结果只返回“元数据”，不要把完整 messages 放进结果数组/缓存，避免内存暴涨。
+                    matchedEntries.push({ index: currentIndex, data: historyMeta });
                   }
                 } catch (error) {
                   console.error(`搜索会话 ${historyMeta.id} 失败:`, error);
@@ -1640,7 +1702,14 @@ export function createChatHistoryUI(appContext) {
 
               processedCount++;
               updateProgress();
-              await new Promise(resolve => setTimeout(resolve, 0));
+
+              // 让出主线程给 UI（进度条/滚动/输入），避免长时间占用导致卡顿。
+              // 注意：不必每条都 setTimeout(0)，否则会明显拖慢搜索；这里按时间片让出即可。
+              const now = performance.now();
+              if (now - lastYieldTime >= 16) {
+                lastYieldTime = now;
+                await new Promise(resolve => setTimeout(resolve, 0));
+              }
             }
           });
 
@@ -4714,12 +4783,10 @@ export function createChatHistoryUI(appContext) {
     
     // 清空缓存
     loadedConversations.clear();
-    conversationUsageTimestamp.clear();
     
     // 恢复当前活动会话到缓存
     if (activeId && activeConv) {
       loadedConversations.set(activeId, activeConv);
-      conversationUsageTimestamp.set(activeId, Date.now());
     }
     
     // console.log('内存缓存已清理');
