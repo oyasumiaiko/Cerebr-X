@@ -559,6 +559,127 @@ export function createMessageSender(appContext) {
     }
   }
 
+  function escapeMessageIdForSelector(id) {
+    const raw = (id == null) ? '' : String(id);
+    if (!raw) return '';
+    try {
+      if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+        return CSS.escape(raw);
+      }
+    } catch (_) {}
+    // 极简回退：避免引号/反斜杠破坏 attribute selector（messageId 目前是 msg_...，通常不会走到这里）
+    return raw.replace(/["\\]/g, '\\$&');
+  }
+
+  /**
+   * 读取当前滚动视口内“最靠上的可见消息元素”（阅读锚点）。
+   *
+   * 用途：当用户正在阅读对话中部/顶部时，如果我们更新了其上方某条消息（例如“重新生成”导致该消息变长），
+   * 浏览器会因为内容高度变化而让视口中的内容整体下移/上移，造成“跳一下”的体验。
+   * 这里通过锁定“当前屏幕上第一条可见消息”的 top 位置来抵消这种跳动。
+   *
+   * 性能：使用二分查找在 chatContainer.children 中定位第一个 bottom > scrollTop 的元素，避免每次遍历全部消息。
+   *
+   * @param {HTMLElement} container - chatContainer
+   * @returns {HTMLElement|null}
+   */
+  function findFirstVisibleMessageElement(container) {
+    if (!container) return null;
+    const children = container.children;
+    const total = children ? children.length : 0;
+    if (!total) return null;
+
+    const viewportTop = container.scrollTop || 0;
+    const EPS = 1; // 允许 1px 误差，避免边界抖动
+
+    let low = 0;
+    let high = total - 1;
+    let firstIdx = total;
+
+    // 找到第一个满足：elementBottom > viewportTop 的元素
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      const el = children[mid];
+      const bottom = (el?.offsetTop || 0) + (el?.offsetHeight || 0);
+      if (bottom <= viewportTop + EPS) {
+        low = mid + 1;
+      } else {
+        firstIdx = mid;
+        high = mid - 1;
+      }
+    }
+
+    // 从 firstIdx 起向后找第一个 .message（chatContainer 理论上只包含 .message，这里做健壮性处理）
+    for (let i = firstIdx; i < total; i += 1) {
+      const el = children[i];
+      if (el && el.classList && el.classList.contains('message')) return el;
+    }
+    return null;
+  }
+
+  /**
+   * 仅在“重新生成（原地替换指定 AI 消息）且目标消息位于当前阅读位置上方”时，捕获阅读锚点。
+   *
+   * 捕获内容：锚点 messageId + 锚点 top 相对于容器视口的偏移（offsetTop - scrollTop）。
+   * 后续在 DOM 更新后，通过调整 scrollTop 把该偏移恢复，从而保持用户阅读位置不跳动。
+   *
+   * @param {HTMLElement} container
+   * @param {string|null} targetMessageId - 正在被更新的目标 AI 消息ID
+   * @param {Object|null} attemptState - 当前请求 attempt
+   * @returns {{ anchorId: string, anchorOffset: number } | null}
+   */
+  function captureReadingAnchorForRegenerate(container, targetMessageId, attemptState) {
+    if (!attemptState || attemptState.preserveReadingPosition !== true) return null;
+    if (!targetMessageId || targetMessageId !== attemptState.preserveTargetMessageId) return null;
+
+    const safeTargetId = escapeMessageIdForSelector(targetMessageId);
+    const targetEl = container.querySelector(`[data-message-id="${safeTargetId}"]`);
+    if (!targetEl) return null;
+
+    const anchorEl = findFirstVisibleMessageElement(container);
+    if (!anchorEl) return null;
+
+    const anchorId = anchorEl.getAttribute('data-message-id') || '';
+    if (!anchorId) return null;
+
+    // 只有当“目标消息在锚点之前”（也就是目标位于用户阅读位置上方）时才需要补偿滚动
+    try {
+      if (anchorEl === targetEl) return null;
+      const pos = targetEl.compareDocumentPosition(anchorEl);
+      const isTargetAboveAnchor = !!(pos & Node.DOCUMENT_POSITION_FOLLOWING);
+      if (!isTargetAboveAnchor) return null;
+    } catch (_) {
+      return null;
+    }
+
+    return {
+      anchorId,
+      anchorOffset: (anchorEl.offsetTop || 0) - (container.scrollTop || 0)
+    };
+  }
+
+  /**
+   * 恢复阅读锚点位置：让锚点消息的 top 坐标保持不变，避免视图跳动。
+   * @param {HTMLElement} container
+   * @param {{ anchorId: string, anchorOffset: number } | null} anchorInfo
+   */
+  function restoreReadingAnchor(container, anchorInfo) {
+    if (!container || !anchorInfo) return;
+    const anchorId = anchorInfo.anchorId || '';
+    if (!anchorId) return;
+
+    const safeAnchorId = escapeMessageIdForSelector(anchorId);
+    const anchorEl = container.querySelector(`[data-message-id="${safeAnchorId}"]`);
+    if (!anchorEl) return;
+
+    const currentOffset = (anchorEl.offsetTop || 0) - (container.scrollTop || 0);
+    const delta = currentOffset - (Number(anchorInfo.anchorOffset) || 0);
+    if (!Number.isFinite(delta) || Math.abs(delta) < 0.5) return;
+
+    // 关键：补偿 scrollTop，使锚点消息回到原来的像素位置
+    container.scrollTop = (container.scrollTop || 0) + delta;
+  }
+
   /**
    * 验证API配置是否有效
    * @private
@@ -829,6 +950,11 @@ export function createMessageSender(appContext) {
           if (canUpdateExistingAiMessage) {
             // 绑定 attempt 到目标 AI 消息，便于“停止更新”按消息粒度工作
             attempt.aiMessageId = normalizedTargetAiMessageId;
+            // 阅读位置锁定：仅对“原地替换”重新生成开启
+            // - preserveTargetMessageId 用于在流式/非流式更新时判断是否需要做滚动补偿；
+            // - preserveReadingPosition 用于总开关，避免普通发送/普通更新带来额外开销。
+            attempt.preserveReadingPosition = true;
+            attempt.preserveTargetMessageId = normalizedTargetAiMessageId;
             try {
               el.classList.add('updating');
               el.classList.add('regenerating');
@@ -1515,12 +1641,17 @@ export function createMessageSender(appContext) {
 	    const uiUpdateThrottler = createAdaptiveUpdateThrottler({
 	      run: (payload) => {
 	        if (!payload || !payload.messageId) return;
-	        messageProcessor.updateAIMessage(
-	          payload.messageId,
-	          payload.answer || '',
-	          payload.thoughts || '',
-	          payload.groundingMetadata
-	        );
+	        const anchor = captureReadingAnchorForRegenerate(chatContainer, payload.messageId, attemptState);
+	        try {
+	          messageProcessor.updateAIMessage(
+	            payload.messageId,
+	            payload.answer || '',
+	            payload.thoughts || '',
+	            payload.groundingMetadata
+	          );
+	        } finally {
+	          restoreReadingAnchor(chatContainer, anchor);
+	        }
 	      },
 	      shouldCancel: () => {
 	        try { return !!(attemptState?.controller?.signal?.aborted || attemptState?.finished); } catch (_) { return false; }
@@ -1761,6 +1892,7 @@ export function createMessageSender(appContext) {
 
         if (currentAiMessageId) {
           // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
+          const anchor = captureReadingAnchorForRegenerate(chatContainer, currentAiMessageId, attemptState);
           try {
             messageProcessor.updateAIMessage(
               currentAiMessageId,
@@ -1772,6 +1904,8 @@ export function createMessageSender(appContext) {
           } catch (e) {
             console.warn('原地替换 AI 消息失败，将回退为追加新消息:', e);
             currentAiMessageId = null;
+          } finally {
+            restoreReadingAnchor(chatContainer, anchor);
           }
         }
 
@@ -1878,6 +2012,7 @@ export function createMessageSender(appContext) {
               
               if (currentAiMessageId) {
                   // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
+                  const anchor = captureReadingAnchorForRegenerate(chatContainer, currentAiMessageId, attemptState);
                   try {
                     messageProcessor.updateAIMessage(
                       currentAiMessageId,
@@ -1889,6 +2024,8 @@ export function createMessageSender(appContext) {
                   } catch (e) {
                     console.warn('原地替换 AI 消息失败，将回退为追加新消息:', e);
                     currentAiMessageId = null;
+                  } finally {
+                    restoreReadingAnchor(chatContainer, anchor);
                   }
               }
 
@@ -2157,19 +2294,24 @@ export function createMessageSender(appContext) {
         const existingNode = chatHistoryManager.chatHistory.messages.find(m => m.id === existingMessageId);
         const existingEl = chatContainer.querySelector(`[data-message-id="${existingMessageId}"]`);
         if (existingNode && existingNode.role === 'assistant' && existingEl && existingEl.classList.contains('ai-message')) {
-          messageProcessor.updateAIMessage(existingMessageId, answer || '', thoughts || '', null);
-          applyApiMetaToMessage(existingMessageId, usedApiConfig, existingEl);
-          // 在历史节点上记录 Gemini 思维链签名，供后续多轮对话回传使用，并刷新 footer 标记
-          if (isGeminiApi && thoughtSignature) {
-            try {
-              existingNode.thoughtSignature = thoughtSignature;
-              renderApiFooter(existingEl, existingNode);
-            } catch (e) {
-              console.warn('记录 Gemini 思维链签名失败（非流式，原地替换）:', e);
+          const anchor = captureReadingAnchorForRegenerate(chatContainer, existingMessageId, attemptState);
+          try {
+            messageProcessor.updateAIMessage(existingMessageId, answer || '', thoughts || '', null);
+            applyApiMetaToMessage(existingMessageId, usedApiConfig, existingEl);
+            // 在历史节点上记录 Gemini 思维链签名，供后续多轮对话回传使用，并刷新 footer 标记
+            if (isGeminiApi && thoughtSignature) {
+              try {
+                existingNode.thoughtSignature = thoughtSignature;
+                renderApiFooter(existingEl, existingNode);
+              } catch (e) {
+                console.warn('记录 Gemini 思维链签名失败（非流式，原地替换）:', e);
+              }
             }
+            if (!anchor) scrollToBottom();
+            return;
+          } finally {
+            restoreReadingAnchor(chatContainer, anchor);
           }
-          scrollToBottom();
-          return;
         }
       } catch (e) {
         console.warn('非流式原地替换失败，将回退为创建新消息:', e);
