@@ -681,6 +681,41 @@ export function createMessageSender(appContext) {
   }
 
   /**
+   * 重新生成（原地替换）时清空旧的“推理签名/推理字段”。
+   *
+   * 设计说明：
+   * - 推理签名与“该条 assistant 的回答/推理内容”绑定；
+   * - 当我们开始把新的生成结果写回到旧消息时，旧签名将不再匹配；
+   * - 若本次响应未返回新签名，就必须保持为空，否则后续把历史回传给上游时会触发
+   *   “signature required / invalid signature” 等校验错误；
+   * - 这里同时清理 OpenAI 兼容字段（reasoning_content/tool_calls），避免旧内容残留导致语义错配。
+   *
+   * 注意：只在“原地替换的重新生成”场景触发；普通追加新消息不需要清理。
+   *
+   * @param {string|null} messageId
+   * @param {Object|null} attemptState
+   * @returns {boolean} 是否发生了清空
+   */
+  function clearBoundSignatureForRegenerate(messageId, attemptState) {
+    const id = (typeof messageId === 'string' && messageId.trim()) ? messageId.trim() : '';
+    if (!id) return false;
+    if (!attemptState || attemptState.preserveTargetMessageId !== id) return false;
+
+    try {
+      const node = chatHistoryManager?.chatHistory?.messages?.find(m => m.id === id) || null;
+      if (!node || node.role !== 'assistant') return false;
+
+      node.thoughtSignature = null;
+      node.thoughtSignatureSource = null;
+      node.reasoning_content = null;
+      node.tool_calls = null;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /**
    * 验证API配置是否有效
    * @private
    * @returns {boolean} 配置是否有效
@@ -1631,10 +1666,29 @@ export function createMessageSender(appContext) {
     let currentEventDataLines = []; // 当前事件中的所有 data: 行内容
 	    // 记录当前流式响应中最新的 Gemini 思维链签名（Thought Signature）
 	    let latestGeminiThoughtSignature = null;
-	    // 当前流对应的 AI 消息 ID：
-	    // - 普通发送：首个 token 到达时新建消息并赋值；
-	    // - “原地替换”重新生成：sendMessageCore 会预先把 attempt.aiMessageId 设为目标消息ID，这里直接复用。
-	    let currentAiMessageId = attemptState?.aiMessageId || null;
+
+	    // OpenAI 兼容：记录当前流式响应中最新的推理签名（thoughtSignature）。
+	    //
+	    // 背景：
+	    // - 某些 OpenAI 兼容服务会在 SSE chunk 的 `choices[0].delta` 上透传 `thoughtSignature`；
+	    // - 该签名用于校验/回传 `reasoning_content`（以及 tool_calls 片段），否则上游可能报 “signature required”；
+	    //
+	    // 约定：
+	    // - `delta.thoughtSignature`：对应 `delta.reasoning_content`（或 `delta.reasoning`）的签名；
+	    // - `delta.tool_calls[i].thoughtSignature`：对应工具调用片段的签名；
+	    //
+	    // 注意：签名必须“原样保存、原样回传”，不要做 trim/格式化。
+	    let latestOpenAIThoughtSignature = null;
+	    // OpenAI 兼容：累积原始 reasoning_content（用于与 thoughtSignature 配对回传）
+	    let latestOpenAIReasoningContent = '';
+	    // OpenAI 兼容：累积 tool_calls（流式增量会把 function.arguments 分片输出）
+	    let latestOpenAIToolCalls = [];
+		    // 当前流对应的 AI 消息 ID：
+		    // - 普通发送：首个 token 到达时新建消息并赋值；
+		    // - “原地替换”重新生成：sendMessageCore 会预先把 attempt.aiMessageId 设为目标消息ID，这里直接复用。
+		    let currentAiMessageId = attemptState?.aiMessageId || null;
+		    // 重新生成（原地替换）：只在“首次写回”时清一次，避免后续 token 更新中重复清空
+		    let hasClearedBoundSignatureForRegenerate = false;
 
 	    // 自适应 UI 更新节流器：将多个 token 的高频更新合并为较低频的 DOM 刷新，缓解长消息渲染导致的卡顿。
 	    // 说明：这里不改 messageProcessor.updateAIMessage 的“全量重渲染”策略，而是通过“掉帧合并”降低调用频率。
@@ -1697,22 +1751,48 @@ export function createMessageSender(appContext) {
 	    // 流式响应结束：强制刷新最后一帧，避免尾部 token 被节流合并后未能落到 UI。
 	    try { uiUpdateThrottler.flush({ force: true }); } catch (_) {}
 
-	    // 流式响应结束后，如果是 Gemini 且解析到了思维链签名，则写入当前 AI 消息节点，并刷新 footer 标记
-	    if (isGeminiApi && currentAiMessageId && latestGeminiThoughtSignature) {
-	      try {
-        const node = chatHistoryManager.chatHistory.messages.find(m => m.id === currentAiMessageId);
-        if (node) {
-          // 在历史节点上记录 Thought Signature，供后续多轮对话回传使用
-          node.thoughtSignature = latestGeminiThoughtSignature;
-          const el = chatContainer.querySelector(`[data-message-id="${currentAiMessageId}"]`);
-          if (el) {
-            renderApiFooter(el, node);
-          }
-        }
-      } catch (e) {
-        console.warn('记录 Gemini 思维链签名失败（流式）:', e);
-      }
-    }
+		    // 流式响应结束后，将“签名/推理元信息”写入当前 AI 消息节点，并刷新 footer 标记
+		    // - Gemini：Thought Signature（part-level thought_signature）
+		    // - OpenAI 兼容：thoughtSignature（message-level thoughtSignature + reasoning_content/tool_calls）
+		    if (currentAiMessageId && (latestGeminiThoughtSignature || latestOpenAIThoughtSignature || (Array.isArray(latestOpenAIToolCalls) && latestOpenAIToolCalls.length > 0))) {
+		      try {
+	        const node = chatHistoryManager.chatHistory.messages.find(m => m.id === currentAiMessageId);
+	        if (node) {
+	          if (isGeminiApi && latestGeminiThoughtSignature) {
+	            // Gemini：在历史节点上记录 Thought Signature，供后续多轮对话回传使用
+	            node.thoughtSignature = latestGeminiThoughtSignature;
+	            node.thoughtSignatureSource = 'gemini';
+	          }
+
+	          if (!isGeminiApi) {
+	            // OpenAI 兼容：推理签名与推理原文、tool_calls 原样落库，供后续历史消息回传
+	            if (latestOpenAIThoughtSignature) {
+	              node.thoughtSignature = latestOpenAIThoughtSignature;
+	              node.thoughtSignatureSource = 'openai';
+	            } else if (Array.isArray(latestOpenAIToolCalls) && latestOpenAIToolCalls.length > 0) {
+	              // 仅有 tool_calls 签名/结构时，也标记来源，避免后续误发给 Gemini
+	              if (!node.thoughtSignatureSource) node.thoughtSignatureSource = 'openai';
+	            }
+
+	            if (typeof latestOpenAIReasoningContent === 'string' && latestOpenAIReasoningContent) {
+	              // 与 OpenAI 兼容字段保持一致：使用 reasoning_content 命名，便于 buildRequest 直接透传
+	              node.reasoning_content = latestOpenAIReasoningContent;
+	            }
+
+	            if (Array.isArray(latestOpenAIToolCalls) && latestOpenAIToolCalls.length > 0) {
+	              node.tool_calls = latestOpenAIToolCalls;
+	            }
+	          }
+
+	          const el = chatContainer.querySelector(`[data-message-id="${currentAiMessageId}"]`);
+	          if (el) {
+	            renderApiFooter(el, node);
+	          }
+	        }
+	      } catch (e) {
+	        console.warn('记录签名/推理元信息失败（流式）:', e);
+	      }
+	    }
 
     async function processLine(line) {
       // Trim the line to handle potential CR characters as well (e.g. '\r\n')
@@ -1890,21 +1970,24 @@ export function createMessageSender(appContext) {
 	        hasStartedResponse = true;
 	        try { GetInputContainer().classList.add('auto-scroll-glow-active'); } catch (_) {}
 
-        if (currentAiMessageId) {
-          // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
-          const anchor = captureReadingAnchorForRegenerate(chatContainer, currentAiMessageId, attemptState);
-          try {
-            messageProcessor.updateAIMessage(
-              currentAiMessageId,
-              aiResponse,
-              aiThoughtsRaw,
-              groundingMetadata
-            );
-            applyApiMetaToMessage(currentAiMessageId, usedApiConfig);
-          } catch (e) {
-            console.warn('原地替换 AI 消息失败，将回退为追加新消息:', e);
-            currentAiMessageId = null;
-          } finally {
+	        if (currentAiMessageId) {
+	          // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
+	          const anchor = captureReadingAnchorForRegenerate(chatContainer, currentAiMessageId, attemptState);
+	          try {
+	            messageProcessor.updateAIMessage(
+	              currentAiMessageId,
+	              aiResponse,
+	              aiThoughtsRaw,
+	              groundingMetadata
+	            );
+	            if (!hasClearedBoundSignatureForRegenerate) {
+	              hasClearedBoundSignatureForRegenerate = clearBoundSignatureForRegenerate(currentAiMessageId, attemptState);
+	            }
+	            applyApiMetaToMessage(currentAiMessageId, usedApiConfig);
+	          } catch (e) {
+	            console.warn('原地替换 AI 消息失败，将回退为追加新消息:', e);
+	            currentAiMessageId = null;
+	          } finally {
             restoreReadingAnchor(chatContainer, anchor);
           }
         }
@@ -1960,9 +2043,68 @@ export function createMessageSender(appContext) {
      * 处理与OpenAI兼容的API的SSE事件
      * @param {Object} data - 从SSE事件中解析出的JSON对象
      */
-    function handleOpenAIEvent(data) {
-      // 检查API返回的错误信息
-      if (data.error) {
+	    function mergeOpenAIToolCallsDelta(existingCalls, deltaCalls) {
+	      const existing = Array.isArray(existingCalls) ? existingCalls : [];
+	      const deltas = Array.isArray(deltaCalls) ? deltaCalls : [];
+	      if (deltas.length === 0) return existing;
+
+	      // 深拷贝一层，避免在高频流式更新中意外共享引用导致历史节点被“半成品”污染
+	      const nextCalls = existing.map((c) => {
+	        if (!c || typeof c !== 'object') return c;
+	        const cloned = { ...c };
+	        if (c.function && typeof c.function === 'object') {
+	          cloned.function = { ...c.function };
+	        }
+	        return cloned;
+	      });
+
+	      for (const delta of deltas) {
+	        if (!delta || typeof delta !== 'object') continue;
+	        const idx = Number.isInteger(delta.index) ? delta.index : nextCalls.length;
+	        while (nextCalls.length <= idx) {
+	          nextCalls.push({ id: '', type: 'function', function: { name: '', arguments: '' } });
+	        }
+
+	        const current = nextCalls[idx] && typeof nextCalls[idx] === 'object' ? nextCalls[idx] : {};
+	        const merged = { ...current };
+
+	        if (typeof delta.id === 'string' && delta.id) merged.id = delta.id;
+	        if (typeof delta.type === 'string' && delta.type) merged.type = delta.type;
+
+	        // 工具调用片段的签名（某些代理会要求回传）
+	        const toolThoughtSignature =
+	          (typeof delta.thoughtSignature === 'string' && delta.thoughtSignature) ||
+	          (typeof delta.thought_signature === 'string' && delta.thought_signature) ||
+	          null;
+	        if (toolThoughtSignature) merged.thoughtSignature = toolThoughtSignature;
+
+	        if (delta.function && typeof delta.function === 'object') {
+	          const mergedFn = (merged.function && typeof merged.function === 'object')
+	            ? { ...merged.function }
+	            : {};
+
+	          if (typeof delta.function.name === 'string' && delta.function.name) {
+	            mergedFn.name = delta.function.name;
+	          }
+
+	          if (typeof delta.function.arguments === 'string' && delta.function.arguments) {
+	            const prevArgs = (typeof mergedFn.arguments === 'string') ? mergedFn.arguments : '';
+	            // arguments 是流式分片输出：使用 mergeStreamingThoughts 的“去重拼接”策略做通用合并
+	            mergedFn.arguments = mergeStreamingThoughts(prevArgs, delta.function.arguments);
+	          }
+
+	          merged.function = mergedFn;
+	        }
+
+	        nextCalls[idx] = merged;
+	      }
+
+	      return nextCalls;
+	    }
+
+	    function handleOpenAIEvent(data) {
+	      // 检查API返回的错误信息
+	      if (data.error) {
           const msg = data.error.message || 'Unknown OpenAI error';
           console.error('OpenAI API error:', data.error);
           // 不要移除 loadingMessage，让上层的 catch 块来处理错误显示
@@ -1977,23 +2119,52 @@ export function createMessageSender(appContext) {
           throw new Error(msg);
       }
 
-      // 从事件数据中提取内容增量 (delta)
-      let currentEventAnswerDelta = data.choices?.[0]?.delta?.content;
-      let currentEventThoughtsDelta = data.choices?.[0]?.delta?.reasoning_content || data.choices?.[0]?.delta?.reasoning || '';
-      
+	      const delta = data.choices?.[0]?.delta || {};
 
-      // 只有在有实际内容增量时才继续处理
-      if (currentEventAnswerDelta || currentEventThoughtsDelta) {
-          const split = splitDeltaByThinkTags(String(currentEventAnswerDelta || ''), false);
-          const thoughtSplit = splitDeltaByThinkTags(String(currentEventThoughtsDelta || ''), true);
+	      // 1) OpenAI 兼容：捕获推理签名（对应 reasoning_content/reasoning）
+	      const extractedThoughtSignature =
+	        (typeof delta?.thoughtSignature === 'string' && delta.thoughtSignature) ||
+	        (typeof delta?.thought_signature === 'string' && delta.thought_signature) ||
+	        null;
+	      if (extractedThoughtSignature) {
+	        latestOpenAIThoughtSignature = extractedThoughtSignature;
+	      }
 
-          // 累积AI的完整响应文本
-          aiResponse += split.answerDelta;
-          // 思考过程同样按“流式增量”合并，避免 mergeThoughts 的 `\\n\\n` 拼接导致每个 token 变成一段。
-          aiThoughtsRaw = mergeStreamingThoughts(aiThoughtsRaw, thoughtSplit.thoughtDelta || split.thoughtDelta);
+	      // 2) OpenAI 兼容：捕获 tool_calls（含 thoughtSignature / function.arguments 分片）
+	      if (Array.isArray(delta?.tool_calls) && delta.tool_calls.length > 0) {
+	        latestOpenAIToolCalls = mergeOpenAIToolCallsDelta(latestOpenAIToolCalls, delta.tool_calls);
+	      }
 
-          // 若思考流仍未闭合，避免正文暂存残留 <think>
-          if (split.thoughtDelta && !split.answerDelta) {
+	      // 3) 从事件数据中提取内容增量 (delta)
+	      const currentEventAnswerDelta = delta?.content;
+	      const currentEventReasoningDelta = delta?.reasoning_content || delta?.reasoning || '';
+
+	      // reasoning_content 必须原样累积（用于与 thoughtSignature 配对回传）
+	      if (typeof currentEventReasoningDelta === 'string' && currentEventReasoningDelta) {
+	        latestOpenAIReasoningContent = mergeStreamingThoughts(latestOpenAIReasoningContent, currentEventReasoningDelta);
+	      }
+
+	      const hasToolCallsDelta = Array.isArray(delta?.tool_calls) && delta.tool_calls.length > 0;
+	      const hasAnyDelta = !!(currentEventAnswerDelta || currentEventReasoningDelta || hasToolCallsDelta);
+
+	      // 只有在有“可展示或结构性”的增量时才继续处理（签名本身可能独立出现：仅保存，不触发 UI 更新）
+	      if (hasAnyDelta) {
+	          const split = splitDeltaByThinkTags(String(currentEventAnswerDelta || ''), false);
+
+	          // 累积AI的完整响应文本
+	          aiResponse += split.answerDelta;
+
+	          // 思考过程同样按“流式增量”合并：
+	          // - OpenAI 兼容的 reasoning_content：必须保持原样，不做 <think> 标签拆分；
+	          // - content 内的 <think> 片段：仅用于 UI 展示（不计入 reasoning_content 回传）。
+	          if (typeof currentEventReasoningDelta === 'string' && currentEventReasoningDelta) {
+	            aiThoughtsRaw = mergeStreamingThoughts(aiThoughtsRaw, currentEventReasoningDelta);
+	          } else if (split.thoughtDelta) {
+	            aiThoughtsRaw = mergeStreamingThoughts(aiThoughtsRaw, split.thoughtDelta);
+	          }
+
+	          // 若思考流仍未闭合，避免正文暂存残留 <think>
+	          if (split.thoughtDelta && !split.answerDelta) {
             aiResponse = aiResponse; // no-op, 保持逻辑对齐
           }
           const thinkExtraction = extractThinkingFromText(aiResponse);
@@ -2010,21 +2181,24 @@ export function createMessageSender(appContext) {
           // 流式开始：更醒目的输入容器提示
           try { GetInputContainer().classList.add('auto-scroll-glow-active'); } catch (_) {}
               
-              if (currentAiMessageId) {
-                  // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
-                  const anchor = captureReadingAnchorForRegenerate(chatContainer, currentAiMessageId, attemptState);
-                  try {
-                    messageProcessor.updateAIMessage(
-                      currentAiMessageId,
-                      aiResponse,
-                      aiThoughtsRaw,
-                      null
-                    );
-                    applyApiMetaToMessage(currentAiMessageId, usedApiConfig);
-                  } catch (e) {
-                    console.warn('原地替换 AI 消息失败，将回退为追加新消息:', e);
-                    currentAiMessageId = null;
-                  } finally {
+	              if (currentAiMessageId) {
+	                  // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
+	                  const anchor = captureReadingAnchorForRegenerate(chatContainer, currentAiMessageId, attemptState);
+	                  try {
+	                    messageProcessor.updateAIMessage(
+	                      currentAiMessageId,
+	                      aiResponse,
+	                      aiThoughtsRaw,
+	                      null
+	                    );
+	                    if (!hasClearedBoundSignatureForRegenerate) {
+	                      hasClearedBoundSignatureForRegenerate = clearBoundSignatureForRegenerate(currentAiMessageId, attemptState);
+	                    }
+	                    applyApiMetaToMessage(currentAiMessageId, usedApiConfig);
+	                  } catch (e) {
+	                    console.warn('原地替换 AI 消息失败，将回退为追加新消息:', e);
+	                    currentAiMessageId = null;
+	                  } finally {
                     restoreReadingAnchor(chatContainer, anchor);
                   }
               }
@@ -2160,8 +2334,16 @@ export function createMessageSender(appContext) {
 
     let answer = '';
     let thoughts = '';
-    // 用于承载 Gemini 3 返回的思维链签名（Thought Signature），仅在 Gemini 响应中填充
+    // 用于承载“推理签名”（Thought Signature / thoughtSignature）：
+    // - Gemini：part-level thought_signature（用于回传给 Gemini 维持多轮推理上下文）
+    // - OpenAI 兼容：message-level thoughtSignature（用于与 reasoning_content/tool_calls 配对回传，避免 “signature required”）
     let thoughtSignature = null;
+    // 签名来源：用于避免跨 API（Gemini/OpenAI 兼容）误回传导致上游报错
+    let thoughtSignatureSource = null;
+    // OpenAI 兼容：必须原样保存的 reasoning_content（不要与 thoughts 混用，避免 UI 合并逻辑改变文本导致签名失效）
+    let reasoningContentRaw = '';
+    // OpenAI 兼容：工具调用（若存在则与 thoughtSignature 一并回传）
+    let toolCalls = null;
     let json = null;
     try {
       json = await response.json();
@@ -2212,6 +2394,7 @@ export function createMessageSender(appContext) {
         }
         if (extractedSignature) {
           thoughtSignature = extractedSignature;
+          thoughtSignatureSource = 'gemini';
         }
 
         if (typeof part?.text === 'string') {
@@ -2271,11 +2454,34 @@ export function createMessageSender(appContext) {
       const choice = Array.isArray(json?.choices) ? json.choices[0] : null;
       const message = choice?.message || {};
       if (typeof message?.content === 'string') answer = message.content;
-      if (typeof message?.reasoning_content === 'string') thoughts = message.reasoning_content;
-      else if (typeof message?.reasoning === 'string') thoughts = message.reasoning;
+      if (typeof message?.reasoning_content === 'string') {
+        reasoningContentRaw = message.reasoning_content;
+        thoughts = message.reasoning_content;
+      } else if (typeof message?.reasoning === 'string') {
+        reasoningContentRaw = message.reasoning;
+        thoughts = message.reasoning;
+      }
+
+      // 捕获 OpenAI 兼容 thoughtSignature（对应 reasoning_content 的签名）
+      const extractedThoughtSignature =
+        (typeof message?.thoughtSignature === 'string' && message.thoughtSignature) ||
+        (typeof message?.thought_signature === 'string' && message.thought_signature) ||
+        null;
+      if (extractedThoughtSignature) {
+        thoughtSignature = extractedThoughtSignature;
+        thoughtSignatureSource = 'openai';
+      }
+
+      // 捕获 tool_calls（如有），并原样保存（含 tool_calls[i].thoughtSignature）
+      if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
+        toolCalls = message.tool_calls;
+        // 如果没有 message-level thoughtSignature，但 tool_calls 带签名，也应标记来源为 openai
+        if (!thoughtSignatureSource) thoughtSignatureSource = 'openai';
+      }
     }
 
     // 额外提取 <think> 包裹的思考摘要，避免混入正文
+    // 注意：OpenAI 兼容的 reasoning_content 需要“原样回传”，因此这里仅影响 UI 展示的 thoughts，不修改 reasoningContentRaw。
     if (typeof answer === 'string') {
       const thinkExtraction = extractThinkingFromText(answer);
       answer = thinkExtraction.cleanText;
@@ -2297,16 +2503,35 @@ export function createMessageSender(appContext) {
           const anchor = captureReadingAnchorForRegenerate(chatContainer, existingMessageId, attemptState);
           try {
             messageProcessor.updateAIMessage(existingMessageId, answer || '', thoughts || '', null);
+            // 重新生成（原地替换）：一旦开始写回新内容，旧签名就不再匹配，必须先清空
+            clearBoundSignatureForRegenerate(existingMessageId, attemptState);
             applyApiMetaToMessage(existingMessageId, usedApiConfig, existingEl);
-            // 在历史节点上记录 Gemini 思维链签名，供后续多轮对话回传使用，并刷新 footer 标记
-            if (isGeminiApi && thoughtSignature) {
+            // 在历史节点上记录推理签名，并刷新 footer 标记
+            if (thoughtSignature) {
               try {
                 existingNode.thoughtSignature = thoughtSignature;
+                if (thoughtSignatureSource) existingNode.thoughtSignatureSource = thoughtSignatureSource;
                 renderApiFooter(existingEl, existingNode);
               } catch (e) {
-                console.warn('记录 Gemini 思维链签名失败（非流式，原地替换）:', e);
+                console.warn('记录推理签名失败（非流式，原地替换）:', e);
               }
             }
+
+	            // OpenAI 兼容：保存 reasoning_content / tool_calls，供下次请求回传（避免签名校验失败）
+	            if (!isGeminiApi) {
+	              try {
+	                if (typeof reasoningContentRaw === 'string' && reasoningContentRaw) {
+	                  existingNode.reasoning_content = reasoningContentRaw;
+	                }
+	                if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+	                  existingNode.tool_calls = toolCalls;
+	                  // 即使没有 message-level thoughtSignature，只要有 tool_calls（含 tool thoughtSignature），也必须标记来源为 openai，确保后续能回传 tool_calls
+	                  existingNode.thoughtSignatureSource = 'openai';
+	                }
+	              } catch (e) {
+	                console.warn('记录 OpenAI 兼容推理元信息失败（非流式，原地替换）:', e);
+	              }
+	            }
             if (!anchor) scrollToBottom();
             return;
           } finally {
@@ -2335,18 +2560,37 @@ export function createMessageSender(appContext) {
         attemptState.aiMessageId = messageId;
       }
       applyApiMetaToMessage(messageId, usedApiConfig, newAiMessageDiv);
-      // 在历史节点上记录 Gemini 思维链签名，供后续多轮对话回传使用，并刷新 footer 标记
-      if (isGeminiApi && thoughtSignature) {
+      // 在历史节点上记录推理签名，供后续多轮对话回传使用，并刷新 footer 标记
+      if (thoughtSignature) {
         try {
           const node = chatHistoryManager.chatHistory.messages.find(m => m.id === messageId);
           if (node) {
             node.thoughtSignature = thoughtSignature;
+            if (thoughtSignatureSource) node.thoughtSignatureSource = thoughtSignatureSource;
             renderApiFooter(newAiMessageDiv, node);
           }
         } catch (e) {
-          console.warn('记录 Gemini 思维链签名失败（非流式）:', e);
+          console.warn('记录推理签名失败（非流式）:', e);
         }
       }
+
+	      // OpenAI 兼容：保存 reasoning_content / tool_calls（仅在非 Gemini 场景）
+	      if (!isGeminiApi) {
+	        try {
+	          const node = chatHistoryManager.chatHistory.messages.find(m => m.id === messageId);
+	          if (node) {
+	            if (typeof reasoningContentRaw === 'string' && reasoningContentRaw) {
+	              node.reasoning_content = reasoningContentRaw;
+	            }
+	            if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+	              node.tool_calls = toolCalls;
+	              node.thoughtSignatureSource = 'openai';
+	            }
+	          }
+	        } catch (e) {
+	          console.warn('记录 OpenAI 兼容推理元信息失败（非流式）:', e);
+	        }
+	      }
     }
     scrollToBottom();
   }

@@ -1148,8 +1148,12 @@ export function createApiManager(appContext) {
     let requestBody = {};
 
     // 复制并规范化消息，按需注入“自定义提示词”至系统提示词最顶端
-    // 说明：这里保留 messages 上的 thoughtSignature 等内部字段，仅在 Gemini 请求体构建中使用；
-    // 对于 OpenAI 兼容接口，会在后续单独做字段过滤，避免发送非标准字段。
+    //
+    // 说明（签名透传）：
+    // - Cerebr 内部会在历史节点上保存 `thoughtSignature` 等字段；
+    // - Gemini：用于在 Part-level 回传 thought_signature；
+    // - OpenAI 兼容：部分代理会要求在 message-level 回传 `thoughtSignature` + `reasoning_content`（以及 tool_calls[i].thoughtSignature），否则可能报 “signature required”；
+    // - 因此这里先保留内部字段，后续按 API 类型有条件地注入/过滤。
     let normalizedMessages = Array.isArray(messages) ? messages.map(m => ({ ...m })) : [];
     const customSystemPrompt = (config.customSystemPrompt || '').trim();
     if (customSystemPrompt) {
@@ -1196,13 +1200,16 @@ export function createApiManager(appContext) {
         }
 
         // 如果该消息带有 Gemini 思维链签名，则将签名附加到最后一个 part 上
-        // 只在模型消息（assistant/model）上回传，以符合官方文档建议
-        // 读取历史消息上记录的 Thought Signature，兼容下划线与驼峰命名
+        // - 只在模型消息（assistant/model）上回传，以符合官方文档建议；
+        // - 读取历史消息上记录的 Thought Signature，兼容下划线与驼峰命名；
+        // - 重要：若该签名来自 OpenAI 兼容接口（thoughtSignatureSource==='openai'），则不能发给 Gemini。
         const thoughtSignature =
           (typeof msg.thoughtSignature === 'string' && msg.thoughtSignature) ||
           (typeof msg.thought_signature === 'string' && msg.thought_signature) ||
           null;
-        if (thoughtSignature && parts.length > 0 && (msg.role === 'assistant' || role === 'model')) {
+        const thoughtSignatureSource = (typeof msg.thoughtSignatureSource === 'string' && msg.thoughtSignatureSource) || null;
+        const canSendGeminiSignature = (thoughtSignatureSource !== 'openai');
+        if (canSendGeminiSignature && thoughtSignature && parts.length > 0 && (msg.role === 'assistant' || role === 'model')) {
           const lastPart = parts[parts.length - 1];
           if (lastPart && typeof lastPart === 'object') {
             // 文档中非函数调用场景为 Part-level 字段 thought_signature
@@ -1294,6 +1301,26 @@ export function createApiManager(appContext) {
         if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
           base.tool_calls = msg.tool_calls;
         }
+
+        // OpenAI 兼容：推理签名透传（可选）
+        // 仅在 thoughtSignatureSource==='openai' 时回传，避免把 Gemini 的签名/字段发给 OpenAI 接口。
+        const thoughtSignatureSource = (typeof msg.thoughtSignatureSource === 'string' && msg.thoughtSignatureSource) || null;
+	        if (thoughtSignatureSource === 'openai' && msg.role === 'assistant') {
+	          const thoughtSignature =
+	            (typeof msg.thoughtSignature === 'string' && msg.thoughtSignature) ||
+	            (typeof msg.thought_signature === 'string' && msg.thought_signature) ||
+	            null;
+	          if (thoughtSignature) {
+	            base.thoughtSignature = thoughtSignature;
+	            // 注意：reasoning_content 必须与 message-level thoughtSignature 成对回传，否则部分上游会报 “signature required”。
+	            // 同时要求“原样回传”，不要做 trim/合并/格式化。
+	            if (typeof msg.reasoning_content === 'string') {
+	              base.reasoning_content = msg.reasoning_content;
+	            } else if (typeof msg.reasoning === 'string') {
+	              base.reasoning = msg.reasoning;
+	            }
+	          }
+	        }
 
         if (Array.isArray(msg.content)) {
           const parts = [];

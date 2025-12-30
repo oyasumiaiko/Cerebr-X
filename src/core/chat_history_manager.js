@@ -14,7 +14,10 @@
  * @property {Array<string>} children - 子节点ID列表
  * @property {number} timestamp - 消息时间戳
  * @property {string} [thoughtsRaw] - AI思考过程的原始文本 (可选)
- * @property {string|null} [thoughtSignature] - Gemini 思维链签名（Thought Signature，保持多轮推理上下文用，可选）
+ * @property {string|null} [thoughtSignature] - 推理签名（Thought Signature / thoughtSignature，可选）
+ * @property {string|null} [thoughtSignatureSource] - 签名来源（'gemini' | 'openai'，可选），用于避免跨 API 误回传导致上游报错
+ * @property {string|null} [reasoning_content] - OpenAI 兼容：需要原样回传的推理原文（与 thoughtSignature 配对，可选）
+ * @property {Array<any>|null} [tool_calls] - OpenAI 兼容：assistant.tool_calls（可能包含 thoughtSignature，可选）
  * @property {string|null} [apiUuid] - 使用的 API 配置 UUID（配置的 id），用于回溯显示 (可选)
  * @property {string} [apiDisplayName] - 创建消息时记录的 API 显示名称快照 (可选)
  * @property {string} [apiModelId] - 创建消息时记录的模型名（modelName）快照 (可选)
@@ -50,8 +53,14 @@ function createMessageNode(role, content, parentId = null) {
     children: [],
     timestamp: Date.now(),
     thoughtsRaw: null, // 初始化思考过程文本
-    // 用于 Gemini 3 思维链签名（Thought Signature），帮助模型在多轮对话中恢复内部推理上下文
+    // 用于“推理签名”（Gemini/OpenAI 兼容），帮助上游在多轮对话中恢复内部推理上下文
     thoughtSignature: null,
+    // 记录该签名来自哪个 API 体系：避免把 Gemini 的签名发给 OpenAI 兼容接口（反之亦然）
+    thoughtSignatureSource: null,
+    // OpenAI 兼容：需要原样回传的 reasoning_content（与 thoughtSignature 配对）
+    reasoning_content: null,
+    // OpenAI 兼容：assistant.tool_calls（可能包含 tool_calls[i].thoughtSignature）
+    tool_calls: null,
     // --- API 元信息（用于消息 footer 显示与持久化）---
     apiUuid: null,
     apiDisplayName: '',

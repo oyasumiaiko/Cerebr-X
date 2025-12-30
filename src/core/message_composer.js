@@ -10,7 +10,10 @@
  * @property {string} id 唯一ID
  * @property {('user'|'assistant'|'system')} role 角色
  * @property {string} content 文本内容
- * @property {string|null} [thoughtSignature] Gemini 思维链签名（可选，用于在 Gemini 请求中回传）
+ * @property {string|null} [thoughtSignature] 推理签名（Thought Signature / thoughtSignature，可选）
+ * @property {string|null} [thoughtSignatureSource] 签名来源（'gemini' | 'openai'，可选）
+ * @property {string|null} [reasoning_content] OpenAI 兼容：需要原样回传的推理原文（与 thoughtSignature 配对，可选）
+ * @property {Array<any>|null} [tool_calls] OpenAI 兼容：assistant.tool_calls（可能包含 thoughtSignature，可选）
  */
 
 /**
@@ -79,6 +82,38 @@ export function composeMessages(args) {
 
   const messages = [];
 
+  // 纯函数：将历史节点转换为可发送的 message 对象（保留必要的签名/推理字段）
+  // 说明：
+  // - content 会剔除 <think> 段落，避免隐式思考内容被重新发送；
+  // - OpenAI 兼容的 reasoning_content 必须“原样回传”，因此这里直接使用节点上保存的 reasoning_content；
+  // - thoughtSignatureSource 用于让下游 buildRequest 决定：哪些签名该发给 Gemini，哪些该发给 OpenAI 兼容接口。
+  const nodeToMessage = (node) => {
+    const role = mapRole(node?.role);
+    const thoughtSignature = node?.thoughtSignature || null;
+    const thoughtSignatureSource = node?.thoughtSignatureSource || null;
+    const hasThoughtSignature = (typeof thoughtSignature === 'string') && !!thoughtSignature;
+
+    const msg = {
+      role,
+      content: sanitizeContentForSend(node?.content),
+      thoughtSignature,
+      thoughtSignatureSource
+    };
+
+    if (role === 'assistant' && thoughtSignatureSource === 'openai') {
+      // OpenAI 兼容：reasoning_content 必须与 message-level thoughtSignature 成对出现，否则上游可能校验失败。
+      // tool_calls 的签名位于 tool_calls[i].thoughtSignature，可独立于 message-level thoughtSignature 存在。
+      if (hasThoughtSignature && typeof node?.reasoning_content === 'string') {
+        msg.reasoning_content = node.reasoning_content;
+      }
+      if (Array.isArray(node?.tool_calls) && node.tool_calls.length > 0) {
+        msg.tool_calls = node.tool_calls;
+      }
+    }
+
+    return msg;
+  };
+
   // 1) 系统消息：系统提示词 + 注入系统消息 + 网页内容 + 截图提示
   const pageContentPrompt = pageContent
     ? `\n\n当前网页内容：\n标题：${pageContent.title}\nURL：${pageContent.url}\n内容：${pageContent.content}`
@@ -121,12 +156,7 @@ export function composeMessages(args) {
         maxUserMessages: normalizedMaxUserHistory,
         maxAssistantMessages: normalizedMaxAssistantHistory
       });
-      messages.push(...limited.map(node => ({
-        role: mapRole(node.role),
-        content: sanitizeContentForSend(node.content),
-        // 透传历史消息上的 Gemini 思维链签名（仅在构建 Gemini 请求体时使用）
-        thoughtSignature: node.thoughtSignature || null
-      })));
+      messages.push(...limited.map(nodeToMessage));
     } else {
       // 旧逻辑：单一 maxHistory，按总条目数裁剪
       // 当 maxHistory 为 0 时，不发送任何历史消息
@@ -135,19 +165,10 @@ export function composeMessages(args) {
       } else if (maxHistory && maxHistory > 0) {
         // 限制历史消息数量
         const limited = effectiveChain.slice(-maxHistory);
-        messages.push(...limited.map(node => ({
-          role: mapRole(node.role),
-          content: sanitizeContentForSend(node.content),
-          // 透传历史消息上的 Gemini 思维链签名（仅在构建 Gemini 请求体时使用）
-          thoughtSignature: node.thoughtSignature || null
-        })));
+        messages.push(...limited.map(nodeToMessage));
       } else {
         // 发送全部历史消息
-        messages.push(...effectiveChain.map(node => ({
-          role: mapRole(node.role),
-          content: sanitizeContentForSend(node.content),
-          thoughtSignature: node.thoughtSignature || null
-        })));
+        messages.push(...effectiveChain.map(nodeToMessage));
       }
     }
   } else {
@@ -167,11 +188,7 @@ export function composeMessages(args) {
       for (let i = effectiveChain.length - 1; i >= 0; i--) {
         const message = effectiveChain[i];
         if (message.role === 'user') {
-          messages.push({
-            role: 'user',
-            content: sanitizeContentForSend(message.content),
-            thoughtSignature: message.thoughtSignature || null
-          });
+          messages.push(nodeToMessage(message));
           break; // 只添加最后一条用户消息
         }
       }
