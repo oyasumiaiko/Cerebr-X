@@ -641,6 +641,7 @@ export function createMessageSender(appContext) {
    * @param {string} [options.originalMessageText] - 原始消息文本，用于恢复输入框内容
    * @param {boolean} [options.regenerateMode] - 是否为重新生成模式
    * @param {string} [options.messageId] - 重新生成模式下的消息ID（通常是用户消息的ID）
+   * @param {string|null} [options.targetAiMessageId] - 重新生成模式下要“原地替换”的 AI 消息ID（为空则按旧逻辑追加新消息）
    * @param {Object|string} [options.api] - API 选择参数：可为完整配置对象、配置 id/displayName/modelName、'selected'、或 {favoriteIndex}
    * @param {Object} [options.resolvedApiConfig] - 已解析好的 API 配置（优先于 api 参数，完全绕过内部选择策略）
    * @param {boolean} [options.forceSendFullHistory] - 是否强制发送完整历史
@@ -660,6 +661,7 @@ export function createMessageSender(appContext) {
       originalMessageText = null,
       regenerateMode = false,
       messageId = null,
+      targetAiMessageId = null,
       forceSendFullHistory = false,
       api = null,
       resolvedApiConfig = null,
@@ -693,8 +695,18 @@ export function createMessageSender(appContext) {
     // 获取当前提示词设置
     const promptsConfig = promptSettingsManager.getPrompts();
     const currentPromptType = specificPromptType || messageProcessor.getPromptTypeFromContent(messageText, promptsConfig);
+
+    // 重新生成“指定 AI 消息”的场景：如果提供 targetAiMessageId，则尝试进入“原地替换”模式。
+    // 说明：
+    // - messageId 仍然表示“对应的用户消息ID”，用于 composeMessages 裁剪上下文；
+    // - targetAiMessageId 表示“要被替换内容的 AI 消息ID”，用于把生成结果写回到同一条消息上；
+    // - 若校验失败（找不到消息/不是 assistant），会自动回退为旧逻辑：追加一条新的 AI 消息。
+    const normalizedTargetAiMessageId = (typeof targetAiMessageId === 'string' && targetAiMessageId.trim())
+      ? targetAiMessageId.trim()
+      : null;
     // 提前创建 loadingMessage 配合finally使用
     let loadingMessage;
+    let canUpdateExistingAiMessage = false;
     let pageContentResponse = null;
     let pageContentLength = 0;
     let conversationChain = null;
@@ -749,6 +761,7 @@ export function createMessageSender(appContext) {
         const aiEl = chatContainer.querySelector(`[data-message-id="${attemptState.aiMessageId}"]`);
         if (aiEl) {
           aiEl.classList.remove('updating');
+          aiEl.classList.remove('regenerating');
         }
       } else if (attemptState.loadingMessage && attemptState.loadingMessage.parentNode) {
         // 尚未产生正式 AI 消息，仅存在 loading 占位
@@ -802,20 +815,58 @@ export function createMessageSender(appContext) {
       if (!regenerateMode) {
         clearInputs();
       }
-      
-      // 添加加载状态消息
-      loadingMessage = messageProcessor.appendMessage('正在处理...', 'ai', true);
-      attempt.loadingMessage = loadingMessage;
-      loadingMessage.classList.add('loading-message');
-      // 让“等待回复”占位消息也带有 updating 状态，便于右键菜单显示“停止更新”
-      loadingMessage.classList.add('updating');
+
+      // --- 重新生成：原地替换指定 AI 消息（不新增/不删除其他消息）---
+      // 注意：这里只决定“写回目标”，不改变 composeMessages 的裁剪策略；裁剪仍由 messageId（用户消息ID）负责。
+      if (regenerateMode && normalizedTargetAiMessageId) {
+        try {
+          const node = chatHistoryManager?.chatHistory?.messages?.find(m => m.id === normalizedTargetAiMessageId) || null;
+          const el = chatContainer.querySelector(`[data-message-id="${normalizedTargetAiMessageId}"]`);
+          const isAssistantNode = !!(node && node.role === 'assistant');
+          const isAiElement = !!(el && el.classList && el.classList.contains('ai-message'));
+          canUpdateExistingAiMessage = !!(isAssistantNode && isAiElement);
+
+          if (canUpdateExistingAiMessage) {
+            // 绑定 attempt 到目标 AI 消息，便于“停止更新”按消息粒度工作
+            attempt.aiMessageId = normalizedTargetAiMessageId;
+            try {
+              el.classList.add('updating');
+              el.classList.add('regenerating');
+            } catch (_) {}
+
+            // 若目标并非最后一条 AI 消息，关闭自动滚动，避免视角被强行拉到底部
+            try {
+              const aiMessages = chatContainer.querySelectorAll('.message.ai-message');
+              const lastAi = aiMessages.length > 0 ? aiMessages[aiMessages.length - 1] : null;
+              if (lastAi && lastAi !== el) {
+                shouldAutoScroll = false;
+              }
+            } catch (_) {}
+          }
+        } catch (e) {
+          console.warn('校验 targetAiMessageId 失败，将回退为追加消息:', e);
+          canUpdateExistingAiMessage = false;
+        }
+      }
+
+      // 添加加载状态消息（仅在“追加新消息”模式下需要占位）
+      if (!canUpdateExistingAiMessage) {
+        loadingMessage = messageProcessor.appendMessage('正在处理...', 'ai', true);
+        attempt.loadingMessage = loadingMessage;
+        loadingMessage.classList.add('loading-message');
+        // 让“等待回复”占位消息也带有 updating 状态，便于右键菜单显示“停止更新”
+        loadingMessage.classList.add('updating');
+      } else {
+        loadingMessage = null;
+        attempt.loadingMessage = null;
+      }
 
       // 如果不是临时模式，获取网页内容
       if (!isTemporaryMode) {
         if (pageContentSnapshot) {
           pageContentResponse = pageContentSnapshot;
         } else {
-          loadingMessage.textContent = '正在获取网页内容...';
+          updateLoadingStatus(loadingMessage, '正在获取网页内容...', { stage: 'get_page_content' });
           pageContentResponse = await getPageContent();
         }
         if (pageContentResponse) {
@@ -826,7 +877,7 @@ export function createMessageSender(appContext) {
       }
       
       // 更新加载状态：正在构建消息
-      loadingMessage.textContent = '正在构建消息...';
+      updateLoadingStatus(loadingMessage, '正在构建消息...', { stage: 'compose_messages' });
 
       // 构建消息数组（改为纯函数 composer）
       conversationChain = Array.isArray(conversationSnapshot) && conversationSnapshot.length > 0
@@ -996,6 +1047,7 @@ export function createMessageSender(appContext) {
         originalMessageText: messageText,
         regenerateMode: true,
         messageId,
+        targetAiMessageId: normalizedTargetAiMessageId,
         forceSendFullHistory,
         pageContentSnapshot: pageContentResponse || null,
         conversationSnapshot: Array.isArray(conversationChain) ? conversationChain : null,
@@ -1040,6 +1092,19 @@ export function createMessageSender(appContext) {
           ? '请求中断: '
           : '发送失败: ';
       const errorMessageText = `${prefix}${detail}`;
+
+      // “原地替换”重新生成：不要在对话末尾追加错误消息，避免污染历史；
+      // 这里用轻量通知提示错误即可（目标 AI 消息保留当前内容：可能是旧内容，也可能是已生成的部分新内容）。
+      if (canUpdateExistingAiMessage && normalizedTargetAiMessageId) {
+        if (typeof showNotification === 'function') {
+          showNotification({ message: errorMessageText, type: 'error' });
+        }
+        if (autoRetryEnabled && typeof showNotification === 'function') {
+          // 错误：重试达到上限
+          showNotification({ message: '自动重试失败，已达到最大尝试次数', type: 'error' });
+        }
+        return { ok: false, error, apiConfig: (resolvedApiConfig || preferredApiConfig || apiManager.getSelectedConfig()), retryHint, retry };
+      }
 
       let messageElement = null;
       if (loadingMessage && loadingMessage.parentNode) {
@@ -1232,6 +1297,13 @@ export function createMessageSender(appContext) {
     }
 
     let { baseText, parallelCount, aspectRatio } = parseParallelMultiplier(rawText);
+
+    // “原地替换指定 AI 消息”不支持并行生成：
+    // - 并行会导致多路流式更新互相覆盖同一条消息，结果不可控；
+    // - 因此一旦指定 targetAiMessageId，强制退回为单路执行。
+    if (typeof opts.targetAiMessageId === 'string' && opts.targetAiMessageId.trim()) {
+      parallelCount = 1;
+    }
 
     // 兜底：如果当前原始文本中未检测到 [xN]，再尝试从最后一条用户消息中解析一次
     // 这样可以覆盖一些边缘情况，例如重新生成时上下文传入的 originalMessageText 未及时更新等。
@@ -1433,8 +1505,10 @@ export function createMessageSender(appContext) {
     let currentEventDataLines = []; // 当前事件中的所有 data: 行内容
 	    // 记录当前流式响应中最新的 Gemini 思维链签名（Thought Signature）
 	    let latestGeminiThoughtSignature = null;
-	    // 当前流对应的 AI 消息 ID（与 attempt 绑定）
-	    let currentAiMessageId = null;
+	    // 当前流对应的 AI 消息 ID：
+	    // - 普通发送：首个 token 到达时新建消息并赋值；
+	    // - “原地替换”重新生成：sendMessageCore 会预先把 attempt.aiMessageId 设为目标消息ID，这里直接复用。
+	    let currentAiMessageId = attemptState?.aiMessageId || null;
 
 	    // 自适应 UI 更新节流器：将多个 token 的高频更新合并为较低频的 DOM 刷新，缓解长消息渲染导致的卡顿。
 	    // 说明：这里不改 messageProcessor.updateAIMessage 的“全量重渲染”策略，而是通过“掉帧合并”降低调用频率。
@@ -1685,26 +1759,44 @@ export function createMessageSender(appContext) {
 	        hasStartedResponse = true;
 	        try { GetInputContainer().classList.add('auto-scroll-glow-active'); } catch (_) {}
 
-        const newAiMessageDiv = messageProcessor.appendMessage(
-          aiResponse,      // 初始完整回答文本
-          'ai',
-          false,           // skipHistory = false, 创建历史节点
-          null,            // fragment = null
-          null,            // inline 模式下不再单独传入图片HTML
-          aiThoughtsRaw,   // 初始思考过程
-          null             // messageIdToUpdate = null
-        );
+        if (currentAiMessageId) {
+          // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
+          try {
+            messageProcessor.updateAIMessage(
+              currentAiMessageId,
+              aiResponse,
+              aiThoughtsRaw,
+              groundingMetadata
+            );
+            applyApiMetaToMessage(currentAiMessageId, usedApiConfig);
+          } catch (e) {
+            console.warn('原地替换 AI 消息失败，将回退为追加新消息:', e);
+            currentAiMessageId = null;
+          }
+        }
 
-	        if (newAiMessageDiv) {
-	          currentAiMessageId = newAiMessageDiv.getAttribute('data-message-id');
-	          // 将本次 AI 消息与 attempt 绑定，便于按消息粒度中止/清理
-	          if (attemptState) {
-	            attemptState.aiMessageId = currentAiMessageId;
+        if (!currentAiMessageId) {
+          const newAiMessageDiv = messageProcessor.appendMessage(
+            aiResponse,      // 初始完整回答文本
+            'ai',
+            false,           // skipHistory = false, 创建历史节点
+            null,            // fragment = null
+            null,            // inline 模式下不再单独传入图片HTML
+            aiThoughtsRaw,   // 初始思考过程
+            null             // messageIdToUpdate = null
+          );
+
+	          if (newAiMessageDiv) {
+	            currentAiMessageId = newAiMessageDiv.getAttribute('data-message-id');
+	            // 将本次 AI 消息与 attempt 绑定，便于按消息粒度中止/清理
+	            if (attemptState) {
+	              attemptState.aiMessageId = currentAiMessageId;
+	            }
+	            // 记录 API 元信息并渲染 footer
+	            applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
 	          }
-	          // 记录 API 元信息并渲染 footer
-	          applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
-	        }
-	        scrollToBottom();
+	          scrollToBottom();
+        }
 
 	        // 记录“正文已出现”：若首帧只包含思考过程，则保持 false，待正文首次出现时强制刷新一次 UI。
 	        hasEverShownAnswerContent = (typeof aiResponse === 'string') && aiResponse.trim() !== '';
@@ -1784,31 +1876,49 @@ export function createMessageSender(appContext) {
           // 流式开始：更醒目的输入容器提示
           try { GetInputContainer().classList.add('auto-scroll-glow-active'); } catch (_) {}
               
-              // 【创建消息】调用 appendMessage 来创建新的AI消息DOM元素
-              // 这是获取唯一 messageId 的关键步骤
-              const newAiMessageDiv = messageProcessor.appendMessage(
-                  aiResponse,     // 传入初始的文本内容
-                  'ai',           // 指定发送者为 'ai'
-                  false,          // false: 需要在聊天历史中创建节点
-                  null,           // fragment: null, 直接添加到DOM
-                  null,           // imagesHTML: null
-                  aiThoughtsRaw,  // initialThoughtsRaw: 传入初始的思考内容
-                  null            // messageIdToUpdate: null, 因为是创建新消息
-              );
-              
-              // 从新创建的DOM元素中获取并保存 messageId
-              if (newAiMessageDiv) {
-                  currentAiMessageId = newAiMessageDiv.getAttribute('data-message-id');
-                  // 将本次 AI 消息与 attempt 绑定，便于按消息粒度中止/清理
-                  if (attemptState) {
-                    attemptState.aiMessageId = currentAiMessageId;
+              if (currentAiMessageId) {
+                  // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
+                  try {
+                    messageProcessor.updateAIMessage(
+                      currentAiMessageId,
+                      aiResponse,
+                      aiThoughtsRaw,
+                      null
+                    );
+                    applyApiMetaToMessage(currentAiMessageId, usedApiConfig);
+                  } catch (e) {
+                    console.warn('原地替换 AI 消息失败，将回退为追加新消息:', e);
+                    currentAiMessageId = null;
                   }
-                  // 记录 API 元信息并渲染 footer
-                  applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
               }
-              
-	              // 自动滚动到聊天底部
-	              scrollToBottom();
+
+              if (!currentAiMessageId) {
+                // 【创建消息】调用 appendMessage 来创建新的AI消息DOM元素
+                // 这是获取唯一 messageId 的关键步骤
+                const newAiMessageDiv = messageProcessor.appendMessage(
+                    aiResponse,     // 传入初始的文本内容
+                    'ai',           // 指定发送者为 'ai'
+                    false,          // false: 需要在聊天历史中创建节点
+                    null,           // fragment: null, 直接添加到DOM
+                    null,           // imagesHTML: null
+                    aiThoughtsRaw,  // initialThoughtsRaw: 传入初始的思考内容
+                    null            // messageIdToUpdate: null, 因为是创建新消息
+                );
+                
+                // 从新创建的DOM元素中获取并保存 messageId
+                if (newAiMessageDiv) {
+                    currentAiMessageId = newAiMessageDiv.getAttribute('data-message-id');
+                    // 将本次 AI 消息与 attempt 绑定，便于按消息粒度中止/清理
+                    if (attemptState) {
+                      attemptState.aiMessageId = currentAiMessageId;
+                    }
+                    // 记录 API 元信息并渲染 footer
+                    applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
+                }
+                
+	                // 自动滚动到聊天底部
+	                scrollToBottom();
+              }
 
 	              // 记录“正文已出现”：若首帧只包含思考过程，则保持 false，待正文首次出现时强制刷新一次 UI。
 	              hasEverShownAnswerContent = (typeof aiResponse === 'string') && aiResponse.trim() !== '';
@@ -2038,6 +2148,35 @@ export function createMessageSender(appContext) {
     // 移除 loading 并渲染最终消息
     if (loadingMessage && loadingMessage.parentNode) loadingMessage.remove();
     try { GetInputContainer().classList.add('auto-scroll-glow-active'); } catch (_) {}
+
+    // “原地替换”模式：attemptState.aiMessageId 会在 sendMessageCore 阶段预先绑定到目标消息。
+    // 这里优先尝试更新既有 AI 消息；若失败再回退为创建新消息（向后兼容）。
+    const existingMessageId = attemptState?.aiMessageId || null;
+    if (existingMessageId) {
+      try {
+        const existingNode = chatHistoryManager.chatHistory.messages.find(m => m.id === existingMessageId);
+        const existingEl = chatContainer.querySelector(`[data-message-id="${existingMessageId}"]`);
+        if (existingNode && existingNode.role === 'assistant' && existingEl && existingEl.classList.contains('ai-message')) {
+          messageProcessor.updateAIMessage(existingMessageId, answer || '', thoughts || '', null);
+          applyApiMetaToMessage(existingMessageId, usedApiConfig, existingEl);
+          // 在历史节点上记录 Gemini 思维链签名，供后续多轮对话回传使用，并刷新 footer 标记
+          if (isGeminiApi && thoughtSignature) {
+            try {
+              existingNode.thoughtSignature = thoughtSignature;
+              renderApiFooter(existingEl, existingNode);
+            } catch (e) {
+              console.warn('记录 Gemini 思维链签名失败（非流式，原地替换）:', e);
+            }
+          }
+          scrollToBottom();
+          return;
+        }
+      } catch (e) {
+        console.warn('非流式原地替换失败，将回退为创建新消息:', e);
+      }
+    }
+
+    // 回退：创建新消息（旧行为）
     const newAiMessageDiv = messageProcessor.appendMessage(
       answer || '',
       'ai',
@@ -2221,8 +2360,11 @@ export function createMessageSender(appContext) {
           const loadingMessages = chatContainer.querySelectorAll('.loading-message');
           loadingMessages.forEach(el => el.remove());
 
-          const updatingMessages = chatContainer.querySelectorAll('.ai-message.updating');
-          updatingMessages.forEach(el => el.classList.remove('updating'));
+          const updatingMessages = chatContainer.querySelectorAll('.ai-message.updating, .ai-message.regenerating');
+          updatingMessages.forEach(el => {
+            el.classList.remove('updating');
+            el.classList.remove('regenerating');
+          });
 
           GetInputContainer().classList.remove('auto-scroll-glow');
           GetInputContainer().classList.remove('auto-scroll-glow-active');

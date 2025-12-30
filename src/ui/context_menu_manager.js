@@ -56,6 +56,75 @@ export function createContextMenuManager(appContext) {
   let isEditing = false;
 
   /**
+   * 解析“重新生成”的目标：
+   * - 若右键/触发点是 AI 消息：重生成该 AI 消息（目标=自身），其对应的用户消息为「向上最近的一条 user」；
+   * - 若右键/触发点是用户消息：重生成该用户消息之后的第一条 AI 消息（目标=下一条 AI）。
+   *
+   * 设计约束：
+   * - 必须做到“只替换目标 AI 消息的内容”，不删除/不改动其他消息；
+   * - 发送给模型的上下文应裁剪到对应用户消息（messageId=用户消息ID），避免把后续消息带入上下文。
+   *
+   * @param {HTMLElement|null} messageElement
+   * @returns {{
+   *   userMessageElement: HTMLElement,
+   *   userMessageId: string,
+   *   originalMessageText: string,
+   *   targetAiMessageElement: HTMLElement|null,
+   *   targetAiMessageId: string|null
+   * }|null}
+   */
+  function resolveRegenerateTarget(messageElement) {
+    if (!messageElement || !(messageElement instanceof HTMLElement)) return null;
+
+    // loading/error 占位消息不支持作为“目标消息”
+    if (messageElement.classList.contains('loading-message')) return null;
+
+    const isAi = messageElement.classList.contains('ai-message');
+    const isUser = messageElement.classList.contains('user-message');
+    if (!isAi && !isUser) return null;
+
+    const findPrevUser = (start) => {
+      let el = start;
+      while (el && el.previousElementSibling) {
+        el = el.previousElementSibling;
+        if (el.classList && el.classList.contains('user-message')) return el;
+      }
+      return null;
+    };
+
+    const findNextAi = (start) => {
+      let el = start;
+      while (el && el.nextElementSibling) {
+        el = el.nextElementSibling;
+        if (el.classList && el.classList.contains('ai-message')) return el;
+      }
+      return null;
+    };
+
+    const userMessageElement = isAi ? findPrevUser(messageElement) : messageElement;
+    if (!userMessageElement) return null;
+
+    const userMessageId = userMessageElement.getAttribute('data-message-id') || '';
+    const originalMessageText = userMessageElement.getAttribute('data-original-text') || '';
+
+    // 用户消息允许为空（例如纯图片/截图场景），但必须有 messageId 才能裁剪上下文
+    if (!userMessageId) return null;
+
+    const targetAiMessageElement = isAi ? messageElement : findNextAi(messageElement);
+    const targetAiMessageId = targetAiMessageElement
+      ? (targetAiMessageElement.getAttribute('data-message-id') || null)
+      : null;
+
+    return {
+      userMessageElement,
+      userMessageId,
+      originalMessageText,
+      targetAiMessageElement,
+      targetAiMessageId
+    };
+  }
+
+  /**
    * 显示上下文菜单
    * @param {MouseEvent} e - 鼠标事件
    * @param {HTMLElement} messageElement - 消息元素
@@ -107,14 +176,9 @@ export function createContextMenuManager(appContext) {
     contextMenu.style.left = x + 'px';
     contextMenu.style.top = y + 'px';
 
-    // 只在最后一条消息时显示"重新生成"按钮
-    const userMessages = Array.from(chatContainer.querySelectorAll('.user-message'));
-    const aiMessages = Array.from(chatContainer.querySelectorAll('.ai-message'));
-    const isLastMessage = (
-      messageElement === userMessages[userMessages.length - 1] || 
-      messageElement === aiMessages[aiMessages.length - 1]
-    );
-    regenerateButton.style.display = isLastMessage ? 'flex' : 'none';
+    // “重新生成”支持任意消息：根据当前消息解析目标是否可重生成
+    const regenTarget = resolveRegenerateTarget(messageElement);
+    regenerateButton.style.display = regenTarget ? 'flex' : 'none';
     // 始终显示创建分支对话按钮，但只有在有足够消息时才可用
     if (forkConversationButton) {
       const messageCount = chatContainer.querySelectorAll('.message').length;
@@ -168,80 +232,46 @@ export function createContextMenuManager(appContext) {
   /**
    * 重新生成消息
    */
-  async function regenerateMessage() {
-    // 获取所有消息
-    const messages = chatContainer.querySelectorAll('.message');
-    if (messages.length > 0) {
-      // 先找到最后一条用户消息和可能存在的AI回复
-      let lastUserMessage = null;
-      let lastAiMessage = null;
-      
-      // 从后向前遍历找到最后一对消息
-      for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].classList.contains('ai-message') && !lastAiMessage) {
-          lastAiMessage = messages[i];
-        } else if (messages[i].classList.contains('user-message') && !lastUserMessage) {
-          lastUserMessage = messages[i];
-          // 如果用户消息后面没有AI消息，也视为最后一条可操作消息
-          if (!lastAiMessage && i === messages.length -1) {
-            // No AI message after this user message, allow regenerate
-          } else if (lastAiMessage && messages[i+1] !== lastAiMessage) {
-            // User message found, but the AI message after it is not the *last* AI message overall.
-            // This case implies we are not at the absolute end of convo, so reset lastAiMessage to ensure we only delete the one immediately following this user message if any.
-            lastAiMessage = null; 
-          }
-          break; // 找到最后一条用户消息后停止
-        }
-      }
-      
-      // 如果有AI消息，先删除它
-      if (lastAiMessage) {
-        await utils.deleteMessageContent(lastAiMessage);
-      }
-      
-      // 如果找到了用户消息，直接使用它重新生成AI回复
-      if (lastUserMessage) {
-        try {
-          // 获取消息ID和原始文本
-          const messageId = lastUserMessage.getAttribute('data-message-id');
-          const originalMessageText = lastUserMessage.getAttribute('data-original-text');
-          const imageHTML = lastUserMessage.querySelector('.image-previews-container')?.innerHTML || ''; // Get existing images if any
-          
-          if (!messageId || !chatHistory?.messages) {
-            console.error('未找到消息ID或聊天历史');
-            return;
-          }
-          
-          // 从聊天历史中找到对应消息节点
-          const messageNode = chatHistory.messages.find(msg => msg.id === messageId);
-          
-          if (!messageNode) {
-            console.error('在聊天历史中未找到对应消息');
-            return;
-          }
+  async function regenerateMessage(targetMessageElement = null) {
+    // 注意：该函数既会被按钮 click 事件直接调用（参数是 MouseEvent），
+    // 也会被 Ctrl+Enter 场景传入“被编辑的消息元素”。这里统一做一次参数归一化。
+    const elementArg = (targetMessageElement && targetMessageElement.nodeType === 1)
+      ? targetMessageElement
+      : null;
+    const baseElement = elementArg || currentMessageElement;
+    const regenTarget = resolveRegenerateTarget(baseElement);
+    if (!regenTarget) {
+      hideContextMenu();
+      return;
+    }
 
-          // 使用regenerateMode标志告诉message_sender这是重新生成操作
-          // 优先使用该提示词类型的偏好模型（若设置）
-          const prompts = appContext.services.promptSettingsManager.getPrompts();
-          let apiParam = 'follow_current';
-          try {
-            const promptType = appContext.services.messageProcessor.getPromptTypeFromContent(originalMessageText, prompts) || 'none';
-            const modelPref = (prompts[promptType]?.model || '').trim();
-            apiParam = modelPref || 'follow_current';
-          } catch (_) { apiParam = 'follow_current'; }
+    const {
+      userMessageId,
+      originalMessageText,
+      targetAiMessageId
+    } = regenTarget;
 
-          messageSender.sendMessage({
-            originalMessageText,
-            imageHTML, // Pass image HTML if it should be part of regeneration
-            regenerateMode: true,
-            messageId,
-            api: apiParam
-          });
-        } catch (err) {
-          console.error('准备重新生成消息时出错:', err);
-        }
-      }
-      
+    try {
+      // 优先使用该提示词类型的偏好模型（若设置）
+      const prompts = appContext.services.promptSettingsManager.getPrompts();
+      let apiParam = 'follow_current';
+      try {
+        const promptType = appContext.services.messageProcessor.getPromptTypeFromContent(originalMessageText, prompts) || 'none';
+        const modelPref = (prompts[promptType]?.model || '').trim();
+        apiParam = modelPref || 'follow_current';
+      } catch (_) { apiParam = 'follow_current'; }
+
+      // 关键：指定 targetAiMessageId，让发送层“原地替换”目标 AI 消息内容（不删除/不新增其他消息）
+      messageSender.sendMessage({
+        originalMessageText,
+        regenerateMode: true,
+        messageId: userMessageId,
+        targetAiMessageId: targetAiMessageId || null,
+        api: apiParam
+      });
+    } catch (err) {
+      console.error('准备重新生成消息时出错:', err);
+    } finally {
       hideContextMenu();
     }
   }
@@ -575,7 +605,10 @@ export function createContextMenuManager(appContext) {
           const newText = textarea.value;
           await applyInlineEdit(messageElement, messageId, newText);
           cleanup();
-          await regenerateMessage();
+          // Ctrl+Enter：
+          // - 编辑用户消息：重生成其后的第一条 AI 消息；
+          // - 编辑 AI 消息：重生成该条 AI 消息本身。
+          await regenerateMessage(messageElement);
         } else {
           saveBtn.click();
         }
