@@ -393,6 +393,7 @@ body.standalone-mode #empty-state-repomix {
     gap: 8px;
     height: 100%;
     overflow-y: auto;
+    overflow-x: hidden;
     overscroll-behavior: contain;
     padding: 15px 15px 15px 15px;
     /* 滚动条样式统一至全局 */
