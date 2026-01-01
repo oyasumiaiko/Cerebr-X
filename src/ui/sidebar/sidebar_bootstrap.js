@@ -9,6 +9,7 @@ import { createSettingsManager } from '../settings_manager.js';
 import { createContextMenuManager } from '../context_menu_manager.js';
 import { createUIManager } from '../ui_manager.js';
 import { createInputController } from '../input_controller.js';
+import { createConversationPresence } from '../../utils/conversation_presence.js';
 import { applyStandaloneAdjustments } from './sidebar_app_context.js';
 
 /**
@@ -42,6 +43,11 @@ export async function initializeSidebarServices(appContext) {
   appContext.services.apiManager = createApiManager(appContext);
 
   appContext.services.messageProcessor = createMessageProcessor(appContext);
+
+  // 会话-标签页存在性：用于“聊天记录”面板标注“已在其它标签页打开”并提供跳转
+  // 注意：需要在 chatHistoryUI 创建前初始化，便于其内部订阅快照并渲染右侧按钮
+  appContext.services.conversationPresence = createConversationPresence(appContext);
+
   appContext.services.chatHistoryUI = createChatHistoryUI(appContext);
   appContext.services.inputController = createInputController(appContext);
 

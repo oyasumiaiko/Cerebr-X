@@ -2792,6 +2792,14 @@ export function createMessageSender(appContext) {
   function setCurrentConversationId(id) {
     currentConversationId = id;
     // console.log(`消息发送器: 设置当前会话ID为 ${id}`);
+
+    // 同步到“会话-标签页存在性”服务：用于聊天记录面板提示“该会话已在其它标签页打开”
+    // 设计说明：
+    // - setCurrentConversationId 是当前工程里变更会话ID的统一入口（加载历史/新建会话/分支/清空等最终都会调用）；
+    // - 把上报逻辑放在这里，可以确保不会遗漏任何会话切换场景，且对其它模块保持低耦合（可选服务，失败不影响主流程）。
+    try {
+      services.conversationPresence?.setActiveConversationId?.(id);
+    } catch (_) {}
   }
 
   /**

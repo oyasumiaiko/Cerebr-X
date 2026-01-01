@@ -3159,6 +3159,73 @@ body.hide-references .reference-number.superscript {
     border-bottom: 1px solid var(--cerebr-border-color);
     padding: 6px 0;
     cursor: pointer;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.chat-history-item-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.chat-history-item-actions {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    padding-top: 2px;
+}
+
+.open-tab-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 18px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 18px;
+    border: 1px solid var(--cerebr-control-border);
+    background: var(--cerebr-control-bg);
+    color: var(--cerebr-text-color);
+    white-space: nowrap;
+    user-select: none;
+    opacity: 0.92;
+}
+
+.open-tab-status.open-self {
+    border-color: color-mix(in srgb, var(--cerebr-green) 65%, transparent);
+    background: color-mix(in srgb, var(--cerebr-green) 18%, transparent);
+}
+
+.open-tab-status.open-elsewhere {
+    border-color: color-mix(in srgb, var(--cerebr-orange) 65%, transparent);
+    background: color-mix(in srgb, var(--cerebr-orange) 18%, transparent);
+}
+
+.jump-to-open-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid var(--cerebr-control-border);
+    background: var(--cerebr-control-bg);
+    color: var(--cerebr-text-color);
+    cursor: pointer;
+    padding: 0;
+}
+
+.jump-to-open-tab-btn:hover {
+    background-color: var(--cerebr-hover-color);
+}
+
+.jump-to-open-tab-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 @keyframes chatHistoryItemFadeIn {

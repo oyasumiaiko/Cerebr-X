@@ -12,6 +12,200 @@ self.addEventListener('activate', (event) => {
 // 添加启动日志
 console.log('Background script loaded at:', new Date().toISOString());
 
+// ============================================================================
+//  会话-标签页“存在性”注册表（用于避免同一会话被多标签页同时打开）
+//
+//  背景：
+//  - 用户可以在“聊天记录”面板里打开历史会话；
+//  - 若同一会话在多个标签页的侧栏/独立页同时打开，可能产生并发写入，导致保存冲突或覆盖；
+//  - 这里由后台维护一份“当前有哪些 conversationId 正被哪些 tab 打开”的实时映射，
+//    供 UI 显示“已打开”标记并提供“一键跳转到已打开标签页”按钮。
+//
+//  设计说明：
+//  - 使用 chrome.runtime.connect 的 Port 作为“活跃实例”标识；
+//  - Port 断开（标签页关闭/侧栏销毁/页面刷新）会触发 onDisconnect，从而自动清理映射；
+//  - 映射仅保存在 Service Worker 内存中，不做持久化；SW 被回收后由客户端重连重建即可。
+// ============================================================================
+
+const CONVERSATION_PRESENCE_PORT_NAME = 'cerebr-conversation-presence';
+
+/**
+ * @typedef {Object} ConversationPresenceInfo
+ * @property {number|null} tabId
+ * @property {number|null} windowId
+ * @property {number|null} frameId
+ * @property {string|null} conversationId
+ * @property {string} tabTitle
+ * @property {string} tabUrl
+ * @property {boolean} isStandalone
+ * @property {number} lastUpdated
+ */
+
+/** @type {Set<chrome.runtime.Port>} */
+const conversationPresencePorts = new Set();
+/** @type {Map<chrome.runtime.Port, ConversationPresenceInfo>} */
+const conversationPresenceByPort = new Map();
+
+function normalizeConversationId(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function buildOpenConversationSnapshot(conversationIds = null) {
+  const filterSet = (() => {
+    if (!Array.isArray(conversationIds) || conversationIds.length === 0) return null;
+    const set = new Set();
+    for (const raw of conversationIds) {
+      const normalized = normalizeConversationId(raw);
+      if (normalized) set.add(normalized);
+    }
+    return set.size ? set : null;
+  })();
+
+  // convId -> (tabId -> entry) 用于去重（同一 tab 可能出现多个 port/多次更新）
+  const convToTabs = new Map();
+
+  for (const info of conversationPresenceByPort.values()) {
+    const convId = normalizeConversationId(info?.conversationId);
+    if (!convId) continue;
+    if (filterSet && !filterSet.has(convId)) continue;
+
+    const tabId = Number.isFinite(Number(info?.tabId)) ? Number(info.tabId) : null;
+    if (tabId === null) continue;
+
+    if (!convToTabs.has(convId)) convToTabs.set(convId, new Map());
+    const perTab = convToTabs.get(convId);
+
+    const entry = {
+      tabId,
+      windowId: Number.isFinite(Number(info?.windowId)) ? Number(info.windowId) : null,
+      title: typeof info?.tabTitle === 'string' ? info.tabTitle : '',
+      url: typeof info?.tabUrl === 'string' ? info.tabUrl : '',
+      isStandalone: !!info?.isStandalone,
+      lastUpdated: Number.isFinite(Number(info?.lastUpdated)) ? Number(info.lastUpdated) : 0
+    };
+
+    const existing = perTab.get(tabId);
+    if (!existing || entry.lastUpdated >= existing.lastUpdated) {
+      perTab.set(tabId, entry);
+    }
+  }
+
+  const out = {};
+  for (const [convId, perTab] of convToTabs.entries()) {
+    out[convId] = Array.from(perTab.values()).sort((a, b) => (b.lastUpdated || 0) - (a.lastUpdated || 0));
+  }
+  return out;
+}
+
+function broadcastOpenConversationSnapshot() {
+  const snapshot = buildOpenConversationSnapshot(null);
+  for (const port of conversationPresencePorts) {
+    try {
+      port.postMessage({
+        type: 'OPEN_CONVERSATIONS_SNAPSHOT',
+        openConversations: snapshot,
+        timestamp: Date.now()
+      });
+    } catch (_) {}
+  }
+}
+
+function removeConversationPresencePort(port) {
+  try { conversationPresencePorts.delete(port); } catch (_) {}
+  try { conversationPresenceByPort.delete(port); } catch (_) {}
+}
+
+function registerConversationPresencePort(port) {
+  conversationPresencePorts.add(port);
+
+  /** @type {ConversationPresenceInfo} */
+  const info = {
+    tabId: Number.isFinite(Number(port?.sender?.tab?.id)) ? Number(port.sender.tab.id) : null,
+    windowId: Number.isFinite(Number(port?.sender?.tab?.windowId)) ? Number(port.sender.tab.windowId) : null,
+    frameId: Number.isFinite(Number(port?.sender?.frameId)) ? Number(port.sender.frameId) : null,
+    conversationId: null,
+    tabTitle: typeof port?.sender?.tab?.title === 'string' ? port.sender.tab.title : '',
+    tabUrl: typeof port?.sender?.tab?.url === 'string' ? port.sender.tab.url : '',
+    isStandalone: false,
+    lastUpdated: Date.now()
+  };
+
+  conversationPresenceByPort.set(port, info);
+
+  port.onDisconnect.addListener(() => {
+    removeConversationPresencePort(port);
+    broadcastOpenConversationSnapshot();
+  });
+
+  port.onMessage.addListener((message) => {
+    if (!message || typeof message !== 'object') return;
+
+    if (message.type === 'SET_ACTIVE_CONVERSATION') {
+      const nextId = normalizeConversationId(message.conversationId);
+      const current = conversationPresenceByPort.get(port);
+      if (!current) return;
+
+      current.conversationId = nextId;
+      current.lastUpdated = Date.now();
+      if (typeof message.isStandalone === 'boolean') current.isStandalone = message.isStandalone;
+
+      // 扩展页(iframe/standalone)发来的 Port sender.tab 可能为空，这里允许客户端显式上报 tabId/windowId
+      if (Number.isFinite(Number(message.tabId))) current.tabId = Number(message.tabId);
+      if (Number.isFinite(Number(message.windowId))) current.windowId = Number(message.windowId);
+
+      // 允许客户端在 URL_CHANGED 时同步 tab title/url（用于 UI tooltip 更友好）
+      if (typeof message.tabTitle === 'string') current.tabTitle = message.tabTitle;
+      if (typeof message.tabUrl === 'string') current.tabUrl = message.tabUrl;
+
+      conversationPresenceByPort.set(port, current);
+      broadcastOpenConversationSnapshot();
+      return;
+    }
+  });
+
+  // 连接建立后立刻回传一次快照，避免 UI 首次打开面板需要额外等待
+  try {
+    port.postMessage({
+      type: 'PRESENCE_ACK',
+      tabId: info.tabId,
+      windowId: info.windowId,
+      frameId: info.frameId,
+      openConversations: buildOpenConversationSnapshot(null),
+      timestamp: Date.now()
+    });
+  } catch (_) {}
+}
+
+async function focusConversationTab(conversationId, options = {}) {
+  const convId = normalizeConversationId(conversationId);
+  if (!convId) return { status: 'error', message: 'invalid_conversation_id' };
+
+  const excludeTabId = Number.isFinite(Number(options?.excludeTabId)) ? Number(options.excludeTabId) : null;
+  const snapshot = buildOpenConversationSnapshot([convId]);
+  const entries = Array.isArray(snapshot?.[convId]) ? snapshot[convId] : [];
+
+  const target = entries.find((e) => excludeTabId === null || e.tabId !== excludeTabId) || entries[0] || null;
+  if (!target) return { status: 'not_found' };
+
+  try {
+    const tab = await chrome.tabs.get(target.tabId);
+    try { await chrome.windows.update(tab.windowId, { focused: true }); } catch (_) {}
+    await chrome.tabs.update(tab.id, { active: true });
+    return { status: 'ok', tabId: tab.id, windowId: tab.windowId };
+  } catch (error) {
+    // 理论上 Port 断开会清理映射；这里再做一次兜底，防止 tabId 失效导致 UI 长期误判
+    for (const [port, info] of conversationPresenceByPort.entries()) {
+      if (Number(info?.tabId) === Number(target.tabId)) {
+        removeConversationPresencePort(port);
+      }
+    }
+    broadcastOpenConversationSnapshot();
+    return { status: 'error', message: error?.message || 'focus_failed' };
+  }
+}
+
 function checkCustomShortcut(callback) {
   chrome.commands.getAll((commands) => {
       const toggleCommand = commands.find(command => command.name === '_execute_action' || command.name === '_execute_browser_action');
@@ -114,10 +308,15 @@ chrome.action.onClicked.addListener(async (tab) => {
 // 创建一个持久连接
 let port = null;
 chrome.runtime.onConnect.addListener((p) => {
-  // console.log('建立持久连接');
+  // 会话存在性专用连接：用于维护 conversationId -> tabId 映射
+  if (p?.name === CONVERSATION_PRESENCE_PORT_NAME) {
+    registerConversationPresencePort(p);
+    return;
+  }
+
+  // 兼容旧逻辑：保留一个连接引用（主要用于保持 Service Worker 活跃）
   port = p;
   port.onDisconnect.addListener(() => {
-    // console.log('连接断开，尝试重新连接');
     port = null;
   });
 });
@@ -125,6 +324,28 @@ chrome.runtime.onConnect.addListener((p) => {
 // 监听来自 content script 的消息
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // console.log('收到消息:', message, '来自:', sender.tab?.id);
+
+  if (message?.type === 'GET_OPEN_CONVERSATION_TABS') {
+    const ids = Array.isArray(message.conversationIds) ? message.conversationIds : null;
+    const snapshot = buildOpenConversationSnapshot(ids);
+    sendResponse({
+      status: 'ok',
+      openConversations: snapshot,
+      requesterTabId: Number.isFinite(Number(sender?.tab?.id)) ? Number(sender.tab.id) : null,
+      timestamp: Date.now()
+    });
+    return false;
+  }
+
+  if (message?.type === 'FOCUS_CONVERSATION_TAB') {
+    (async () => {
+      const result = await focusConversationTab(message.conversationId, {
+        excludeTabId: message.excludeTabId
+      });
+      sendResponse(result);
+    })();
+    return true;
+  }
 
   if (message.type === 'CONTENT_LOADED') {
     // console.log('内容脚本已加载:', message.url);

@@ -60,6 +60,7 @@ export function createChatHistoryUI(appContext) {
   // 修改: 直接使用 services.chatHistoryManager.getCurrentConversationChain 访问获取会话链函数
   // const getCurrentConversationChain = services.chatHistoryManager.getCurrentConversationChain;
   const showNotification = utils.showNotification;
+  const conversationPresence = services.conversationPresence;
 
   let currentConversationId = null;
   // let currentPageInfo = null; // Replaced by appContext.state.pageInfo or parameter to updatePageInfo
@@ -2214,6 +2215,130 @@ export function createChatHistoryUI(appContext) {
    * @param {boolean} isPinned - 该项是否是置顶项
    * @returns {HTMLElement} 创建的会话项元素
    */
+
+  // ==========================================================================
+  //  聊天记录列表：标注“已在其它标签页打开”并提供跳转按钮
+  // ==========================================================================
+
+  function buildOpenTabsTooltipText(tabs, selfTabId) {
+    const list = Array.isArray(tabs) ? tabs : [];
+    if (list.length === 0) return '';
+
+    const normalizedSelfTabId = Number.isFinite(Number(selfTabId)) ? Number(selfTabId) : null;
+    const lines = [`该会话已在 ${list.length} 个标签页打开`];
+
+    const maxLines = Math.min(6, list.length);
+    for (let i = 0; i < maxLines; i++) {
+      const t = list[i] || {};
+      const tabId = Number.isFinite(Number(t.tabId)) ? Number(t.tabId) : null;
+      const title = typeof t.title === 'string' ? t.title.trim() : '';
+      const url = typeof t.url === 'string' ? t.url.trim() : '';
+      const isSelf = normalizedSelfTabId !== null && tabId !== null && tabId === normalizedSelfTabId;
+      const prefix = isSelf ? '当前' : '其它';
+      const main = title || url || (tabId !== null ? `tab ${tabId}` : 'tab');
+      lines.push(`${prefix}：${main}`);
+      if (title && url && url !== title) lines.push(url);
+    }
+    if (list.length > maxLines) lines.push(`… 还有 ${list.length - maxLines} 个标签页`);
+    return lines.join('\n');
+  }
+
+  function getConversationOpenTabsState(conversationId) {
+    if (!conversationPresence?.getConversationTabs) return { tabs: [], selfTabId: null, otherTabs: [] };
+    const tabs = conversationPresence.getConversationTabs(conversationId) || [];
+    const selfTabId = conversationPresence.getSelfTabId?.() ?? null;
+    const normalizedSelfTabId = Number.isFinite(Number(selfTabId)) ? Number(selfTabId) : null;
+    const otherTabs = (normalizedSelfTabId !== null)
+      ? tabs.filter((t) => Number.isFinite(Number(t?.tabId)) && Number(t.tabId) !== normalizedSelfTabId)
+      : tabs;
+    return { tabs, selfTabId: normalizedSelfTabId, otherTabs };
+  }
+
+  function updateConversationItemOpenTabUi(item, conversationId) {
+    if (!item || !conversationId) return;
+    const actions = item.querySelector('.chat-history-item-actions');
+    if (!actions) return;
+
+    const statusEl = actions.querySelector('.open-tab-status');
+    const jumpBtn = actions.querySelector('.jump-to-open-tab-btn');
+    if (!statusEl || !jumpBtn) return;
+
+    const { tabs, selfTabId, otherTabs } = getConversationOpenTabsState(conversationId);
+    const isOpen = tabs.length > 0;
+    const isOpenElsewhere = otherTabs.length > 0;
+    const tooltip = buildOpenTabsTooltipText(tabs, selfTabId);
+
+    if (!isOpen) {
+      statusEl.style.display = 'none';
+      jumpBtn.style.display = 'none';
+      statusEl.classList.remove('open-self', 'open-elsewhere');
+      return;
+    }
+
+    statusEl.style.display = 'inline-flex';
+    statusEl.classList.toggle('open-elsewhere', isOpenElsewhere);
+    statusEl.classList.toggle('open-self', !isOpenElsewhere);
+    statusEl.title = tooltip;
+    statusEl.textContent = isOpenElsewhere ? `已在 ${tabs.length} 个标签页打开` : '当前标签页已打开';
+
+    // 只有当“其它标签页”确实存在时才显示跳转按钮（避免跳转回当前标签页造成困惑）
+    jumpBtn.style.display = isOpenElsewhere ? 'inline-flex' : 'none';
+    jumpBtn.title = tooltip ? `${tooltip}\n\n点击跳转到已打开的标签页` : '点击跳转到已打开的标签页';
+  }
+
+  function refreshOpenTabUiIfPanelVisible() {
+    try {
+      const panel = document.getElementById('chat-history-panel');
+      if (!panel || !panel.classList.contains('visible')) return;
+      const list = panel.querySelector('#chat-history-list');
+      if (!list) return;
+      list.querySelectorAll('.chat-history-item').forEach((item) => {
+        const id = item.getAttribute('data-id') || '';
+        if (id) updateConversationItemOpenTabUi(item, id);
+      });
+    } catch (_) {}
+  }
+
+  async function guardOpenConversationElsewhere(conversationId) {
+    if (!conversationPresence?.getConversationTabs) return false;
+
+    // 若尚未拿到 tabId，先尝试刷新一次快照（避免“明明其它标签页已打开但仍误判为空”）
+    if (conversationPresence.getSelfTabId?.() == null && conversationPresence.refreshOpenConversations) {
+      try { await conversationPresence.refreshOpenConversations(); } catch (_) {}
+    }
+
+    let { selfTabId, otherTabs } = getConversationOpenTabsState(conversationId);
+    // 兜底：若当前快照尚未到达（tabs 为空），在用户点击打开时再补刷一次
+    if ((!otherTabs || otherTabs.length === 0) && conversationPresence.refreshOpenConversations) {
+      try { await conversationPresence.refreshOpenConversations(); } catch (_) {}
+      ({ selfTabId, otherTabs } = getConversationOpenTabsState(conversationId));
+    }
+    if (!otherTabs || otherTabs.length === 0) return false;
+
+    const ok = await appContext.utils.showConfirm({
+      message: '该会话已在其它标签页打开',
+      description: '为避免多开同一会话导致保存冲突，建议直接跳转到已打开的标签页继续对话。',
+      confirmText: '跳转',
+      cancelText: '仍然在此处打开',
+      type: 'warning'
+    });
+    if (!ok) return false;
+
+    const result = await conversationPresence.focusConversation(conversationId, { excludeTabId: selfTabId });
+    if (result?.status === 'ok') {
+      closeChatHistoryPanel();
+      return true;
+    }
+
+    showNotification?.({ message: '跳转失败', type: 'error', description: result?.message || '' });
+    return false;
+  }
+
+  // 订阅存在性快照更新：仅在聊天记录面板可见时增量更新右侧标记
+  if (conversationPresence?.subscribe) {
+    conversationPresence.subscribe(() => refreshOpenTabUiIfPanelVisible());
+  }
+
   function createConversationItemElement(conv, filterText, isPinned) {
     const item = document.createElement('div');
     item.className = 'chat-history-item';
@@ -2323,8 +2448,45 @@ export function createChatHistoryUI(appContext) {
     }
     item.title = detailsLines.join('\n');
 
-    item.appendChild(summaryDiv);
-    item.appendChild(infoDiv);
+    const mainDiv = document.createElement('div');
+    mainDiv.className = 'chat-history-item-main';
+    mainDiv.appendChild(summaryDiv);
+    mainDiv.appendChild(infoDiv);
+
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'chat-history-item-actions';
+    const openStatusEl = document.createElement('div');
+    openStatusEl.className = 'open-tab-status';
+    openStatusEl.style.display = 'none';
+    const jumpBtn = document.createElement('button');
+    jumpBtn.className = 'jump-to-open-tab-btn';
+    jumpBtn.type = 'button';
+    jumpBtn.style.display = 'none';
+    jumpBtn.setAttribute('aria-label', '跳转到已打开该会话的标签页');
+    jumpBtn.innerHTML = '<i class="fa-solid fa-up-right-from-square"></i>';
+    jumpBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!conversationPresence?.focusConversation) return;
+
+      try {
+        jumpBtn.disabled = true;
+        const selfTabId = conversationPresence.getSelfTabId?.() ?? null;
+        const result = await conversationPresence.focusConversation(conv.id, { excludeTabId: selfTabId });
+        if (result?.status === 'ok') {
+          closeChatHistoryPanel();
+          return;
+        }
+        showNotification?.({ message: '跳转失败', type: 'error', description: result?.message || '' });
+      } finally {
+        jumpBtn.disabled = false;
+      }
+    });
+    actionsDiv.appendChild(openStatusEl);
+    actionsDiv.appendChild(jumpBtn);
+
+    item.appendChild(mainDiv);
+    item.appendChild(actionsDiv);
 
     let snippetRendered = false;
     if (isTextFilterActive && searchMatchInfo && Array.isArray(searchMatchInfo.excerpts) && searchMatchInfo.excerpts.length) {
@@ -2346,7 +2508,7 @@ export function createChatHistoryUI(appContext) {
         if (excerpt.suffixEllipsis) line.appendChild(document.createTextNode('…'));
         snippetDiv.appendChild(line);
       });
-      item.appendChild(snippetDiv);
+      mainDiv.appendChild(snippetDiv);
       snippetRendered = true;
     }
 
@@ -2406,11 +2568,17 @@ export function createChatHistoryUI(appContext) {
           moreMatchesLine.textContent = `…… 共 ${totalMatches} 匹配`;
           snippetDiv.appendChild(moreMatchesLine);
         }
-        item.appendChild(snippetDiv);
+        mainDiv.appendChild(snippetDiv);
       }
     }
 
     item.addEventListener('click', async () => {
+      // 若该会话已在其它标签页打开，先提示用户跳转，避免不小心多开造成保存冲突
+      try {
+        const handled = await guardOpenConversationElsewhere(conv.id);
+        if (handled) return;
+      } catch (_) {}
+
       const conversation = await getConversationFromCacheOrLoad(conv.id);
       if (conversation) {
         await loadConversationIntoChat(conversation);
@@ -2429,6 +2597,9 @@ export function createChatHistoryUI(appContext) {
       e.preventDefault();
       showChatHistoryItemContextMenu(e, conv.id, conv.url);
     });
+
+    // 根据最新快照更新右侧“已打开/跳转”标记
+    updateConversationItemOpenTabUi(item, conv.id);
 
     return item;
   }
@@ -3345,6 +3516,10 @@ export function createChatHistoryUI(appContext) {
     // 使用已有的筛选值加载历史记录
     const currentFilter = filterInput ? filterInput.value : '';
     loadConversationHistories(panel, currentFilter);
+
+    // 刷新一次“会话-标签页存在性”快照，确保右侧“已打开/跳转”标记尽快准确
+    try { conversationPresence?.refreshOpenConversations?.(); } catch (_) {}
+
     panel.style.display = 'flex';
     void panel.offsetWidth;  
     panel.classList.add('visible');
@@ -3373,6 +3548,7 @@ export function createChatHistoryUI(appContext) {
     if (panel && panel.classList.contains('visible')) { // 仅当面板可见时刷新
       const filterInput = panel.querySelector('input[type="text"]');
       loadConversationHistories(panel, filterInput ? filterInput.value : '');
+      try { conversationPresence?.refreshOpenConversations?.(); } catch (_) {}
       const galleryContent = panel.querySelector('.history-tab-content[data-tab="gallery"]');
       const activeTabName = panel.querySelector('.history-tab.active')?.dataset.tab;
       if (galleryContent) {
