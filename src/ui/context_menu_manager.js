@@ -301,6 +301,7 @@ export function createContextMenuManager(appContext) {
    * @param {'ai'|'user'} sender
    */
   async function insertBlankMessageBelow(sender) {
+    let newMessageDiv = null;
     try {
       if (!currentMessageElement) return;
       const afterMessageId = currentMessageElement.getAttribute('data-message-id') || '';
@@ -339,7 +340,7 @@ export function createContextMenuManager(appContext) {
       if (!newNode || !newNode.id) return;
 
       // 2) 构建消息 DOM（跳过历史写入），再移动到目标位置
-      const newMessageDiv = messageProcessor.appendMessage('', sender, true);
+      newMessageDiv = messageProcessor.appendMessage('', sender, true);
       if (!newMessageDiv) return;
       newMessageDiv.setAttribute('data-message-id', newNode.id);
 
@@ -363,6 +364,12 @@ export function createContextMenuManager(appContext) {
         }
       }
 
+      // 体验优化：插入成功后直接进入编辑模式（无需再次点“重新编辑”），方便立刻补写内容。
+      // 注意：若用户当前已经在编辑其他消息，则这里不强行打断，避免出现多个 editor 并存导致状态错乱。
+      hideContextMenu();
+      if (!isEditing) {
+        try { startInlineEdit(newMessageDiv); } catch (e) { console.error('打开新插入消息的编辑器失败:', e); }
+      }
       await chatHistoryUI.saveCurrentConversation(true);
     } catch (e) {
       console.error('插入空白消息失败:', e);
