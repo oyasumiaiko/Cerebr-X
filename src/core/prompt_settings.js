@@ -394,7 +394,13 @@ class PromptSettings {
     bindEvents() {
         // 返回按钮
         this.promptBackButton.addEventListener('click', () => {
-            this.promptSettings.classList.remove('visible');
+            // 说明：提示词设置已并入“聊天记录”面板标签页；返回即关闭聊天记录面板回到聊天界面。
+            const chatHistoryUI = this.appContext.services?.chatHistoryUI;
+            if (chatHistoryUI?.closeChatHistoryPanel) {
+                chatHistoryUI.closeChatHistoryPanel();
+            } else {
+                this.promptSettings.classList.remove('visible');
+            }
         });
 
         // 重置所有按钮
@@ -495,7 +501,14 @@ class PromptSettings {
             this.savedPrompts = newSavedPromptsState;
             this.appContext.dom.promptSettingsPanel.dispatchEvent(new CustomEvent('promptSettingsUpdated', { bubbles: true, composed: true }));
 
-            if (shouldClosePanel) this.promptSettings.classList.remove('visible');
+            if (shouldClosePanel) {
+                const chatHistoryUI = this.appContext.services?.chatHistoryUI;
+                if (chatHistoryUI?.closeChatHistoryPanel) {
+                    chatHistoryUI.closeChatHistoryPanel();
+                } else {
+                    this.promptSettings.classList.remove('visible');
+                }
+            }
 
             const status = document.getElementById('save-status');
             if (status) {

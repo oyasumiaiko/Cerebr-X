@@ -3523,6 +3523,7 @@ body.hide-references .reference-number.superscript {
 /* 聊天历史标签切换样式 */
 .history-tab-bar {
     display: flex;
+    flex-wrap: wrap;
     border-bottom: 1px solid var(--cerebr-border-color);
     margin-bottom: 16px;
 }
@@ -3534,6 +3535,7 @@ body.hide-references .reference-number.superscript {
     border-bottom: 2px solid transparent;
     transition: all 0.2s ease;
     opacity: 0.7;
+    white-space: nowrap;
 }
 
 .history-tab:hover {
@@ -3567,6 +3569,60 @@ body.hide-references .reference-number.superscript {
 }
 
 /* 滚动条样式统一至全局 */
+
+/* 聊天记录面板内嵌：提示词设置 / API 设置（作为标签页内容而非独立遮罩层） */
+#chat-history-panel #prompt-settings,
+#chat-history-panel #api-settings {
+    position: static;
+    top: auto;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    border: none;
+    backdrop-filter: none;
+    user-select: auto;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition: none;
+}
+
+/* 由聊天记录的标签系统统一控制显示 */
+#chat-history-panel #prompt-settings.history-tab-content,
+#chat-history-panel #api-settings.history-tab-content {
+    display: none;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+#chat-history-panel #prompt-settings.history-tab-content.active,
+#chat-history-panel #api-settings.history-tab-content.active {
+    display: flex;
+    flex-direction: column;
+}
+
+/* 标签页内不再需要二级标题栏（返回按钮/标题由上方标签栏承载） */
+#chat-history-panel #prompt-settings .settings-header,
+#chat-history-panel #api-settings .settings-header {
+    display: none;
+}
+
+/* 旧遮罩层淡入动画会把卡片设为 opacity:0，这里需要恢复为可见 */
+#chat-history-panel #api-settings .api-cards > *:not(.template) {
+    opacity: 1;
+}
+
+#chat-history-panel #api-settings .api-cards {
+    margin-bottom: 0;
+}
+
+/* 全屏/独立页面模式下，避免外层规则把内嵌标签页左右 padding 拉到 100vw */
+.fullscreen-mode #chat-history-panel #prompt-settings,
+.fullscreen-mode #chat-history-panel #api-settings {
+    padding-left: 20px;
+    padding-right: 20px;
+}
 
 /* 数据库统计面板样式 */
 .db-stats-panel {

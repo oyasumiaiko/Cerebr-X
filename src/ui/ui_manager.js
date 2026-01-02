@@ -36,7 +36,6 @@ export function createUIManager(appContext) {
   const chatContainer = dom.chatContainer;
   const sendButton = dom.sendButton;
   const inputContainer = dom.inputContainer;
-  const promptSettingsPanel = dom.promptSettingsPanel; // Renamed from promptSettings
   const collapseButton = dom.collapseButton;
   const imageContainer = dom.imageContainer; // Added for updateSendButtonState
   // other DOM elements like sidebar, topBar, imagePreviewModal etc. can be accessed via dom if needed
@@ -46,9 +45,7 @@ export function createUIManager(appContext) {
   const imageHandler = services.imageHandler;
   const messageSender = services.messageSender; // For setShouldAutoScroll
   const apiManager = services.apiManager; // For renderFavoriteApis
-  const settingsManager = services.settingsManager; // For toggleSettingsPanel
-  const promptSettingsManager = services.promptSettingsManager; // For togglePromptSettingsPanel
-  const mainApiSettingsManager = services.apiManager; // For toggling API settings panel
+  const settingsManager = services.settingsManager; // 预留：后续需要时再使用
 
   let settingsMenuTimeout = null; // Timeout for hover-based closing
 
@@ -112,23 +109,17 @@ export function createUIManager(appContext) {
    * 关闭互斥面板函数
    */
   function closeExclusivePanels() {
-    // 仅互斥以下三者：聊天记录、API 设置、提示词设置；设置菜单不参与
-    const isPanelOpen = (el) => !!el && el.classList?.contains('visible');
-
-    const chatPanel = document.getElementById('chat-history-panel');
-    const apiPanel = appContext.dom.apiSettingsPanel;
-    const promptPanel = appContext.dom.promptSettingsPanel;
-
-    if (chatHistoryUI?.closeChatHistoryPanel) chatHistoryUI.closeChatHistoryPanel();
-    if (promptSettingsManager?.closePanel) {
-      promptSettingsManager.closePanel();
-    } else if (isPanelOpen(promptPanel)) {
-      promptPanel.classList.remove('visible');
-    }
-    if (apiManager?.closePanel) {
-      apiManager.closePanel();
-    } else if (isPanelOpen(apiPanel)) {
-      apiPanel.classList.remove('visible');
+    // 说明：
+    // - “提示词设置 / API 设置”已并入聊天记录面板的标签页，不再作为独立遮罩层管理；
+    // - 因此互斥面板只剩下聊天记录面板本身（设置菜单不参与互斥）。
+    if (chatHistoryUI?.closeChatHistoryPanel) {
+      chatHistoryUI.closeChatHistoryPanel();
+    } else {
+      const chatPanel = document.getElementById('chat-history-panel');
+      if (chatPanel && chatPanel.classList.contains('visible')) {
+        chatPanel.classList.remove('visible');
+        chatPanel.style.display = 'none';
+      }
     }
   }
 
@@ -188,13 +179,32 @@ export function createUIManager(appContext) {
         };
 
         
-        appContext.dom.promptSettingsToggle.addEventListener('click', (e) => {
+        appContext.dom.promptSettingsToggle.addEventListener('click', async (e) => {
           e.stopPropagation();
-          const wasVisible = dom.promptSettingsPanel.classList.contains('visible');
-          closeExclusivePanels();
-          if (!wasVisible) {
-            dom.promptSettingsPanel.classList.toggle('visible');
+
+          const chatHistoryUI = services.chatHistoryUI;
+          const targetTab = 'prompt-settings';
+
+          const isPanelOpen = !!chatHistoryUI?.isChatHistoryPanelOpen?.();
+          const activeTab = chatHistoryUI?.getActiveTabName?.();
+
+          // 行为对齐旧交互：
+          // - 若已在“提示词设置”标签页，再点一次则关闭面板；
+          // - 否则打开聊天记录面板并跳转到对应标签页。
+          if (isPanelOpen && activeTab === targetTab) {
+            closeExclusivePanels();
+            toggleSettingsMenu(false);
+            return;
           }
+
+          if (!isPanelOpen) {
+            closeExclusivePanels();
+            await chatHistoryUI?.showChatHistoryPanel?.(targetTab);
+          } else {
+            await chatHistoryUI?.activateTab?.(targetTab);
+          }
+
+          toggleSettingsMenu(false);
         });
 
         const scheduleCloseSettingsMenu = () => {

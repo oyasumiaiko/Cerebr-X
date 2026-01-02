@@ -653,8 +653,12 @@ export function createApiManager(appContext) {
       template.classList.add('selected');
       selectedConfigIndex = index;
       saveAPIConfigs();
-      // 关闭设置菜单
-      apiSettingsPanel.classList.remove('visible');
+      // 关闭面板并回到聊天界面（旧行为：选择后退出设置层）
+      if (appContext.services?.chatHistoryUI?.closeChatHistoryPanel) {
+        appContext.services.chatHistoryUI.closeChatHistoryPanel();
+      } else {
+        apiSettingsPanel.classList.remove('visible');
+      }
        // 更新收藏列表状态
       renderFavoriteApis();
     });
@@ -1641,23 +1645,42 @@ export function createApiManager(appContext) {
     const panel = currentAppContext.dom.apiSettingsPanel;
     const backButtonElement = currentAppContext.dom.apiSettingsBackButton;
 
-    // 显示/隐藏 API 设置
-      toggleButton.addEventListener('click', () => {
-      const wasVisible = panel.classList.contains('visible');
-      (currentAppContext.utils.closeExclusivePanels || currentAppContext.services.uiManager.closeExclusivePanels)();
+    // 显示/隐藏 API 设置（已并入“聊天记录”面板的标签页）
+    toggleButton.addEventListener('click', async (e) => {
+      e?.stopPropagation?.();
 
-      if (!wasVisible) {
-        panel.classList.toggle('visible');
-          loadAPIConfigs().then(() => {
-            renderAPICards(); // 确保加载最新配置后渲染
-            renderFavoriteApis();
-        });
+      const chatHistoryUI = currentAppContext.services?.chatHistoryUI;
+      const uiManager = currentAppContext.services?.uiManager;
+      const targetTab = 'api-settings';
+
+      const isPanelOpen = !!chatHistoryUI?.isChatHistoryPanelOpen?.();
+      const activeTab = chatHistoryUI?.getActiveTabName?.();
+
+      // 行为对齐旧交互：已在该标签页时再次点击则关闭面板，否则跳转到该标签页。
+      if (isPanelOpen && activeTab === targetTab) {
+        uiManager?.closeExclusivePanels?.();
+        uiManager?.toggleSettingsMenu?.(false);
+        return;
       }
+
+      if (!isPanelOpen) {
+        uiManager?.closeExclusivePanels?.();
+        await chatHistoryUI?.showChatHistoryPanel?.(targetTab);
+      } else {
+        await chatHistoryUI?.activateTab?.(targetTab);
+      }
+
+      uiManager?.toggleSettingsMenu?.(false);
     });
 
     // 返回聊天界面
     backButtonElement.addEventListener('click', () => {
-      panel.classList.remove('visible');
+      const chatHistoryUI = currentAppContext.services?.chatHistoryUI;
+      if (chatHistoryUI?.closeChatHistoryPanel) {
+        chatHistoryUI.closeChatHistoryPanel();
+      } else {
+        panel.classList.remove('visible');
+      }
     });
   }
 

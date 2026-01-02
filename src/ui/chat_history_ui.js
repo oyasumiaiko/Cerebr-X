@@ -3157,7 +3157,98 @@ export function createChatHistoryUI(appContext) {
   /**
    * 显示聊天记录面板
    */
-  async function showChatHistoryPanel() {
+  async function activateChatHistoryTab(panel, tabName) {
+    if (!panel) return;
+
+    const tabBar = panel.querySelector('.history-tab-bar');
+    const tabContents = panel.querySelector('.history-tab-contents');
+    if (!tabBar || !tabContents) return;
+
+    const safeTabName = (typeof tabName === 'string' && tabName.trim()) ? tabName.trim() : 'history';
+    const targetTabEl = tabBar.querySelector(`.history-tab[data-tab="${safeTabName}"]`)
+      || tabBar.querySelector('.history-tab[data-tab="history"]')
+      || tabBar.querySelector('.history-tab');
+    if (!targetTabEl) return;
+
+    const resolvedTabName = targetTabEl.dataset.tab || 'history';
+    const targetContent = tabContents.querySelector(`.history-tab-content[data-tab="${resolvedTabName}"]`);
+
+    tabBar.querySelectorAll('.history-tab').forEach(tab => tab.classList.remove('active'));
+    tabContents.querySelectorAll('.history-tab-content').forEach(content => content.classList.remove('active'));
+
+    targetTabEl.classList.add('active');
+    if (targetContent) {
+      targetContent.classList.add('active');
+    }
+
+    if (resolvedTabName === 'history') {
+      const filterInput = panel.querySelector('.filter-container input[type="text"]');
+      requestAnimationFrame(() => filterInput?.focus());
+      return;
+    }
+
+    if (resolvedTabName === 'gallery') {
+      if (targetContent) await renderGalleryTab(targetContent);
+      return;
+    }
+
+    if (resolvedTabName === 'stats') {
+      if (!targetContent) return;
+      const existingStatsPanel = targetContent.querySelector('.db-stats-panel');
+      if (!existingStatsPanel) {
+        const loadingIndicator = document.createElement('div');
+        loadingIndicator.textContent = '正在加载统计数据...';
+        targetContent.appendChild(loadingIndicator);
+
+        getDbStatsWithCache().then(statsData => {
+          loadingIndicator.remove();
+          const statsPanel = renderStatsPanel(statsData);
+          targetContent.appendChild(statsPanel);
+        }).catch(error => {
+          loadingIndicator.remove();
+          console.error('加载统计数据失败:', error);
+          targetContent.textContent = '加载统计数据失败';
+        });
+      } else {
+        getDbStatsWithCache(true).then(updatedStats => {
+          const newStatsPanel = renderStatsPanel(updatedStats);
+          existingStatsPanel.replaceWith(newStatsPanel);
+        }).catch(error => {
+          console.error('更新统计数据失败:', error);
+        });
+      }
+      return;
+    }
+
+    if (resolvedTabName === 'api-settings') {
+      try {
+        // 说明：保持与旧逻辑一致——进入 API 设置时刷新一次配置并重新渲染卡片。
+        await services.apiManager?.loadAPIConfigs?.();
+        services.apiManager?.renderAPICards?.();
+        services.apiManager?.renderFavoriteApis?.();
+      } catch (e) {
+        console.error('切换到 API 设置标签失败:', e);
+      }
+      return;
+    }
+
+    if (resolvedTabName === 'prompt-settings') {
+      try {
+        // 说明：提示词面板内部本身带有 storage 监听；这里刷新一次，确保跨标签页修改后立即可见。
+        await services.promptSettingsManager?.loadPromptSettings?.();
+      } catch (e) {
+        console.error('切换到提示词设置标签失败:', e);
+      }
+      return;
+    }
+  }
+
+  function getActiveChatHistoryTabName() {
+    const panel = document.getElementById('chat-history-panel');
+    return panel?.querySelector('.history-tab.active')?.dataset?.tab || null;
+  }
+
+  async function showChatHistoryPanel(initialTab = 'history') {
     ensurePanelStylesInjected();
     let panel = document.getElementById('chat-history-panel');
     let filterInput; // 在外部声明 filterInput 以便在函数末尾访问
@@ -3219,6 +3310,16 @@ export function createChatHistoryUI(appContext) {
       historyTab.className = 'history-tab active';
       historyTab.textContent = '聊天记录';
       historyTab.dataset.tab = 'history';
+
+      const promptTab = document.createElement('div');
+      promptTab.className = 'history-tab';
+      promptTab.textContent = '提示词设置';
+      promptTab.dataset.tab = 'prompt-settings';
+
+      const apiTab = document.createElement('div');
+      apiTab.className = 'history-tab';
+      apiTab.textContent = 'API 设置';
+      apiTab.dataset.tab = 'api-settings';
       
       const galleryTab = document.createElement('div');
       galleryTab.className = 'history-tab';
@@ -3236,6 +3337,8 @@ export function createChatHistoryUI(appContext) {
       backupTab.dataset.tab = 'backup-settings';
       
       tabBar.appendChild(historyTab);
+      tabBar.appendChild(promptTab);
+      tabBar.appendChild(apiTab);
       tabBar.appendChild(galleryTab);
       tabBar.appendChild(statsTab);
       tabBar.appendChild(backupTab);
@@ -3371,6 +3474,23 @@ export function createChatHistoryUI(appContext) {
       const listContainer = document.createElement('div');
       listContainer.id = 'chat-history-list';
       historyContent.appendChild(listContainer);
+
+      // 提示词设置标签内容（复用 sidebar.html 中的 DOM）
+      const promptSettingsContent = dom.promptSettingsPanel;
+      if (promptSettingsContent) {
+        promptSettingsContent.classList.add('history-tab-content');
+        promptSettingsContent.dataset.tab = 'prompt-settings';
+        // 旧样式通过 .visible 控制显示；嵌入标签页后统一由 .active 控制。
+        promptSettingsContent.classList.remove('visible');
+      }
+
+      // API 设置标签内容（复用 sidebar.html 中的 DOM）
+      const apiSettingsContent = dom.apiSettingsPanel;
+      if (apiSettingsContent) {
+        apiSettingsContent.classList.add('history-tab-content');
+        apiSettingsContent.dataset.tab = 'api-settings';
+        apiSettingsContent.classList.remove('visible');
+      }
       
       // 图片相册标签内容
       const galleryContent = document.createElement('div');
@@ -3390,6 +3510,8 @@ export function createChatHistoryUI(appContext) {
 
       // 添加标签内容到容器
       tabContents.appendChild(historyContent);
+      if (promptSettingsContent) tabContents.appendChild(promptSettingsContent);
+      if (apiSettingsContent) tabContents.appendChild(apiSettingsContent);
       tabContents.appendChild(galleryContent);
       tabContents.appendChild(statsContent);
       tabContents.appendChild(backupSettingsContent);
@@ -3397,51 +3519,8 @@ export function createChatHistoryUI(appContext) {
       
       // 设置标签切换事件（异步以支持 await 刷新）
       tabBar.addEventListener('click', async (e) => {
-        if (e.target.classList.contains('history-tab')) {
-          // 移除所有标签和内容的active类
-          tabBar.querySelectorAll('.history-tab').forEach(tab => tab.classList.remove('active'));
-          tabContents.querySelectorAll('.history-tab-content').forEach(content => content.classList.remove('active'));
-          
-          // 给点击的标签和对应内容添加active类
-          e.target.classList.add('active');
-          const tabName = e.target.dataset.tab;
-          const targetContent = tabContents.querySelector(`.history-tab-content[data-tab="${tabName}"]`);
-          targetContent.classList.add('active');
-          
-          if (tabName === 'history') {
-             // 切换到历史记录时，聚焦到筛选框
-             requestAnimationFrame(() => filterInput?.focus());
-          } else if (tabName === 'gallery') {
-            await renderGalleryTab(targetContent);
-          } else if (tabName === 'stats') {
-            // 仅在切换到 'stats' 标签页时加载/更新统计信息
-            const existingStatsPanel = targetContent.querySelector('.db-stats-panel');
-            if (!existingStatsPanel) {
-              const loadingIndicator = document.createElement('div');
-              loadingIndicator.textContent = '正在加载统计数据...';
-              targetContent.appendChild(loadingIndicator);
-              
-              getDbStatsWithCache().then(statsData => {
-                loadingIndicator.remove();
-                const statsPanel = renderStatsPanel(statsData);
-                targetContent.appendChild(statsPanel);
-              }).catch(error => {
-                loadingIndicator.remove();
-                console.error('加载统计数据失败:', error);
-                targetContent.textContent = '加载统计数据失败';
-              });
-            } else {
-              getDbStatsWithCache(true).then(updatedStats => {
-                const newStatsPanel = renderStatsPanel(updatedStats);
-                existingStatsPanel.replaceWith(newStatsPanel);
-              }).catch(error => {
-                console.error('更新统计数据失败:', error);
-              });
-            }
-          } else if (tabName === 'backup-settings') {
-            // 纯下载方案，无需刷新句柄状态
-          }
-        }
+        if (!e.target.classList.contains('history-tab')) return;
+        await activateChatHistoryTab(panel, e.target.dataset.tab);
       });
       
       document.body.appendChild(panel);
@@ -3478,6 +3557,10 @@ export function createChatHistoryUI(appContext) {
 
     // 刷新一次“会话-标签页存在性”快照，确保右侧“已打开/跳转”标记尽快准确
     try { conversationPresence?.refreshOpenConversations?.(); } catch (_) {}
+
+    // 切换到目标标签（同步更新 active 类；耗时渲染逻辑异步执行）
+    // 说明：这里不 await，避免打开面板被 “图片/统计/API加载” 阻塞。
+    void activateChatHistoryTab(panel, initialTab);
 
     panel.style.display = 'flex';
     void panel.offsetWidth;  
@@ -5630,6 +5713,12 @@ export function createChatHistoryUI(appContext) {
     loadConversationIntoChat,
     clearChatHistory,
     showChatHistoryPanel,
+    activateTab: async (tabName) => {
+      const panel = document.getElementById('chat-history-panel');
+      if (!panel) return;
+      await activateChatHistoryTab(panel, tabName);
+    },
+    getActiveTabName: getActiveChatHistoryTabName,
     closeChatHistoryPanel,
     toggleChatHistoryPanel,
     isChatHistoryPanelOpen,

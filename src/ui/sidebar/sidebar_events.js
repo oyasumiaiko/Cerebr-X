@@ -425,9 +425,7 @@ function setupGlobalEscapeHandler(appContext) {
     }
 
     const chatOpen = appContext.services.chatHistoryUI.isChatHistoryPanelOpen();
-    const apiOpen = appContext.dom.apiSettingsPanel?.classList.contains('visible');
-    const promptOpen = appContext.dom.promptSettingsPanel?.classList.contains('visible');
-    const anyPanelOpen = chatOpen || apiOpen || promptOpen;
+    const anyPanelOpen = chatOpen;
 
     if (anyPanelOpen) {
       appContext.services.uiManager.closeExclusivePanels();
@@ -450,10 +448,12 @@ function setupClickAwayHandler(appContext) {
       {
         panel: document.getElementById('chat-history-panel'),
         toggle: appContext.dom.chatHistoryMenuItem,
-        openers: [appContext.dom.emptyStateHistory]
-      },
-      { panel: appContext.dom.apiSettingsPanel, toggle: appContext.dom.apiSettingsToggle, openers: [] },
-      { panel: appContext.dom.promptSettingsPanel, toggle: appContext.dom.promptSettingsToggle, openers: [] }
+        openers: [
+          appContext.dom.emptyStateHistory,
+          appContext.dom.apiSettingsToggle,
+          appContext.dom.promptSettingsToggle
+        ]
+      }
     ];
 
     let clickInsideManagedElement = false;
