@@ -13,12 +13,9 @@
  */
 import {
   MAX_SYNC_ITEM_BYTES,
-  DEFAULT_CHUNK_SUFFIX,
-  getStringByteLength,
   splitStringToByteChunks,
   setChunksToSync,
-  getChunksFromSync,
-  removeChunksByPrefix
+  getChunksFromSync
 } from '../utils/sync_chunk.js';
 
 export function createApiManager(appContext) {
@@ -52,6 +49,17 @@ export function createApiManager(appContext) {
   const SYNC_CHUNK_KEY_PREFIX = 'apiConfigs_chunk_';
   let lastMetaUpdatedAt = 0;
 
+  // 本地兜底备份（用于应对 sync 配额/写入失败/分片损坏等情况）
+  // 说明：
+  // - sync 是“跨设备同步”的主存储，但存在写入频率/容量限制；当多标签页并发写入或触发配额时容易失败；
+  // - 过去的实现存在“先删旧分片再写新分片”的窗口期：只要写入失败，就会导致配置直接丢失；
+  // - 因此这里额外维护一份 local 备份，保证“最坏情况下也能在本机恢复”。
+  const API_CONFIGS_LOCAL_BACKUP_KEY = 'apiConfigs_backup_v1';
+
+  // 保存失败提示节流：避免拖动滑块等高频操作导致 toast 刷屏
+  let lastSyncSaveWarningAt = 0;
+  const SYNC_SAVE_WARNING_COOLDOWN_MS = 8000;
+
 
   function minifyJsonIfPossible(input) {
     if (!input || typeof input !== 'string') return input || '';
@@ -81,6 +89,47 @@ export function createApiManager(appContext) {
       customParams: minifyJsonIfPossible(c.customParams || ''),
       customSystemPrompt: (c.customSystemPrompt || '').trim()
     }));
+  }
+
+  async function saveConfigsToLocalBackup(configs, selectedIndex, updatedAt) {
+    try {
+      const index = Number.isFinite(selectedIndex) ? selectedIndex : 0;
+      await chrome.storage.local.set({
+        [API_CONFIGS_LOCAL_BACKUP_KEY]: {
+          v: 1,
+          updatedAt: Number(updatedAt) || Date.now(),
+          selectedConfigIndex: index,
+          items: (Array.isArray(configs) ? configs : []).map(c => ({ ...c }))
+        }
+      });
+      return true;
+    } catch (e) {
+      console.warn('写入本地 API 配置备份失败（可忽略）:', e);
+      return false;
+    }
+  }
+
+  async function loadConfigsFromLocalBackup() {
+    try {
+      const wrap = await chrome.storage.local.get([API_CONFIGS_LOCAL_BACKUP_KEY]);
+      const backup = wrap?.[API_CONFIGS_LOCAL_BACKUP_KEY];
+      if (!backup || backup.v !== 1 || !Array.isArray(backup.items) || backup.items.length <= 0) return null;
+      return {
+        apiConfigs: backup.items,
+        selectedConfigIndex: Number(backup.selectedConfigIndex) || 0,
+        updatedAt: Number(backup.updatedAt) || 0
+      };
+    } catch (e) {
+      console.warn('读取本地 API 配置备份失败（可忽略）:', e);
+      return null;
+    }
+  }
+
+  function emitApiConfigsUpdated() {
+    // 暴露 apiConfigs 到 window 对象 (向后兼容)
+    window.apiConfigs = apiConfigs;
+    // 触发配置更新事件：用于同步菜单文本等 UI（跨标签页由 storage.onChanged 驱动后再触发）
+    (apiSettingsPanel || document).dispatchEvent(new Event('apiConfigsUpdated', { bubbles: true, composed: true }));
   }
 
   // ---- API Key 黑名单相关函数 ----
@@ -182,20 +231,34 @@ export function createApiManager(appContext) {
     return raw.split(',').map(k => k.trim()).filter(Boolean);
   }
 
-  async function saveConfigsToSyncChunked(configs) {
+  async function saveConfigsToSyncChunked(configs, options = {}) {
+    // 重要：不要“先删后写”
+    // - chrome.storage.sync 有写入频率限制；高频操作（例如温度滑块拖动）可能触发配额导致 set 失败；
+    // - 若先 remove 再 set，一旦 set 失败就会造成配置被清空（你这次遇到的“只剩一个 gpt-4o”就是典型表现）；
+    // - 因此改为“直接覆盖写入”，即使失败也不会破坏旧数据；多余的旧分片键最多只会占用一些空间，但不会影响读取。
+    const updatedAt = Number(options?.updatedAt) || Date.now();
+    const selectedIndexToSync = Number.isFinite(options?.selectedConfigIndex)
+      ? options.selectedConfigIndex
+      : selectedConfigIndex;
     try {
       const slim = compactConfigsForSync(configs);
       const serialized = JSON.stringify({ v: 1, items: slim });
-      // 清理旧分片
-      await removeChunksByPrefix(SYNC_CHUNK_KEY_PREFIX);
-      // 切分并写入
       const maxBytesPerChunkData = MAX_SYNC_ITEM_BYTES - 1000;
       const chunks = splitStringToByteChunks(serialized, maxBytesPerChunkData);
-      await setChunksToSync(SYNC_CHUNK_KEY_PREFIX, chunks, { [SYNC_CHUNK_META_KEY]: { count: chunks.length, updatedAt: Date.now() } });
-      return true;
+      if (!chunks || chunks.length <= 0) {
+        throw new Error('分片结果为空，拒绝写入 sync（避免写入空配置覆盖旧数据）');
+      }
+
+      // 与分片一起写入 selectedConfigIndex，减少一次 sync 写操作（降低触发配额概率）
+      await setChunksToSync(SYNC_CHUNK_KEY_PREFIX, chunks, {
+        [SYNC_CHUNK_META_KEY]: { count: chunks.length, updatedAt },
+        selectedConfigIndex: selectedIndexToSync
+      });
+
+      return { ok: true, updatedAt };
     } catch (e) {
       console.warn('保存API配置到 sync 失败：', e);
-      return false;
+      return { ok: false, updatedAt };
     }
   }
 
@@ -203,15 +266,24 @@ export function createApiManager(appContext) {
     try {
       const metaWrap = await chrome.storage.sync.get([SYNC_CHUNK_META_KEY]);
       const meta = metaWrap[SYNC_CHUNK_META_KEY];
-      if (!meta || !meta.count || meta.count <= 0) return null;
-      const serialized = await getChunksFromSync(SYNC_CHUNK_KEY_PREFIX, meta.count);
-      if (!serialized) return null;
+      const count = Number(meta?.count || 0);
+      if (!meta || !Number.isFinite(count) || count <= 0) {
+        return { state: 'empty', items: null, meta: null, error: null };
+      }
+
+      const serialized = await getChunksFromSync(SYNC_CHUNK_KEY_PREFIX, count);
+      if (!serialized) {
+        return { state: 'corrupt', items: null, meta, error: new Error('sync serialized 为空') };
+      }
+
       const parsed = JSON.parse(serialized);
-      if (!parsed || parsed.v !== 1 || !Array.isArray(parsed.items)) return null;
-      return parsed.items;
+      if (!parsed || parsed.v !== 1 || !Array.isArray(parsed.items)) {
+        return { state: 'corrupt', items: null, meta, error: new Error('sync payload 格式不合法') };
+      }
+      return { state: 'ok', items: parsed.items, meta, error: null };
     } catch (e) {
       console.warn('从 sync 读取API配置失败：', e);
-      return null;
+      return { state: 'error', items: null, meta: null, error: e };
     }
   }
 
@@ -237,15 +309,32 @@ export function createApiManager(appContext) {
       // 读取顺序统一：sync 分片 → 旧 sync 字段（一次性迁移）
       let result = { apiConfigs: null, selectedConfigIndex: 0 };
       const chunked = await loadConfigsFromSyncChunked();
-      if (chunked && chunked.length > 0) {
-        result.apiConfigs = chunked;
+      if (chunked?.state === 'ok' && Array.isArray(chunked.items) && chunked.items.length > 0) {
+        result.apiConfigs = chunked.items;
         const syncSel = await chrome.storage.sync.get(['selectedConfigIndex']);
         result.selectedConfigIndex = syncSel.selectedConfigIndex || 0;
-        try {
-          const metaWrap = await chrome.storage.sync.get([SYNC_CHUNK_META_KEY]);
-          const meta = metaWrap[SYNC_CHUNK_META_KEY];
-          lastMetaUpdatedAt = Number(meta?.updatedAt || Date.now());
-        } catch (_) {}
+        lastMetaUpdatedAt = Number(chunked?.meta?.updatedAt || Date.now());
+      } else if (chunked?.state === 'corrupt' || chunked?.state === 'error') {
+        // 云端分片存在但无法读取：优先从本地备份恢复（避免覆盖掉用户真实配置）
+        const backup = await loadConfigsFromLocalBackup();
+        if (backup?.apiConfigs && backup.apiConfigs.length > 0) {
+          result.apiConfigs = backup.apiConfigs;
+          result.selectedConfigIndex = backup.selectedConfigIndex || 0;
+        } else {
+          // 再尝试兼容最老的存储形态（可能是旧版本尚未迁移的情况）
+          const syncResult = await chrome.storage.sync.get(['apiConfigs', 'selectedConfigIndex']);
+          if (syncResult.apiConfigs && syncResult.apiConfigs.length > 0) {
+            result.apiConfigs = syncResult.apiConfigs;
+            result.selectedConfigIndex = syncResult.selectedConfigIndex || 0;
+          }
+        }
+
+        // 提示：不自动写回默认配置，避免“错误读取 => 覆盖清空”的连锁反应
+        utils?.showNotification?.({
+          type: 'warning',
+          message: '云端 API 设置读取失败，已尝试从本地备份恢复',
+          description: '建议刷新/关闭其它旧标签页后，再打开 API 设置保存一次以修复云端。'
+        });
       } else {
         // 兼容最老的存储形态（仅一次性迁移）
         const syncResult = await chrome.storage.sync.get(['apiConfigs', 'selectedConfigIndex']);
@@ -254,17 +343,20 @@ export function createApiManager(appContext) {
           result.selectedConfigIndex = syncResult.selectedConfigIndex || 0;
           // 迁移到分片并清理旧键
           try {
-            await saveConfigsToSyncChunked(result.apiConfigs);
-            await chrome.storage.sync.remove(['apiConfigs']);
-          } catch (e) {
-            console.warn('迁移最老 apiConfigs 到分片失败：', e);
-          }
+              const migrated = await saveConfigsToSyncChunked(result.apiConfigs, { selectedConfigIndex: result.selectedConfigIndex || 0 });
+              if (migrated?.ok) {
+                await chrome.storage.sync.remove(['apiConfigs']);
+              }
+            } catch (e) {
+              console.warn('迁移最老 apiConfigs 到分片失败：', e);
+            }
         }
       }
 
       if (result.apiConfigs && result.apiConfigs.length > 0) {
         apiConfigs = result.apiConfigs.map(config => ({ ...config }));
         selectedConfigIndex = result.selectedConfigIndex || 0;
+        selectedConfigIndex = Math.max(0, Math.min(selectedConfigIndex, apiConfigs.length - 1));
 
         let needResave = false;
         // 兼容旧格式：如果 apiKey 是带逗号的字符串，则转换为数组；并确保有 id
@@ -315,8 +407,11 @@ export function createApiManager(appContext) {
         });
         if (needResave) { await saveAPIConfigs(); }
 
+        // 将“可用配置快照”写入本地备份，避免 sync 发生异常时无从恢复
+        try { await saveConfigsToLocalBackup(apiConfigs, selectedConfigIndex, lastMetaUpdatedAt || Date.now()); } catch (_) {}
+
       } else {
-        // 创建默认配置
+        // 创建默认配置（仅在确认为“完全没有存储数据”的情况下才写回 sync）
         apiConfigs = [{
           id: generateUUID(),
           apiKey: '', // 初始为空字符串
@@ -333,7 +428,13 @@ export function createApiManager(appContext) {
           maxChatHistoryAssistant: 500
         }];
         selectedConfigIndex = 0;
-        await saveAPIConfigs();
+        // 如果云端分片损坏导致读取不到数据，这里不应写回默认值（否则会覆盖掉真实数据）
+        // 仅当 sync 分片为空且旧字段也为空时，才写入默认配置作为初始化。
+        if (chunked?.state === 'empty') {
+          await saveAPIConfigs();
+        } else {
+          await saveConfigsToLocalBackup(apiConfigs, selectedConfigIndex, Date.now());
+        }
       }
     } catch (error) {
       console.error('加载 API 配置失败:', error);
@@ -356,10 +457,7 @@ export function createApiManager(appContext) {
       selectedConfigIndex = 0;
     }
 
-    // 暴露 apiConfigs 到 window 对象 (向后兼容)
-    window.apiConfigs = apiConfigs;
-    // 触发配置更新事件
-    (apiSettingsPanel || document).dispatchEvent(new Event('apiConfigsUpdated', { bubbles: true, composed: true }));
+    emitApiConfigsUpdated();
 
     // 确保一定会渲染卡片和收藏列表
     renderAPICards();
@@ -377,14 +475,69 @@ export function createApiManager(appContext) {
         // delete config.nextApiKeyIndex; // 不在 config 对象中保存索引
         return config;
       });
-      // 仅同步到 sync（分片以规避配额），并同步 selectedConfigIndex
-      try { await saveConfigsToSyncChunked(configsToSave); } catch (e) { console.warn('同步 apiConfigs 到 sync 失败（可忽略）:', e); }
-      try { await chrome.storage.sync.set({ selectedConfigIndex }); } catch (e) { console.warn('同步 selectedConfigIndex 到 sync 失败（可忽略）:', e); }
-      // 清理本地遗留的 local 缓存（如有）
+
+      const updatedAt = Date.now();
+
+      // 先写本地兜底备份：即使后续 sync 写入失败，也能在本机恢复
+      await saveConfigsToLocalBackup(configsToSave, selectedConfigIndex, updatedAt);
+
+      // 若检测到 sync 上有更新且当前标签页可能滞后：做一次“保守合并”以避免误覆盖
+      // 合并策略：以 sync 为底，按 id 用本地配置覆盖；这样至少不会把其它标签页新加的配置“抹掉”。
+      const selectedId = apiConfigs?.[selectedConfigIndex]?.id || null;
+      const remote = await loadConfigsFromSyncChunked();
+      if (remote?.state === 'ok') {
+        const remoteUpdatedAt = Number(remote?.meta?.updatedAt || 0);
+        if (remoteUpdatedAt && remoteUpdatedAt > lastMetaUpdatedAt) {
+          const localById = new Map(configsToSave.map(c => [c.id, c]));
+          const merged = [];
+          remote.items.forEach((cfg) => {
+            const local = localById.get(cfg.id);
+            if (local) {
+              merged.push(local);
+              localById.delete(cfg.id);
+            } else {
+              merged.push(cfg);
+            }
+          });
+          localById.forEach((cfg) => merged.push(cfg));
+
+          apiConfigs = merged;
+          configsToSave.length = 0;
+          merged.forEach(c => configsToSave.push(c));
+
+          if (selectedId) {
+            const newIndex = apiConfigs.findIndex(c => c.id === selectedId);
+            selectedConfigIndex = (newIndex >= 0) ? newIndex : Math.min(selectedConfigIndex, apiConfigs.length - 1);
+          } else {
+            selectedConfigIndex = Math.min(selectedConfigIndex, apiConfigs.length - 1);
+          }
+
+          // 合并发生意味着当前 UI 很可能不是最新：重渲染以保持一致
+          renderAPICards();
+          renderFavoriteApis();
+        }
+      }
+
+      // 同步到 sync（分片以规避单项 8KB），并同步 selectedConfigIndex（同一次 set）
+      const syncSave = await saveConfigsToSyncChunked(configsToSave);
+      if (syncSave?.ok) {
+        lastMetaUpdatedAt = Math.max(lastMetaUpdatedAt, Number(syncSave.updatedAt) || 0);
+      } else {
+        const now = Date.now();
+        if ((now - lastSyncSaveWarningAt) > SYNC_SAVE_WARNING_COOLDOWN_MS) {
+          lastSyncSaveWarningAt = now;
+          utils?.showNotification?.({
+            type: 'warning',
+            message: '云端 API 设置同步失败，已写入本地备份',
+            description: '可能是 sync 写入配额/网络波动导致；稍后再保存一次即可。'
+          });
+        }
+      }
+
+      // 清理本地遗留的旧 local 缓存（如有），注意不要删除新的备份键
       try { await chrome.storage.local.remove(['apiConfigs', 'selectedConfigIndex']); } catch (_) {}
-      // 更新 window.apiConfigs 并触发事件 (向后兼容)
-      window.apiConfigs = apiConfigs; // 保持内存中的对象包含索引
-      (apiSettingsPanel || document).dispatchEvent(new Event('apiConfigsUpdated', { bubbles: true, composed: true }));
+
+      emitApiConfigsUpdated();
     } catch (error) {
       console.error('保存 API 配置失败:', error);
     }
@@ -415,11 +568,16 @@ export function createApiManager(appContext) {
         }
         Object.keys(changes).forEach((k) => { if (k.startsWith(SYNC_CHUNK_KEY_PREFIX)) needReload = true; });
         if (needReload) {
-          const items = await loadConfigsFromSyncChunked();
-          if (items && Array.isArray(items)) {
-            apiConfigs = items;
+          const loaded = await loadConfigsFromSyncChunked();
+          if (loaded?.state === 'ok' && loaded.items && Array.isArray(loaded.items)) {
+            apiConfigs = loaded.items;
+            selectedConfigIndex = Math.max(0, Math.min(selectedConfigIndex, apiConfigs.length - 1));
+            // 同步到本地备份，确保“最近一次可用配置”始终存在
+            try { await saveConfigsToLocalBackup(apiConfigs, selectedConfigIndex, Number(loaded?.meta?.updatedAt || Date.now())); } catch (_) {}
+
             renderAPICards();
             renderFavoriteApis();
+            emitApiConfigsUpdated();
           }
         }
       });
@@ -719,8 +877,10 @@ export function createApiManager(appContext) {
       const value = parseFloat(e.target.value);
       temperatureValue.textContent = value.toFixed(1);
       apiConfigs[index].temperature = value;
-      saveAPIConfigs();
     });
+    // 说明：input 事件触发频率很高，直接同步到 sync 容易撞到写入配额；
+    // 因此改为 change 时再落盘（用户松手/确认时触发），既省配额也更稳定。
+    temperatureInput.addEventListener('change', () => saveAPIConfigs());
 
     // 检查是否已收藏
     if (config.isFavorite) {
