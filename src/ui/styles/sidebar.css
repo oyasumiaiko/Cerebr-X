@@ -3168,6 +3168,8 @@ body.hide-references .reference-number.superscript {
 .chat-history-item-main {
     flex: 1 1 auto;
     min-width: 0;
+    /* 右上角会渲染“已打开”绿点（绝对定位，不占布局），这里预留一点右侧空间避免与文字重叠 */
+    padding-right: 18px;
 }
 
 /* 会话“已打开”提示：右上角小绿点（不占布局空间） */
@@ -3357,6 +3359,9 @@ body.hide-references .reference-number.superscript {
 
 .chat-history-item .summary {
     font-weight: bold;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .chat-history-item .info {
