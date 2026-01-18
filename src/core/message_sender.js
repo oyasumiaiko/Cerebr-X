@@ -195,6 +195,7 @@ export function createMessageSender(appContext) {
   const MAX_AUTO_RETRY_ATTEMPTS = 5;
   const AUTO_RETRY_BASE_DELAY_MS = 500;
   const AUTO_RETRY_MAX_DELAY_MS = 8000;
+  const REGENERATE_AUTO_SCROLL_THRESHOLD_PX = 100;
 
   function getAutoRetryDelayMs(attemptIndex = 0) {
     const normalizedAttempt = Math.max(0, attemptIndex);
@@ -541,6 +542,16 @@ export function createMessageSender(appContext) {
     shouldAutoScroll = value;
   }
 
+  // 重新生成时需要判断用户是否接近底部，避免在阅读中途被自动滚动打断。
+  function isChatContainerNearBottom(container, thresholdPx = REGENERATE_AUTO_SCROLL_THRESHOLD_PX) {
+    if (!container) return false;
+    const scrollHeight = container.scrollHeight || 0;
+    const scrollTop = container.scrollTop || 0;
+    const clientHeight = container.clientHeight || 0;
+    const distance = scrollHeight - scrollTop - clientHeight;
+    return distance <= thresholdPx;
+  }
+
   /**
    * 清空消息输入框和图片容器
    * @private
@@ -678,6 +689,16 @@ export function createMessageSender(appContext) {
 
     // 关键：补偿 scrollTop，使锚点消息回到原来的像素位置
     container.scrollTop = (container.scrollTop || 0) + delta;
+  }
+
+  // 重新生成时清理用户手动折叠标记，确保新的思考过程按默认规则自动展开/折叠。
+  function resetThoughtsToggleStateForRegenerate(targetElement) {
+    if (!targetElement) return;
+    const thoughtsContent = targetElement.querySelector('.thoughts-content');
+    if (!thoughtsContent) return;
+    if (thoughtsContent.dataset && thoughtsContent.dataset.userToggled) {
+      delete thoughtsContent.dataset.userToggled;
+    }
   }
 
   /**
@@ -860,6 +881,8 @@ export function createMessageSender(appContext) {
     const normalizedTargetAiMessageId = (typeof targetAiMessageId === 'string' && targetAiMessageId.trim())
       ? targetAiMessageId.trim()
       : null;
+    const shouldPreserveReadingPositionOnRegenerate =
+      regenerateMode && !isChatContainerNearBottom(chatContainer);
     // 提前创建 loadingMessage 配合finally使用
     let loadingMessage;
     let canUpdateExistingAiMessage = false;
@@ -932,6 +955,11 @@ export function createMessageSender(appContext) {
       attempt = beginAttempt();
       const signal = attempt.controller.signal;
 
+      if (regenerateMode) {
+        // 重新生成时尊重当前阅读位置：不在底部就关闭自动滚动，避免视角被拉走。
+        shouldAutoScroll = !shouldPreserveReadingPositionOnRegenerate;
+      }
+
       // 如果已有注入的系统消息，则使用它；否则从消息文本中提取
       const injectedSystemMessages = existingInjectedSystemMessages.length > 0 ? 
                                  existingInjectedSystemMessages : [];
@@ -985,11 +1013,12 @@ export function createMessageSender(appContext) {
           if (canUpdateExistingAiMessage) {
             // 绑定 attempt 到目标 AI 消息，便于“停止更新”按消息粒度工作
             attempt.aiMessageId = normalizedTargetAiMessageId;
-            // 阅读位置锁定：仅对“原地替换”重新生成开启
+            // 阅读位置锁定：仅对“原地替换”重新生成开启。
             // - preserveTargetMessageId 用于在流式/非流式更新时判断是否需要做滚动补偿；
             // - preserveReadingPosition 用于总开关，避免普通发送/普通更新带来额外开销。
             attempt.preserveReadingPosition = true;
             attempt.preserveTargetMessageId = normalizedTargetAiMessageId;
+            resetThoughtsToggleStateForRegenerate(el);
             try {
               el.classList.add('updating');
               el.classList.add('regenerating');
