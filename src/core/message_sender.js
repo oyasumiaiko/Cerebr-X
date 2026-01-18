@@ -542,6 +542,22 @@ export function createMessageSender(appContext) {
     shouldAutoScroll = value;
   }
 
+  // 思考流阶段临时关闭自动滚动，避免视角被频繁拉到底部；更新结束后恢复原状态。
+  function withAutoScrollSuppressed(shouldSuppress, action) {
+    if (typeof action !== 'function') return;
+    if (!shouldSuppress) {
+      action();
+      return;
+    }
+    const wasAutoScrollEnabled = shouldAutoScroll === true;
+    if (wasAutoScrollEnabled) setShouldAutoScroll(false);
+    try {
+      action();
+    } finally {
+      if (wasAutoScrollEnabled) setShouldAutoScroll(true);
+    }
+  }
+
   // 重新生成时需要判断用户是否接近底部，避免在阅读中途被自动滚动打断。
   function isChatContainerNearBottom(container, thresholdPx = REGENERATE_AUTO_SCROLL_THRESHOLD_PX) {
     if (!container) return false;
@@ -1762,12 +1778,14 @@ export function createMessageSender(appContext) {
 	        if (!payload || !payload.messageId) return;
 	        const anchor = captureReadingAnchorForRegenerate(chatContainer, payload.messageId, attemptState);
 	        try {
-	          messageProcessor.updateAIMessage(
-	            payload.messageId,
-	            payload.answer || '',
-	            payload.thoughts || '',
-	            payload.groundingMetadata
-	          );
+	          withAutoScrollSuppressed(!!payload.suppressAutoScroll, () => {
+	            messageProcessor.updateAIMessage(
+	              payload.messageId,
+	              payload.answer || '',
+	              payload.thoughts || '',
+	              payload.groundingMetadata
+	            );
+	          });
 	        } finally {
 	          restoreReadingAnchor(chatContainer, anchor);
 	        }
@@ -2034,6 +2052,7 @@ export function createMessageSender(appContext) {
         aiThoughtsRaw = mergeThoughts(aiThoughtsRaw, thinkExtraction.thoughtText);
       }
 
+	      const nowHasAnswerContent = (typeof aiResponse === 'string') && aiResponse.trim() !== '';
 	      if (!hasStartedResponse) {
 	        // 首次收到内容（文本或图片）：移除“正在处理...”提示
 	        if (loadingMessage && loadingMessage.parentNode) loadingMessage.remove();
@@ -2044,12 +2063,14 @@ export function createMessageSender(appContext) {
 	          // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
 	          const anchor = captureReadingAnchorForRegenerate(chatContainer, currentAiMessageId, attemptState);
 	          try {
-	            messageProcessor.updateAIMessage(
-	              currentAiMessageId,
-	              aiResponse,
-	              aiThoughtsRaw,
-	              groundingMetadata
-	            );
+	            withAutoScrollSuppressed(!nowHasAnswerContent, () => {
+	              messageProcessor.updateAIMessage(
+	                currentAiMessageId,
+	                aiResponse,
+	                aiThoughtsRaw,
+	                groundingMetadata
+	              );
+	            });
 	            if (!hasClearedBoundSignatureForRegenerate) {
 	              hasClearedBoundSignatureForRegenerate = clearBoundSignatureForRegenerate(currentAiMessageId, attemptState);
 	            }
@@ -2082,14 +2103,15 @@ export function createMessageSender(appContext) {
 	            // 记录 API 元信息并渲染 footer
 	            applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
 	          }
-	          scrollToBottom();
+	          if (nowHasAnswerContent) {
+	            scrollToBottom();
+	          }
         }
 
 	        // 记录“正文已出现”：若首帧只包含思考过程，则保持 false，待正文首次出现时强制刷新一次 UI。
-	        hasEverShownAnswerContent = (typeof aiResponse === 'string') && aiResponse.trim() !== '';
+	        hasEverShownAnswerContent = nowHasAnswerContent;
 	      } else if (currentAiMessageId) {
 	        // 后续事件：直接更新完整文本与思考过程（图片已被转为内联HTML）
-	        const nowHasAnswerContent = (typeof aiResponse === 'string') && aiResponse.trim() !== '';
 	        const forceUiUpdate = nowHasAnswerContent && !hasEverShownAnswerContent;
 	        if (forceUiUpdate) {
 	          // 正文首次出现：优先让 UI 立刻落地（同时触发思考框自动折叠），避免“正文已开始但仍只看到思考”的错觉。
@@ -2101,7 +2123,8 @@ export function createMessageSender(appContext) {
 	            messageId: currentAiMessageId,
 	            answer: aiResponse,
 	            thoughts: aiThoughtsRaw,
-	            groundingMetadata
+	            groundingMetadata,
+	            suppressAutoScroll: !hasEverShownAnswerContent && !nowHasAnswerContent
 	          },
 	          { force: forceUiUpdate }
 	        );
@@ -2245,6 +2268,7 @@ export function createMessageSender(appContext) {
           }
 
           // 【关键逻辑】检查这是否是流式响应的第一个数据块
+      const nowHasAnswerContent = (typeof aiResponse === 'string') && aiResponse.trim() !== '';
       if (!hasStartedResponse) {
               // 首次收到可见内容：移除占位 loading 提示（此时 UI 状态已从“等待首 token”切换为正式输出）
               if (loadingMessage && loadingMessage.parentNode) loadingMessage.remove();
@@ -2258,12 +2282,14 @@ export function createMessageSender(appContext) {
 	                  // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
 	                  const anchor = captureReadingAnchorForRegenerate(chatContainer, currentAiMessageId, attemptState);
 	                  try {
-	                    messageProcessor.updateAIMessage(
-	                      currentAiMessageId,
-	                      aiResponse,
-	                      aiThoughtsRaw,
-	                      null
-	                    );
+	                    withAutoScrollSuppressed(!nowHasAnswerContent, () => {
+	                      messageProcessor.updateAIMessage(
+	                        currentAiMessageId,
+	                        aiResponse,
+	                        aiThoughtsRaw,
+	                        null
+	                      );
+	                    });
 	                    if (!hasClearedBoundSignatureForRegenerate) {
 	                      hasClearedBoundSignatureForRegenerate = clearBoundSignatureForRegenerate(currentAiMessageId, attemptState);
 	                    }
@@ -2300,17 +2326,18 @@ export function createMessageSender(appContext) {
                     applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
                 }
                 
-	                // 自动滚动到聊天底部
-	                scrollToBottom();
+	                // 自动滚动到聊天底部（仅在正文开始出现时触发）
+	                if (nowHasAnswerContent) {
+	                  scrollToBottom();
+	                }
               }
 
 	              // 记录“正文已出现”：若首帧只包含思考过程，则保持 false，待正文首次出现时强制刷新一次 UI。
-	              hasEverShownAnswerContent = (typeof aiResponse === 'string') && aiResponse.trim() !== '';
+	              hasEverShownAnswerContent = nowHasAnswerContent;
 
 	          } else if (currentAiMessageId) {
 	              // 【更新消息】如果不是第一个数据块，并且我们已经有了 messageId
 	              // 则调用 updateAIMessage 来更新已存在的消息内容
-	              const nowHasAnswerContent = (typeof aiResponse === 'string') && aiResponse.trim() !== '';
 	              const forceUiUpdate = nowHasAnswerContent && !hasEverShownAnswerContent;
 	              if (forceUiUpdate) {
 	                // 正文首次出现：优先让 UI 立刻落地（同时触发思考框自动折叠）
@@ -2322,7 +2349,8 @@ export function createMessageSender(appContext) {
 	                  messageId: currentAiMessageId,
 	                  answer: aiResponse,
 	                  thoughts: aiThoughtsRaw,
-	                  groundingMetadata: null
+	                  groundingMetadata: null,
+	                  suppressAutoScroll: !hasEverShownAnswerContent && !nowHasAnswerContent
 	                },
 	                { force: forceUiUpdate }
 	              );
