@@ -29,7 +29,11 @@ export function createSelectionThreadManager(appContext) {
     activeSelectionText: '',
     pendingSelection: null,
     bubblePinned: false,
-    bubbleType: 'hidden'
+    bubbleType: 'hidden',
+    bubbleHovered: false,
+    highlightHovered: false,
+    bubbleHideTimer: null,
+    bubbleClickHandler: null
   };
 
   const threadPanelHome = {
@@ -40,11 +44,10 @@ export function createSelectionThreadManager(appContext) {
   let layoutObserver = null;
 
   let bubbleEl = null;
+  let bubbleHeaderEl = null;
+  let bubbleIconEl = null;
   let bubbleTitleEl = null;
   let bubbleContentEl = null;
-  let bubbleActionEl = null;
-  let bubbleSecondaryEl = null;
-  let bubbleCloseEl = null;
 
   function ensureBubble() {
     if (bubbleEl) return;
@@ -52,41 +55,60 @@ export function createSelectionThreadManager(appContext) {
     bubbleEl.className = 'selection-thread-bubble';
     bubbleEl.style.display = 'none';
 
-    const header = document.createElement('div');
-    header.className = 'selection-thread-bubble__header';
+    bubbleHeaderEl = document.createElement('div');
+    bubbleHeaderEl.className = 'selection-thread-bubble__header';
+
+    bubbleIconEl = document.createElement('div');
+    bubbleIconEl.className = 'selection-thread-bubble__icon';
+    bubbleHeaderEl.appendChild(bubbleIconEl);
 
     bubbleTitleEl = document.createElement('div');
     bubbleTitleEl.className = 'selection-thread-bubble__title';
-    header.appendChild(bubbleTitleEl);
-
-    bubbleCloseEl = document.createElement('button');
-    bubbleCloseEl.className = 'selection-thread-bubble__close';
-    bubbleCloseEl.setAttribute('type', 'button');
-    bubbleCloseEl.textContent = '×';
-    bubbleCloseEl.addEventListener('click', () => hideBubble(true));
-    header.appendChild(bubbleCloseEl);
+    bubbleHeaderEl.appendChild(bubbleTitleEl);
 
     bubbleContentEl = document.createElement('div');
     bubbleContentEl.className = 'selection-thread-bubble__content';
 
-    const actions = document.createElement('div');
-    actions.className = 'selection-thread-bubble__actions';
-
-    bubbleActionEl = document.createElement('button');
-    bubbleActionEl.className = 'selection-thread-bubble__primary';
-    bubbleActionEl.setAttribute('type', 'button');
-
-    bubbleSecondaryEl = document.createElement('button');
-    bubbleSecondaryEl.className = 'selection-thread-bubble__secondary';
-    bubbleSecondaryEl.setAttribute('type', 'button');
-
-    actions.appendChild(bubbleSecondaryEl);
-    actions.appendChild(bubbleActionEl);
-
-    bubbleEl.appendChild(header);
+    bubbleEl.appendChild(bubbleHeaderEl);
     bubbleEl.appendChild(bubbleContentEl);
-    bubbleEl.appendChild(actions);
+    bubbleEl.addEventListener('mouseenter', handleBubbleMouseEnter);
+    bubbleEl.addEventListener('mouseleave', handleBubbleMouseLeave);
+    bubbleEl.addEventListener('click', handleBubbleClick);
     document.body.appendChild(bubbleEl);
+  }
+
+  function handleBubbleMouseEnter() {
+    state.bubbleHovered = true;
+    clearBubbleHideTimer();
+  }
+
+  function handleBubbleMouseLeave() {
+    state.bubbleHovered = false;
+    scheduleBubbleHide();
+  }
+
+  function handleBubbleClick(event) {
+    if (typeof state.bubbleClickHandler !== 'function') return;
+    event.preventDefault();
+    event.stopPropagation();
+    state.bubbleClickHandler();
+  }
+
+  function clearBubbleHideTimer() {
+    if (!state.bubbleHideTimer) return;
+    clearTimeout(state.bubbleHideTimer);
+    state.bubbleHideTimer = null;
+  }
+
+  function scheduleBubbleHide(delay = 220) {
+    if (!bubbleEl || bubbleEl.style.display === 'none') return;
+    if (state.bubblePinned) return;
+    clearBubbleHideTimer();
+    // 鼠标从高亮移动到气泡会经过空白区域，留出缓冲时间避免误关闭预览。
+    state.bubbleHideTimer = window.setTimeout(() => {
+      if (state.bubblePinned || state.bubbleHovered || state.highlightHovered) return;
+      hideBubble();
+    }, delay);
   }
 
   function showBubbleAtRect(rect, options = {}) {
@@ -96,37 +118,53 @@ export function createSelectionThreadManager(appContext) {
     const {
       title = '',
       content = '',
-      primaryText = '',
-      secondaryText = '',
-      onPrimary = null,
-      onSecondary = null,
-      onClose = null,
+      iconClass = '',
+      onClick = null,
       pinned = false,
-      type = 'preview'
+      type = 'preview',
+      variant = ''
     } = options;
 
     bubbleTitleEl.textContent = title;
+    bubbleTitleEl.style.display = title ? 'block' : 'none';
     bubbleContentEl.textContent = content;
+    bubbleContentEl.style.display = content ? 'block' : 'none';
 
-    bubbleActionEl.textContent = primaryText;
-    bubbleSecondaryEl.textContent = secondaryText;
+    if (iconClass) {
+      bubbleIconEl.innerHTML = '';
+      const icon = document.createElement('i');
+      icon.className = iconClass;
+      bubbleIconEl.appendChild(icon);
+      bubbleIconEl.style.display = 'flex';
+    } else {
+      bubbleIconEl.innerHTML = '';
+      bubbleIconEl.style.display = 'none';
+    }
 
-    bubbleActionEl.style.display = primaryText ? 'inline-flex' : 'none';
-    bubbleSecondaryEl.style.display = secondaryText ? 'inline-flex' : 'none';
+    bubbleHeaderEl.style.display = (title || iconClass) ? 'flex' : 'none';
 
-    bubbleActionEl.onclick = typeof onPrimary === 'function' ? onPrimary : null;
-    bubbleSecondaryEl.onclick = typeof onSecondary === 'function' ? onSecondary : null;
-
-    bubbleCloseEl.onclick = () => {
-      if (typeof onClose === 'function') onClose();
-      hideBubble(true);
-    };
+    state.bubbleClickHandler = typeof onClick === 'function' ? onClick : null;
+    bubbleEl.classList.toggle('selection-thread-bubble--action', !!state.bubbleClickHandler);
+    if (variant) {
+      bubbleEl.dataset.variant = variant;
+    } else {
+      delete bubbleEl.dataset.variant;
+    }
+    if (state.bubbleClickHandler) {
+      bubbleEl.setAttribute('role', 'button');
+      bubbleEl.setAttribute('tabindex', '0');
+    } else {
+      bubbleEl.removeAttribute('role');
+      bubbleEl.removeAttribute('tabindex');
+    }
 
     bubbleEl.style.display = 'block';
     bubbleEl.dataset.visible = 'true';
     bubbleEl.dataset.type = type;
     state.bubblePinned = !!pinned;
     state.bubbleType = type;
+    state.bubbleHovered = false;
+    clearBubbleHideTimer();
 
     positionBubble(rect);
   }
@@ -140,9 +178,11 @@ export function createSelectionThreadManager(appContext) {
     const bubbleRect = bubbleEl.getBoundingClientRect();
     let left = rect.left + rect.width / 2 - bubbleRect.width / 2;
     let top = rect.top - bubbleRect.height - 10;
+    let placement = 'top';
 
     if (top < padding) {
       top = rect.bottom + 10;
+      placement = 'bottom';
     }
 
     left = Math.max(padding, Math.min(left, viewportW - bubbleRect.width - padding));
@@ -150,15 +190,23 @@ export function createSelectionThreadManager(appContext) {
 
     bubbleEl.style.left = `${Math.round(left)}px`;
     bubbleEl.style.top = `${Math.round(top)}px`;
+    bubbleEl.dataset.placement = placement;
   }
 
   function hideBubble(force = false) {
     if (!bubbleEl) return;
     if (!force && state.bubblePinned) return;
+    clearBubbleHideTimer();
     bubbleEl.style.display = 'none';
     bubbleEl.dataset.visible = 'false';
+    delete bubbleEl.dataset.variant;
+    delete bubbleEl.dataset.placement;
+    bubbleEl.classList.remove('selection-thread-bubble--action');
     state.bubblePinned = false;
     state.bubbleType = 'hidden';
+    state.bubbleHovered = false;
+    state.highlightHovered = false;
+    state.bubbleClickHandler = null;
   }
 
   function isFullscreenLayout() {
@@ -739,6 +787,13 @@ export function createSelectionThreadManager(appContext) {
     });
   }
 
+  function clearSelectionRanges() {
+    try {
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+    } catch (_) {}
+  }
+
   function showSelectionBubble(selectionInfo, messageElement, range) {
     if (!selectionInfo || !messageElement || !range) return;
     const rect = range.getBoundingClientRect();
@@ -755,12 +810,17 @@ export function createSelectionThreadManager(appContext) {
       matchIndex: selectionInfo.matchIndex
     };
 
+    const previewLines = existingThread ? buildThreadPreviewLines(existingThread.id, 2) : [];
+    const previewText = previewLines.length
+      ? previewLines.join('\n')
+      : selectionInfo.selectionText;
+    const showQuoteIcon = !existingThread;
+
     showBubbleAtRect(rect, {
-      title: existingThread ? '划词对话' : '创建划词对话',
-      content: selectionInfo.selectionText,
-      primaryText: existingThread ? '继续对话' : '进入对话',
-      secondaryText: '取消',
-      onPrimary: () => {
+      title: existingThread ? '划词对话' : '',
+      content: previewText,
+      iconClass: showQuoteIcon ? 'fa-solid fa-quote-left' : '',
+      onClick: () => {
         if (existingThread) {
           enterThread(existingThread.id);
         } else {
@@ -773,14 +833,11 @@ export function createSelectionThreadManager(appContext) {
           }
         }
         hideBubble(true);
-        try {
-          const selection = window.getSelection();
-          selection?.removeAllRanges();
-        } catch (_) {}
+        clearSelectionRanges();
       },
-      onSecondary: () => hideBubble(true),
       pinned: true,
-      type: 'selection'
+      type: 'selection',
+      variant: showQuoteIcon ? 'icon' : ''
     });
   }
 
@@ -788,8 +845,6 @@ export function createSelectionThreadManager(appContext) {
     const rect = target.getBoundingClientRect();
     const threadId = target.dataset.threadId || '';
     const selectionText = target.dataset.selectionText || target.textContent || '';
-
-    const threadInfo = findThreadById(threadId);
     const previewLines = buildThreadPreviewLines(threadId, 2);
     const previewText = previewLines.length
       ? previewLines.join('\n')
@@ -798,45 +853,8 @@ export function createSelectionThreadManager(appContext) {
     showBubbleAtRect(rect, {
       title: '划词对话预览',
       content: previewText,
-      primaryText: threadInfo ? '继续对话' : '',
-      secondaryText: '',
-      onPrimary: () => {
-        if (threadInfo) {
-          enterThread(threadId);
-        }
-        hideBubble(true);
-      },
       pinned: false,
       type: 'preview'
-    });
-  }
-
-  function showPinnedBubbleForHighlight(target) {
-    const rect = target.getBoundingClientRect();
-    const threadId = target.dataset.threadId || '';
-    const selectionText = target.dataset.selectionText || target.textContent || '';
-    const previewLines = buildThreadPreviewLines(threadId, 3);
-    const lines = [];
-    if (selectionText) {
-      lines.push(`选中：${selectionText}`);
-    }
-    if (previewLines.length) {
-      lines.push(...previewLines);
-    }
-    const previewText = lines.length ? lines.join('\n') : '';
-
-    showBubbleAtRect(rect, {
-      title: '划词对话',
-      content: previewText,
-      primaryText: '继续对话',
-      secondaryText: '关闭',
-      onPrimary: () => {
-        enterThread(threadId);
-        hideBubble(true);
-      },
-      onSecondary: () => hideBubble(true),
-      pinned: true,
-      type: 'pinned'
     });
   }
 
@@ -913,6 +931,8 @@ export function createSelectionThreadManager(appContext) {
   function handleHighlightMouseOver(event) {
     const target = event.target.closest('.thread-highlight');
     if (!target || state.bubblePinned) return;
+    state.highlightHovered = true;
+    clearBubbleHideTimer();
     showPreviewBubbleForHighlight(target);
   }
 
@@ -920,7 +940,9 @@ export function createSelectionThreadManager(appContext) {
     const target = event.target.closest('.thread-highlight');
     if (!target) return;
     if (state.bubblePinned) return;
-    hideBubble();
+    state.highlightHovered = false;
+    if (bubbleEl && event.relatedTarget && bubbleEl.contains(event.relatedTarget)) return;
+    scheduleBubbleHide();
   }
 
   function handleHighlightClick(event) {
@@ -928,7 +950,10 @@ export function createSelectionThreadManager(appContext) {
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
-    showPinnedBubbleForHighlight(target);
+    const threadId = target.dataset.threadId || '';
+    if (!threadId) return;
+    hideBubble(true);
+    enterThread(threadId);
   }
 
   function handleDocumentClick(event) {

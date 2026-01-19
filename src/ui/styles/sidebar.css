@@ -1849,23 +1849,67 @@ input:checked + .slider::before {
 .selection-thread-bubble {
     position: fixed;
     z-index: 2100;
-    max-width: min(320px, calc(100vw - 40px));
+    max-width: min(360px, calc(100vw - 40px));
     padding: 10px 12px;
-    border-radius: 10px;
-    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
-    background: color-mix(in srgb, var(--cerebr-bg-color) 92%, transparent);
+    border-radius: 12px;
+    --selection-thread-bubble-bg: color-mix(in srgb, var(--cerebr-bg-color) 92%, transparent);
+    --selection-thread-bubble-border: color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+    border: 1px solid var(--selection-thread-bubble-border);
+    background: var(--selection-thread-bubble-bg);
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
     backdrop-filter: blur(10px);
     display: none;
     color: var(--cerebr-text-color);
 }
 
+.selection-thread-bubble::after {
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: var(--selection-thread-bubble-bg);
+    transform: rotate(45deg);
+}
+
+.selection-thread-bubble[data-placement="top"]::after {
+    bottom: -6px;
+    left: calc(50% - 6px);
+    border-right: 1px solid var(--selection-thread-bubble-border);
+    border-bottom: 1px solid var(--selection-thread-bubble-border);
+}
+
+.selection-thread-bubble[data-placement="bottom"]::after {
+    top: -6px;
+    left: calc(50% - 6px);
+    border-left: 1px solid var(--selection-thread-bubble-border);
+    border-top: 1px solid var(--selection-thread-bubble-border);
+}
+
+.selection-thread-bubble--action {
+    cursor: pointer;
+}
+
+.selection-thread-bubble--action:hover {
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.18);
+}
+
 .selection-thread-bubble__header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 8px;
     margin-bottom: 6px;
+}
+
+.selection-thread-bubble__icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--cerebr-input-bg) 75%, transparent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    color: var(--cerebr-text-color);
 }
 
 .selection-thread-bubble__title {
@@ -1873,46 +1917,24 @@ input:checked + .slider::before {
     font-weight: 600;
 }
 
-.selection-thread-bubble__close {
-    border: none;
-    background: transparent;
-    color: var(--cerebr-text-color);
-    cursor: pointer;
-    font-size: 16px;
-    line-height: 1;
-    padding: 0 4px;
-    box-shadow: none;
-}
-
 .selection-thread-bubble__content {
     font-size: 12px;
     line-height: 1.5;
-    margin-bottom: 8px;
     white-space: pre-wrap;
 }
 
-.selection-thread-bubble__actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
+.selection-thread-bubble[data-variant="icon"] {
+    padding: 8px 10px;
 }
 
-.selection-thread-bubble__primary,
-.selection-thread-bubble__secondary {
-    padding: 4px 10px;
-    border-radius: 8px;
-    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
-    background: color-mix(in srgb, var(--cerebr-input-bg) 85%, transparent);
-    color: var(--cerebr-text-color);
-    cursor: pointer;
-    font-size: 12px;
-    min-height: 28px;
+.selection-thread-bubble[data-variant="icon"] .selection-thread-bubble__header {
+    margin-bottom: 0;
+    justify-content: center;
 }
 
-.selection-thread-bubble__primary {
-    background: var(--cerebr-button-bg);
-    color: var(--cerebr-button-color);
-    border-color: transparent;
+.selection-thread-bubble[data-variant="icon"] .selection-thread-bubble__title,
+.selection-thread-bubble[data-variant="icon"] .selection-thread-bubble__content {
+    display: none;
 }
 
 /* 链接样式 */
@@ -5028,17 +5050,29 @@ html.fullscreen-mode::before {
 /* 全屏 + 划词线程：左右双栏布局 */
 .fullscreen-mode body.thread-mode-active #chat-layout {
   flex-direction: row;
+  justify-content: center;
+  gap: 0;
+}
+
+.fullscreen-mode body.thread-mode-active #chat-container,
+.fullscreen-mode body.thread-mode-active #thread-panel {
+  flex: 0 0 var(--cerebr-fullscreen-width);
+  max-width: var(--cerebr-fullscreen-width);
 }
 
 .fullscreen-mode body.thread-mode-active #chat-container,
 .fullscreen-mode body.thread-mode-active #thread-container {
-  padding-left: max(15px, calc((50vw - var(--cerebr-fullscreen-width)) / 2));
-  padding-right: max(15px, calc((50vw - var(--cerebr-fullscreen-width)) / 2));
+  padding-left: 15px;
+  padding-right: 15px;
+}
+
+.fullscreen-mode body.thread-mode-active #chat-container.has-scrollbar {
+  padding-right: calc(15px - var(--scrollbar-width, 0px));
 }
 
 .fullscreen-mode body.thread-mode-active .thread-panel-header {
-  padding-left: max(15px, calc((50vw - var(--cerebr-fullscreen-width)) / 2));
-  padding-right: max(15px, calc((50vw - var(--cerebr-fullscreen-width)) / 2));
+  padding-left: 15px;
+  padding-right: 15px;
 }
 
 .fullscreen-mode body.thread-mode-active #thread-panel {
