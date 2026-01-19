@@ -761,13 +761,98 @@ function setupMessageInputHandlers(appContext) {
         return;
       }
 
-      appContext.services.messageProcessor.appendMessage(
-        text,
-        'user',
-        false,
-        null,
-        imagesHTML
-      );
+      const selectionThreadManager = appContext.services.selectionThreadManager;
+      const isThreadModeActive = selectionThreadManager?.isThreadModeActive?.();
+      let appendedToThread = false;
+
+      if (isThreadModeActive) {
+        // 线程模式下的 Alt+Enter：附加到线程链路，避免误写入主对话。
+        const threadId = selectionThreadManager?.getActiveThreadId?.() || '';
+        const threadInfo = selectionThreadManager?.findThreadById?.(threadId);
+        const threadAnnotation = threadInfo?.annotation || null;
+        const anchorMessageId = threadInfo?.anchorMessageId || '';
+
+        if (!threadId || !threadAnnotation || !anchorMessageId) {
+          appContext.utils?.showNotification?.({ message: '划词线程状态异常，未能添加消息', type: 'warning' });
+          selectionThreadManager?.exitThread?.();
+          return;
+        }
+
+        const chatHistoryManager = appContext.services.chatHistoryManager;
+        const anchorNode = chatHistoryManager?.chatHistory?.messages?.find(m => m.id === anchorMessageId) || null;
+        if (!anchorNode) {
+          appContext.utils?.showNotification?.({ message: '划词线程锚点已丢失，未能添加消息', type: 'warning' });
+          selectionThreadManager?.exitThread?.();
+          return;
+        }
+
+        let rootMessageId = threadAnnotation.rootMessageId || null;
+        if (!rootMessageId) {
+          const selectionText = threadAnnotation.selectionText || '';
+          const content = selectionText ? `> ${selectionText}` : '>';
+          const rootNode = chatHistoryManager.addMessageToTreeWithOptions(
+            'user',
+            content,
+            anchorMessageId,
+            { preserveCurrentNode: true }
+          );
+          if (!rootNode) {
+            appContext.utils?.showNotification?.({ message: '创建划词线程锚点失败', type: 'warning' });
+            return;
+          }
+          rootNode.threadId = threadId;
+          rootNode.threadAnchorId = anchorMessageId;
+          rootNode.threadSelectionText = selectionText;
+          rootNode.threadHiddenSelection = true;
+          rootNode.threadMatchIndex = Number.isFinite(threadAnnotation.matchIndex)
+            ? threadAnnotation.matchIndex
+            : 0;
+          threadAnnotation.rootMessageId = rootNode.id;
+          threadAnnotation.lastMessageId = rootNode.id;
+          rootMessageId = rootNode.id;
+        }
+
+        const historyParentId = threadAnnotation.lastMessageId || rootMessageId || anchorMessageId;
+        const threadHistoryPatch = {
+          threadId,
+          threadAnchorId: anchorMessageId,
+          threadSelectionText: threadAnnotation.selectionText || '',
+          threadRootId: rootMessageId
+        };
+
+        const newMessage = appContext.services.messageProcessor.appendMessage(
+          text,
+          'user',
+          false,
+          null,
+          imagesHTML,
+          null,
+          null,
+          null,
+          {
+            container: appContext.dom.threadContainer,
+            historyParentId,
+            preserveCurrentNode: true,
+            historyPatch: threadHistoryPatch
+          }
+        );
+        const newMessageId = newMessage?.getAttribute?.('data-message-id') || '';
+        if (newMessageId) {
+          threadAnnotation.lastMessageId = newMessageId;
+        }
+        if (appContext.dom.threadContainer) {
+          appContext.dom.threadContainer.scrollTop = appContext.dom.threadContainer.scrollHeight;
+        }
+        appendedToThread = true;
+      } else {
+        appContext.services.messageProcessor.appendMessage(
+          text,
+          'user',
+          false,
+          null,
+          imagesHTML
+        );
+      }
 
       try { appContext.dom.messageInput.innerHTML = ''; } catch (_) {}
       try { appContext.dom.imageContainer.innerHTML = ''; } catch (_) {}
@@ -780,7 +865,7 @@ function setupMessageInputHandlers(appContext) {
         );
       } catch (_) {}
 
-      appContext.utils.showNotification('已添加到历史（未发送）');
+      appContext.utils.showNotification(appendedToThread ? '已添加到线程（未发送）' : '已添加到历史（未发送）');
       return;
     }
 

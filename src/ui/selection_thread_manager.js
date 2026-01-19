@@ -452,6 +452,24 @@ export function createSelectionThreadManager(appContext) {
     });
   }
 
+  function renderThreadSelectionBanner(selectionText) {
+    if (!threadContainer) return;
+    const banner = document.createElement('div');
+    banner.className = 'thread-selection-banner';
+
+    const label = document.createElement('div');
+    label.className = 'thread-selection-banner__label';
+    label.textContent = '划词内容';
+
+    const text = document.createElement('div');
+    text.className = 'thread-selection-banner__text';
+    text.textContent = (selectionText || '').trim();
+
+    banner.appendChild(label);
+    banner.appendChild(text);
+    threadContainer.appendChild(banner);
+  }
+
   async function renderThreadMessages(threadId) {
     // 将线程链路渲染到线程面板，仅用于展示，不写回历史
     if (!threadContainer || !messageProcessor) return;
@@ -462,6 +480,7 @@ export function createSelectionThreadManager(appContext) {
 
     const chain = collectThreadChain(info.annotation)
       .filter(node => !node?.threadHiddenSelection);
+    renderThreadSelectionBanner(info.annotation?.selectionText || '');
     if (!chain.length) return;
 
     const fragment = document.createDocumentFragment();
@@ -562,6 +581,14 @@ export function createSelectionThreadManager(appContext) {
       node.threadAnnotations = [];
     }
     return node.threadAnnotations;
+  }
+
+  function removeThreadAnnotationFromAnchor(anchorNode, threadId) {
+    if (!anchorNode || !threadId) return false;
+    if (!Array.isArray(anchorNode.threadAnnotations)) return false;
+    const beforeCount = anchorNode.threadAnnotations.length;
+    anchorNode.threadAnnotations = anchorNode.threadAnnotations.filter(item => item?.id !== threadId);
+    return anchorNode.threadAnnotations.length !== beforeCount;
   }
 
   function buildThreadId() {
@@ -913,8 +940,8 @@ export function createSelectionThreadManager(appContext) {
       chatHistoryManager?.deleteMessage?.(node.id);
     });
 
-    if (anchorNode && Array.isArray(anchorNode.threadAnnotations)) {
-      anchorNode.threadAnnotations = anchorNode.threadAnnotations.filter(item => item?.id !== threadId);
+    if (anchorNode) {
+      removeThreadAnnotationFromAnchor(anchorNode, threadId);
     }
 
     const anchorElement = anchorNode ? getMessageElementFromNode(anchorNode) : null;
@@ -923,7 +950,7 @@ export function createSelectionThreadManager(appContext) {
     }
 
     if (state.activeThreadId === threadId) {
-      exitThread();
+      exitThread({ skipDraftCleanup: true });
     }
 
     if (chatHistoryUI?.saveCurrentConversation) {
@@ -939,7 +966,37 @@ export function createSelectionThreadManager(appContext) {
     await deleteThreadById(threadId);
   }
 
-  function exitThread() {
+  function cleanupDraftThreadIfNeeded(threadId) {
+    const info = findThreadById(threadId);
+    if (!info || !info.annotation) return false;
+    if (info.annotation?.rootMessageId) return false;
+
+    const anchorNode = chatHistoryManager?.chatHistory?.messages?.find(m => m.id === info.anchorMessageId) || null;
+    if (!anchorNode) return false;
+    const removed = removeThreadAnnotationFromAnchor(anchorNode, threadId);
+    if (!removed) return false;
+
+    const anchorElement = getMessageElementFromNode(anchorNode);
+    if (anchorElement) {
+      decorateMessageElement(anchorElement, anchorNode);
+    }
+
+    if (chatHistoryUI?.saveCurrentConversation) {
+      // 无实际对话内容的临时线程，退出时自动清理并保存，避免堆积空线程。
+      const savePromise = chatHistoryUI.saveCurrentConversation(true);
+      if (savePromise?.catch) {
+        savePromise.catch(() => {});
+      }
+    }
+    return true;
+  }
+
+  function exitThread(options = {}) {
+    const { skipDraftCleanup = false } = options || {};
+    const currentThreadId = state.activeThreadId;
+    if (!skipDraftCleanup && currentThreadId) {
+      cleanupDraftThreadIfNeeded(currentThreadId);
+    }
     state.activeThreadId = null;
     state.activeAnchorMessageId = null;
     state.activeSelectionText = '';
