@@ -107,14 +107,63 @@ function setupStatusDot(appContext) {
 }
 
 function setupApiMenuWatcher(appContext) {
+  const apiManager = appContext.services.apiManager;
+
   const updateApiMenuText = () => {
-    const currentConfig = appContext.services.apiManager.getSelectedConfig();
+    const currentConfig = apiManager.getSelectedConfig();
     if (currentConfig) {
       appContext.dom.apiSettingsText.textContent = currentConfig.displayName || currentConfig.modelName || 'API 设置';
     }
   };
-  updateApiMenuText();
-  window.addEventListener('apiConfigsUpdated', updateApiMenuText);
+
+  const updateInputApiSwitcher = () => {
+    const switcher = appContext.dom.inputApiSwitcher;
+    const currentEl = appContext.dom.inputApiCurrent;
+    const listEl = appContext.dom.inputApiList;
+    if (!switcher || !currentEl || !listEl) return;
+
+    const configs = apiManager.getAllConfigs?.() || [];
+    const currentConfig = apiManager.getSelectedConfig?.() || null;
+    const currentName = currentConfig?.displayName || currentConfig?.modelName || currentConfig?.baseUrl || 'API';
+    currentEl.textContent = currentName;
+    currentEl.title = currentName;
+
+    listEl.innerHTML = '';
+    const favorites = configs
+      .map((config, index) => ({ config, index }))
+      .filter(item => item.config && item.config.isFavorite);
+
+    if (favorites.length === 0) {
+      switcher.classList.add('no-favorites');
+      return;
+    }
+
+    switcher.classList.remove('no-favorites');
+    favorites.forEach((item) => {
+      const entry = document.createElement('div');
+      entry.className = 'input-api-option';
+      entry.textContent = item.config.displayName || item.config.modelName || item.config.baseUrl || '未命名 API';
+      entry.title = entry.textContent;
+      if (currentConfig?.id && item.config.id && currentConfig.id === item.config.id) {
+        entry.classList.add('current');
+      }
+      entry.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const currentIndex = apiManager.getSelectedIndex?.();
+        if (typeof currentIndex === 'number' && currentIndex === item.index) return;
+        apiManager.setSelectedIndex(item.index);
+      });
+      listEl.appendChild(entry);
+    });
+  };
+
+  const updateAll = () => {
+    updateApiMenuText();
+    updateInputApiSwitcher();
+  };
+
+  updateAll();
+  window.addEventListener('apiConfigsUpdated', updateAll);
 }
 
 /**

@@ -87,7 +87,9 @@ export function createApiManager(appContext) {
       maxChatHistoryUser: c.maxChatHistoryUser ?? null,
       maxChatHistoryAssistant: c.maxChatHistoryAssistant ?? null,
       customParams: minifyJsonIfPossible(c.customParams || ''),
-      customSystemPrompt: (c.customSystemPrompt || '').trim()
+      customSystemPrompt: (c.customSystemPrompt || '').trim(),
+      userMessagePreprocessorTemplate: (typeof c.userMessagePreprocessorTemplate === 'string') ? c.userMessagePreprocessorTemplate : '',
+      userMessagePreprocessorIncludeInHistory: !!c.userMessagePreprocessorIncludeInHistory
     }));
   }
 
@@ -371,6 +373,14 @@ export function createApiManager(appContext) {
             config.useStreaming = true;
             needResave = true;
           }
+          if (typeof config.userMessagePreprocessorTemplate !== 'string') {
+            config.userMessagePreprocessorTemplate = '';
+            needResave = true;
+          }
+          if (typeof config.userMessagePreprocessorIncludeInHistory !== 'boolean') {
+            config.userMessagePreprocessorIncludeInHistory = false;
+            needResave = true;
+          }
           // 兼容旧版本：将单一 maxChatHistory 迁移为按角色拆分的双上限
           // 设计目标：尽量保持“总条数”接近旧行为（默认按 50%/50% 拆分）
           const hasUserLimit = Number.isFinite(config.maxChatHistoryUser);
@@ -423,6 +433,8 @@ export function createApiManager(appContext) {
           isFavorite: false, // 添加收藏状态字段
           customParams: '',
           customSystemPrompt: '',
+          userMessagePreprocessorTemplate: '',
+          userMessagePreprocessorIncludeInHistory: false,
           maxChatHistory: 500,
           maxChatHistoryUser: 500,
           maxChatHistoryAssistant: 500
@@ -450,6 +462,8 @@ export function createApiManager(appContext) {
         isFavorite: false,
         customParams: '',
         customSystemPrompt: '',
+        userMessagePreprocessorTemplate: '',
+        userMessagePreprocessorIncludeInHistory: false,
         maxChatHistory: 500,
         maxChatHistoryUser: 500,
         maxChatHistoryAssistant: 500
@@ -632,6 +646,8 @@ export function createApiManager(appContext) {
    * @param {number} [config.temperature] - temperature 值（可为 0）
    * @param {boolean} [config.isFavorite] - 是否收藏
    * @param {string} [config.customParams] - 自定义参数
+   * @param {string} [config.userMessagePreprocessorTemplate] - 用户消息预处理模板
+   * @param {boolean} [config.userMessagePreprocessorIncludeInHistory] - 预处理结果是否写入历史
    * @param {number} index - 该配置在 apiConfigs 数组中的索引
    * @param {HTMLElement} templateCard - 用于克隆的卡片模板 DOM
    * @returns {HTMLElement} 渲染后的卡片元素
@@ -662,6 +678,8 @@ export function createApiManager(appContext) {
     const selectBtn = template.querySelector('.select-btn');
     const customParamsInput = template.querySelector('.custom-params');
     const customSystemPromptInput = template.querySelector('.custom-system-prompt');
+    const userMessageTemplateInput = template.querySelector('.user-message-template');
+    const userMessageTemplateIncludeHistoryToggle = template.querySelector('.user-message-template-include-history');
 
     // 在 temperature 设置后添加“聊天历史裁剪”设置：分别控制 user / AI(assistant) 的历史消息条数
     // 背景：超长对话时，AI 回复往往更长；允许只保留最近 N 条 AI，同时保留更多用户指令上下文。
@@ -871,6 +889,12 @@ export function createApiManager(appContext) {
     if (customSystemPromptInput) {
       customSystemPromptInput.value = config.customSystemPrompt || '';
     }
+    if (userMessageTemplateInput) {
+      userMessageTemplateInput.value = config.userMessagePreprocessorTemplate || '';
+    }
+    if (userMessageTemplateIncludeHistoryToggle) {
+      userMessageTemplateIncludeHistoryToggle.checked = !!config.userMessagePreprocessorIncludeInHistory;
+    }
 
     // 监听温度变化
     temperatureInput.addEventListener('input', (e) => {
@@ -995,6 +1019,27 @@ export function createApiManager(appContext) {
       });
       customSystemPromptInput.addEventListener('change', () => {
         apiConfigs[index].customSystemPrompt = customSystemPromptInput.value || '';
+        saveAPIConfigs();
+      });
+    }
+
+    if (userMessageTemplateInput) {
+      userMessageTemplateInput.addEventListener('input', () => {
+        apiConfigs[index].userMessagePreprocessorTemplate = userMessageTemplateInput.value;
+      });
+      userMessageTemplateInput.addEventListener('blur', () => {
+        apiConfigs[index].userMessagePreprocessorTemplate = userMessageTemplateInput.value || '';
+        saveAPIConfigs();
+      });
+      userMessageTemplateInput.addEventListener('change', () => {
+        apiConfigs[index].userMessagePreprocessorTemplate = userMessageTemplateInput.value || '';
+        saveAPIConfigs();
+      });
+    }
+
+    if (userMessageTemplateIncludeHistoryToggle) {
+      userMessageTemplateIncludeHistoryToggle.addEventListener('change', () => {
+        apiConfigs[index].userMessagePreprocessorIncludeInHistory = !!userMessageTemplateIncludeHistoryToggle.checked;
         saveAPIConfigs();
       });
     }
@@ -1902,6 +1947,8 @@ export function createApiManager(appContext) {
    * @param {string} partialConfig.modelName - 模型名称
    * @param {number} [partialConfig.temperature] - 温度值
    * @param {string} [partialConfig.customParams] - 自定义参数字符串
+   * @param {string} [partialConfig.userMessagePreprocessorTemplate] - 用户消息预处理模板
+   * @param {boolean} [partialConfig.userMessagePreprocessorIncludeInHistory] - 预处理结果是否写入历史
    * @returns {Object|null} 完整的 API 配置对象或 null
    */
   function getApiConfigFromPartial(partialConfig) {
@@ -1943,6 +1990,8 @@ export function createApiManager(appContext) {
       temperature: partialConfig.temperature ?? 1.0,
       customParams: partialConfig.customParams || '',
       customSystemPrompt: partialConfig.customSystemPrompt || '',
+      userMessagePreprocessorTemplate: (typeof partialConfig.userMessagePreprocessorTemplate === 'string') ? partialConfig.userMessagePreprocessorTemplate : '',
+      userMessagePreprocessorIncludeInHistory: !!partialConfig.userMessagePreprocessorIncludeInHistory,
       maxChatHistory: 500, // 旧字段：保留默认值
       maxChatHistoryUser: 500,
       maxChatHistoryAssistant: 500,
@@ -2059,6 +2108,8 @@ export function createApiManager(appContext) {
             isFavorite: false,
             customParams: '',
             customSystemPrompt: '',
+            userMessagePreprocessorTemplate: '',
+            userMessagePreprocessorIncludeInHistory: false,
             maxChatHistory: 500, // 旧字段：保留默认值
             maxChatHistoryUser: 500,
             maxChatHistoryAssistant: 500,

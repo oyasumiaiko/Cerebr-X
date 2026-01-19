@@ -630,6 +630,111 @@ body.thread-mode-active #thread-panel {
     transform: scale(1.06);
 }
 
+/* 输入区 API 快捷切换 */
+#input-api-switcher {
+    position: absolute;
+    bottom: 100%;
+    right: 44px;
+    display: flex;
+    align-items: flex-end;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    z-index: 1001;
+}
+
+#input-container.has-input #input-api-switcher {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+#input-api-switcher .input-api-current {
+    max-width: 240px;
+    padding: 6px 12px;
+    font-size: calc(var(--cerebr-font-size, 14px) * 0.8);
+    line-height: 1.4;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--cerebr-input-bg) 55%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 45%, transparent);
+    color: var(--cerebr-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    backdrop-filter: blur(var(--cerebr-blur-radius)) saturate(1.2);
+    box-shadow:
+      0 6px 14px rgba(0, 0, 0, 0.12),
+      inset 0 0 0 1px color-mix(in srgb, #fff 18%, transparent);
+}
+
+#input-api-switcher .input-api-list {
+    display: none;
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 6px);
+    min-width: 200px;
+    max-width: 280px;
+    max-height: 240px;
+    overflow-y: auto;
+    background: color-mix(in srgb, var(--cerebr-input-bg) 65%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 50%, transparent);
+    border-radius: 12px;
+    padding: 6px;
+    backdrop-filter: blur(var(--cerebr-blur-radius)) saturate(1.2);
+    box-shadow:
+      0 14px 26px rgba(0, 0, 0, 0.2),
+      inset 0 0 0 1px color-mix(in srgb, #fff 14%, transparent);
+}
+
+#input-api-switcher::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: 100%;
+    width: max(100%, 200px);
+    height: 8px;
+    background: transparent;
+}
+
+#input-api-switcher:hover .input-api-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#input-api-switcher.no-favorites .input-api-list {
+    display: none !important;
+}
+
+.fullscreen-mode #input-api-switcher {
+    right: calc(max(15px, calc((100vw - var(--cerebr-fullscreen-width)) / 2)) + 44px);
+}
+
+.input-api-option {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: calc(var(--cerebr-font-size, 14px) * 0.8);
+    color: var(--cerebr-text-color);
+    background: transparent;
+    border: 1px solid transparent;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.input-api-option:hover {
+    background-color: var(--cerebr-message-user-bg);
+}
+
+.input-api-option.current {
+    border-color: color-mix(in srgb, var(--cerebr-highlight) 60%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--cerebr-highlight) 60%, transparent),
+                0 0 8px 0 color-mix(in srgb, var(--cerebr-highlight) 35%, transparent);
+}
+
 /* 新增：设置 #message-row 横向排列 */
 #message-row {
     display: flex;
@@ -1384,6 +1489,16 @@ input:checked + .slider::before {
     min-height: 140px;
     resize: none;
     overflow: auto;
+}
+
+.user-message-template-group textarea.user-message-template {
+    min-height: 120px;
+    resize: none;
+    overflow: auto;
+}
+
+.user-message-template-options {
+    margin-top: 8px;
 }
 
 /* 滚动条样式统一到全局 */

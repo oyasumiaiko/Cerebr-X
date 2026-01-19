@@ -11,6 +11,7 @@
  */
 export function createSidebarAppContext(isStandalone) {
   const apiSettingsToggle = document.getElementById('api-settings-toggle');
+  const inputApiSwitcher = document.getElementById('input-api-switcher');
 
   const dom = {
     chatLayout: document.getElementById('chat-layout'),
@@ -21,6 +22,9 @@ export function createSidebarAppContext(isStandalone) {
     threadExitButton: document.getElementById('thread-exit'),
     threadDeleteButton: document.getElementById('thread-delete'),
     messageInput: document.getElementById('message-input'),
+    inputApiSwitcher,
+    inputApiCurrent: inputApiSwitcher?.querySelector('.input-api-current') || null,
+    inputApiList: inputApiSwitcher?.querySelector('.input-api-list') || null,
     contextMenu: document.getElementById('context-menu'),
     copyMessageButton: document.getElementById('copy-message'),
     stopUpdateButton: document.getElementById('stop-update'),

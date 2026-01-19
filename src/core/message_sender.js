@@ -5,6 +5,7 @@
  * 这个模块是应用程序的核心部分，处理从用户输入到AI响应显示的完整流程。
  */
 import { composeMessages } from './message_composer.js';
+import { renderUserMessageTemplate, applyRenderedTextToMessageContent } from './message_preprocessor.js';
 import { extractThinkingFromText, mergeStreamingThoughts, mergeThoughts } from '../utils/thoughts_parser.js';
 import { createAdaptiveUpdateThrottler } from '../utils/adaptive_update_throttler.js';
 
@@ -37,7 +38,6 @@ export function createMessageSender(appContext) {
   const scrollToBottom = utils.scrollToBottom;
   const settingsManager = services.settingsManager;
   const promptSettingsManager = services.promptSettingsManager;
-  const uiManager = services.uiManager;
   const showNotification = utils.showNotification;
 
   /**
@@ -281,6 +281,46 @@ export function createMessageSender(appContext) {
     }
 
     return Object.keys(result).length > 0 ? result : null;
+  }
+
+  /**
+   * 解析预处理模板的输入基准文本，避免“已渲染文本”再次被套模板。
+   * @param {Object} args
+   * @param {string} args.messageText
+   * @param {boolean} args.regenerateMode
+   * @param {string|null} args.messageId
+   * @returns {string}
+   */
+  function resolvePreprocessBaseText({ messageText, regenerateMode, messageId }) {
+    if (!regenerateMode || !messageId) return messageText;
+    const node = chatHistoryManager?.chatHistory?.messages?.find(m => m.id === messageId);
+    if (!node) return messageText;
+
+    const originalText = (typeof node.preprocessOriginalText === 'string') ? node.preprocessOriginalText : '';
+    const renderedText = (typeof node.preprocessRenderedText === 'string') ? node.preprocessRenderedText : '';
+    if (originalText && renderedText && renderedText === messageText) {
+      return originalText;
+    }
+    return messageText;
+  }
+
+  /**
+   * 将预处理后的文本应用到“最后一条 user 消息”，用于只影响发送不改历史。
+   * @param {Array} messages
+   * @param {string} renderedText
+   * @returns {Array}
+   */
+  function applyPreprocessedTextToMessages(messages, renderedText) {
+    if (!Array.isArray(messages) || typeof renderedText !== 'string') return messages;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (!msg || msg.role !== 'user') continue;
+      const next = { ...msg, content: applyRenderedTextToMessageContent(msg.content, renderedText) };
+      const cloned = messages.slice();
+      cloned[i] = next;
+      return cloned;
+    }
+    return messages;
   }
 
   /**
@@ -743,6 +783,7 @@ export function createMessageSender(appContext) {
         imageContainer.innerHTML = '';
         appContext.services.uiManager.resetInputHeight();
       }
+      try { appContext.services.uiManager?.updateSendButtonState?.(); } catch (_) {}
     } catch (error) {
       console.error('清空消息输入框和图片容器失败:', error);
     }
@@ -1052,6 +1093,37 @@ export function createMessageSender(appContext) {
     const promptsConfig = promptSettingsManager.getPrompts();
     const currentPromptType = specificPromptType || messageProcessor.getPromptTypeFromContent(messageText, promptsConfig);
 
+    const preprocessorConfig = resolvedApiConfig
+      || (api != null && typeof apiManager.resolveApiParam === 'function' ? apiManager.resolveApiParam(api) : null)
+      || apiManager.getSelectedConfig();
+    const skipUserMessagePreprocess = options.__skipUserMessagePreprocess === true;
+    let messageTextForHistory = messageText;
+    let preprocessedMessageText = null;
+    let shouldApplyPreprocessor = false;
+    let preprocessHistoryPatch = null;
+
+    if (skipUserMessagePreprocess) {
+      shouldApplyPreprocessor = regenerateMode || !isEmptyMessage;
+      preprocessedMessageText = messageText;
+    } else {
+      const template = (typeof preprocessorConfig?.userMessagePreprocessorTemplate === 'string')
+        ? preprocessorConfig.userMessagePreprocessorTemplate
+        : '';
+      const hasTemplate = template.trim().length > 0;
+      shouldApplyPreprocessor = hasTemplate && (regenerateMode || !isEmptyMessage);
+      if (shouldApplyPreprocessor) {
+        const baseText = resolvePreprocessBaseText({ messageText, regenerateMode, messageId });
+        preprocessedMessageText = renderUserMessageTemplate({ template, inputText: baseText });
+        if (!regenerateMode && preprocessorConfig?.userMessagePreprocessorIncludeInHistory) {
+          messageTextForHistory = preprocessedMessageText;
+          preprocessHistoryPatch = {
+            preprocessOriginalText: baseText,
+            preprocessRenderedText: preprocessedMessageText
+          };
+        }
+      }
+    }
+
     const threadContextCandidate = resolveActiveThreadContext();
     if (threadContextCandidate && threadContainer) {
       // 重新生成时，仅当目标消息属于当前线程才启用线程上下文
@@ -1193,9 +1265,12 @@ export function createMessageSender(appContext) {
           const threadRootId = ensureThreadRootMessage(activeThreadContext);
           if (threadRootId) {
             const historyParentId = activeThreadContext.annotation?.lastMessageId || threadRootId;
-            const historyPatch = buildThreadHistoryPatch(activeThreadContext);
+            const threadHistoryPatch = buildThreadHistoryPatch(activeThreadContext);
+            const historyPatch = (threadHistoryPatch || preprocessHistoryPatch)
+              ? { ...(threadHistoryPatch || {}), ...(preprocessHistoryPatch || {}) }
+              : null;
             userMessageDiv = messageProcessor.appendMessage(
-              messageText,
+              messageTextForHistory,
               'user',
               false,
               null,
@@ -1224,15 +1299,17 @@ export function createMessageSender(appContext) {
         }
 
         if (!userMessageDiv) {
+          const messageOptions = preprocessHistoryPatch ? { historyPatch: preprocessHistoryPatch } : null;
           userMessageDiv = messageProcessor.appendMessage(
-            messageText,
+            messageTextForHistory,
             'user',
             false,
             null,
             inputController ? inputController.getImagesHTML() : imageContainer.innerHTML,
             null,
             null,
-            historyMeta
+            historyMeta,
+            messageOptions
           );
         }
       }
@@ -1401,6 +1478,9 @@ export function createMessageSender(appContext) {
         }
         return msg;
       });
+      const finalMessages = (shouldApplyPreprocessor && typeof preprocessedMessageText === 'string')
+        ? applyPreprocessedTextToMessages(sanitizedMessages, preprocessedMessageText)
+        : sanitizedMessages;
 
       // 获取API配置：仅使用外部提供（resolvedApiConfig / api 解析）或当前选中。不再做任何内部推断
       let config;
@@ -1457,7 +1537,7 @@ export function createMessageSender(appContext) {
       }
 
       const requestBody = await apiManager.buildRequest({
-        messages: sanitizedMessages,
+        messages: finalMessages,
         config: config,
         overrides: requestOverrides
       });
@@ -1524,10 +1604,16 @@ export function createMessageSender(appContext) {
       console.error('发送消息失败:', error);
 
       // 返回一个可供外部使用的“无状态重试提示”对象
+      const retryOriginalMessageText = (shouldApplyPreprocessor && typeof preprocessedMessageText === 'string')
+        ? preprocessedMessageText
+        : messageText;
+      const skipNextPreprocess = skipUserMessagePreprocess
+        || (shouldApplyPreprocessor && typeof preprocessedMessageText === 'string');
+
       const retryHint = {
         injectedSystemMessages: existingInjectedSystemMessages,
         specificPromptType,
-        originalMessageText: messageText,
+        originalMessageText: retryOriginalMessageText,
         regenerateMode: true,
         messageId,
         targetAiMessageId: normalizedTargetAiMessageId,
@@ -1535,6 +1621,7 @@ export function createMessageSender(appContext) {
         pageContentSnapshot: pageContentResponse || null,
         conversationSnapshot: Array.isArray(conversationChain) ? conversationChain : null,
         aspectRatioOverride,
+        __skipUserMessagePreprocess: skipNextPreprocess,
         // 透传外部策略决定的API（若有）
         resolvedApiConfig,
         api

@@ -77,7 +77,11 @@ export function createUIManager(appContext) {
   function updateSendButtonState() {
     const hasText = messageInput.textContent.trim();
     const hasImage = dom.imageContainer?.querySelector('.image-tag');
-    sendButton.disabled = !hasText && !hasImage;
+    const hasInput = !!hasText || !!hasImage;
+    sendButton.disabled = !hasInput;
+    if (inputContainer) {
+      inputContainer.classList.toggle('has-input', hasInput);
+    }
   }
 
   /**
