@@ -386,12 +386,23 @@ body.standalone-mode #empty-state-repomix {
     display: none !important;
 }
 
+/* 聊天布局容器：用于承载主消息区与线程面板 */
+#chat-layout {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    gap: 12px;
+}
+
 /* 聊天容器样式 */
 #chat-container {
     display: flex;
     flex-direction: column;
     gap: 8px;
     height: 100%;
+    flex: 1;
+    min-width: 0;
     overflow-y: auto;
     overflow-x: hidden;
     overscroll-behavior: contain;
@@ -407,6 +418,67 @@ body.standalone-mode #empty-state-repomix {
 /* 当有滚动条时，动态调整右侧padding */
 #chat-container.has-scrollbar {
     padding-right: calc(15px - var(--scrollbar-width, 0px));
+}
+
+/* 线程面板容器 */
+#thread-panel {
+    display: none;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--cerebr-bg-color) 85%, transparent);
+}
+
+body.thread-mode-active #thread-panel {
+    display: flex;
+}
+
+/* 侧栏模式：线程面板插入主消息流后使用的内联样式 */
+#thread-panel.thread-panel-inline {
+    display: flex;
+    width: 100%;
+    margin-top: 8px;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
+}
+
+.thread-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+    background: color-mix(in srgb, var(--cerebr-bg-color) 90%, transparent);
+}
+
+.thread-panel-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--cerebr-text-color);
+}
+
+.thread-panel-exit {
+    padding: 4px 10px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+    background: color-mix(in srgb, var(--cerebr-input-bg) 85%, transparent);
+    color: var(--cerebr-text-color);
+    cursor: pointer;
+    font-size: 12px;
+    min-height: 28px;
+}
+
+#thread-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px 12px 14px 12px;
+    scrollbar-gutter: stable;
 }
 
 /* 移除隐藏滚动条的样式 */
@@ -466,6 +538,26 @@ body.standalone-mode #empty-state-repomix {
     overflow-y: auto;
 }
 /* 滚动条样式统一到全局 */
+
+/* 划词线程高亮 */
+.thread-highlight {
+    cursor: pointer;
+    color: var(--cerebr-highlight);
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+    background-color: color-mix(in srgb, var(--cerebr-highlight) 12%, transparent);
+    border-radius: 3px;
+    padding: 0 2px;
+}
+
+.thread-highlight:hover {
+    background-color: color-mix(in srgb, var(--cerebr-highlight) 18%, transparent);
+}
+
+/* 侧栏模式：隐藏锚点之后的消息 */
+.thread-hidden-message {
+    display: none !important;
+}
 
 /* 输入区域样式 */
 #input-container {
@@ -1751,6 +1843,76 @@ input:checked + .slider::before {
 .context-menu-item#fork-conversation.disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* 划词线程气泡提示 */
+.selection-thread-bubble {
+    position: fixed;
+    z-index: 2100;
+    max-width: min(320px, calc(100vw - 40px));
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+    background: color-mix(in srgb, var(--cerebr-bg-color) 92%, transparent);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
+    backdrop-filter: blur(10px);
+    display: none;
+    color: var(--cerebr-text-color);
+}
+
+.selection-thread-bubble__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.selection-thread-bubble__title {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.selection-thread-bubble__close {
+    border: none;
+    background: transparent;
+    color: var(--cerebr-text-color);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0 4px;
+    box-shadow: none;
+}
+
+.selection-thread-bubble__content {
+    font-size: 12px;
+    line-height: 1.5;
+    margin-bottom: 8px;
+    white-space: pre-wrap;
+}
+
+.selection-thread-bubble__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.selection-thread-bubble__primary,
+.selection-thread-bubble__secondary {
+    padding: 4px 10px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+    background: color-mix(in srgb, var(--cerebr-input-bg) 85%, transparent);
+    color: var(--cerebr-text-color);
+    cursor: pointer;
+    font-size: 12px;
+    min-height: 28px;
+}
+
+.selection-thread-bubble__primary {
+    background: var(--cerebr-button-bg);
+    color: var(--cerebr-button-color);
+    border-color: transparent;
 }
 
 /* 链接样式 */
@@ -4560,7 +4722,7 @@ body.hide-references .reference-number.superscript {
 }
 
 /* 当聊天容器为空时显示空状态 */
-#chat-container:empty ~ .empty-state-content {
+body.chat-empty .empty-state-content {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -4861,6 +5023,26 @@ html.fullscreen-mode::before {
   padding-right: calc(
     max(15px, calc((100vw - var(--cerebr-fullscreen-width)) / 2)) - var(--scrollbar-width, 0px)
   );
+}
+
+/* 全屏 + 划词线程：左右双栏布局 */
+.fullscreen-mode body.thread-mode-active #chat-layout {
+  flex-direction: row;
+}
+
+.fullscreen-mode body.thread-mode-active #chat-container,
+.fullscreen-mode body.thread-mode-active #thread-container {
+  padding-left: max(15px, calc((50vw - var(--cerebr-fullscreen-width)) / 2));
+  padding-right: max(15px, calc((50vw - var(--cerebr-fullscreen-width)) / 2));
+}
+
+.fullscreen-mode body.thread-mode-active .thread-panel-header {
+  padding-left: max(15px, calc((50vw - var(--cerebr-fullscreen-width)) / 2));
+  padding-right: max(15px, calc((50vw - var(--cerebr-fullscreen-width)) / 2));
+}
+
+.fullscreen-mode body.thread-mode-active #thread-panel {
+  max-width: var(--cerebr-fullscreen-width);
 }
 
 /* 全屏下：AI 消息不再强制充满整行，避免超宽 */

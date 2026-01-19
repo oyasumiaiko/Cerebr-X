@@ -13,7 +13,12 @@ export function createSidebarAppContext(isStandalone) {
   const apiSettingsToggle = document.getElementById('api-settings-toggle');
 
   const dom = {
+    chatLayout: document.getElementById('chat-layout'),
     chatContainer: document.getElementById('chat-container'),
+    threadPanel: document.getElementById('thread-panel'),
+    threadContainer: document.getElementById('thread-container'),
+    threadPanelTitle: document.getElementById('thread-panel-title'),
+    threadExitButton: document.getElementById('thread-exit'),
     messageInput: document.getElementById('message-input'),
     contextMenu: document.getElementById('context-menu'),
     copyMessageButton: document.getElementById('copy-message'),
@@ -130,10 +135,12 @@ export function registerSidebarUtilities(appContext) {
 
   appContext.utils.updateInputContainerHeightVar = updateInputContainerHeightVar;
 
-  appContext.utils.scrollToBottom = () => {
+  appContext.utils.scrollToBottom = (targetContainer = null) => {
     const settingsManager = appContext.services.settingsManager;
     const messageSender = appContext.services.messageSender;
-    const chatContainer = appContext.dom.chatContainer;
+    const chatContainer = targetContainer || appContext.dom.chatContainer;
+
+    if (!chatContainer) return;
 
     if (settingsManager?.getSetting('autoScroll') === false) return;
     if (!messageSender?.getShouldAutoScroll()) return;

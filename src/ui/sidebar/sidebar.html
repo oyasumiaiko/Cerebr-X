@@ -21,7 +21,16 @@
 </head>
 <body>
     <div id="collapse-button" role="button" tabindex="0" title="切换全屏/侧栏" aria-label="切换全屏/侧栏"></div>
-    <div id="chat-container"></div>
+    <div id="chat-layout">
+        <div id="chat-container"></div>
+        <div id="thread-panel" aria-hidden="true">
+            <div class="thread-panel-header">
+                <div id="thread-panel-title" class="thread-panel-title">划词对话</div>
+                <button id="thread-exit" class="thread-panel-exit" type="button">退出</button>
+            </div>
+            <div id="thread-container"></div>
+        </div>
+    </div>
     <div class="empty-state-content">
         <div class="empty-state-icon" style="display: none;">
             <i class="far fa-comment-dots"></i>

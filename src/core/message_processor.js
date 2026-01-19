@@ -52,6 +52,34 @@ export function createMessageProcessor(appContext) {
   
   // 保留占位：数学渲染现改为在 Markdown 渲染阶段由 KaTeX 完成
 
+  function resolveMessageElement(messageId) {
+    if (!messageId) return null;
+    const selector = `[data-message-id="${messageId}"]`;
+    let element = chatContainer?.querySelector(selector) || null;
+    if (element) return element;
+
+    const threadContainer = dom?.threadContainer || null;
+    if (threadContainer && threadContainer !== chatContainer) {
+      element = threadContainer.querySelector(selector) || null;
+    }
+    return element;
+  }
+
+  function resolveScrollContainerForMessage(messageElement) {
+    if (!messageElement) return chatContainer;
+    const threadContainer = dom?.threadContainer || null;
+    if (threadContainer && threadContainer.contains(messageElement)) {
+      // 若线程容器嵌入在 chatContainer 内（侧栏模式），滚动容器仍应使用 chatContainer
+      const isNestedInChat = typeof threadContainer.closest === 'function'
+        ? !!threadContainer.closest('#chat-container')
+        : false;
+      if (!isNestedInChat) {
+        return threadContainer;
+      }
+    }
+    return chatContainer;
+  }
+
   /**
    * 设置或更新思考过程的显示区域
    * @param {HTMLElement} messageWrapperDiv - 包裹单条消息的顶层div (e.g., .message)
@@ -170,10 +198,22 @@ export function createMessageProcessor(appContext) {
   * @param {string|null} imagesHTML - 图片部分的 HTML 内容（可为空）
   * @param {string|null} [initialThoughtsRaw=null] - AI的初始思考过程文本 (可选)
   * @param {string|null} [messageIdToUpdate=null] - 如果是更新现有消息，则提供其ID
-   * @param {{promptType?: string|null, promptMeta?: Object|null}|null} [meta=null] - 可选：写入历史节点的附加元信息（主要用于用户消息）
-   * @returns {HTMLElement} 新生成或更新的消息元素
+  * @param {{promptType?: string|null, promptMeta?: Object|null}|null} [meta=null] - 可选：写入历史节点的附加元信息（主要用于用户消息）
+  * @param {{container?: HTMLElement|null, skipDom?: boolean, historyParentId?: string|null, preserveCurrentNode?: boolean, historyPatch?: Object|null}|null} [options=null] - 可选：渲染/历史写入控制
+   * @returns {HTMLElement|null} 新生成或更新的消息元素（若 skipDom=true 则返回 null）
   */
-  function appendMessage(text, sender, skipHistory = false, fragment = null, imagesHTML = null, initialThoughtsRaw = null, messageIdToUpdate = null, meta = null) {
+  function appendMessage(text, sender, skipHistory = false, fragment = null, imagesHTML = null, initialThoughtsRaw = null, messageIdToUpdate = null, meta = null, options = null) {
+    const renderOptions = (options && typeof options === 'object') ? options : {};
+    const targetContainer = renderOptions.container || chatContainer;
+    const shouldRenderDom = !renderOptions.skipDom;
+    const historyParentId = (typeof renderOptions.historyParentId === 'string' && renderOptions.historyParentId.trim())
+      ? renderOptions.historyParentId.trim()
+      : chatHistoryManager.chatHistory.currentNode;
+    const preserveCurrentNode = !!renderOptions.preserveCurrentNode;
+    const historyPatch = (renderOptions.historyPatch && typeof renderOptions.historyPatch === 'object')
+      ? renderOptions.historyPatch
+      : null;
+
     let messageDiv;
     let node;
     // 提前拆分 <think> 段落，确保正文与思考摘要分离
@@ -187,128 +227,132 @@ export function createMessageProcessor(appContext) {
       }
     }
 
-    if (messageIdToUpdate) {
-      messageDiv = chatContainer.querySelector(`[data-message-id="${messageIdToUpdate}"]`);
-      if (!messageDiv) {
-        console.error('appendMessage: 试图更新的消息未找到 DOM 元素', messageIdToUpdate);
-        // Create a new one if update target is missing, this indicates a potential logic flaw elsewhere
+    if (shouldRenderDom) {
+      if (messageIdToUpdate) {
+        messageDiv = targetContainer.querySelector(`[data-message-id="${messageIdToUpdate}"]`);
+        if (!messageDiv) {
+          console.error('appendMessage: 试图更新的消息未找到 DOM 元素', messageIdToUpdate);
+          // Create a new one if update target is missing, this indicates a potential logic flaw elsewhere
+          messageDiv = document.createElement('div');
+          messageDiv.classList.add('message', `${sender}-message`);
+          if (fragment) messageDiv.classList.add('batch-load'); // if it was intended for a fragment
+        }
+        // For updates, main text and thoughts are handled by updateAIMessage or setupThoughtsDisplay called from there.
+        // appendMessage when messageIdToUpdate is present is mostly for ensuring the messageDiv exists.
+        // So, we'll mostly clear and let updateAIMessage fill.
+        // However, this function signature with messageIdToUpdate might be part of a specific workflow.
+        // For now, let's assume if messageIdToUpdate is given, it's for initial AI message shell creation in streaming.
+        // And actual content updates will be handled by updateAIMessage.
+
+      } else {
         messageDiv = document.createElement('div');
         messageDiv.classList.add('message', `${sender}-message`);
-        if (fragment) messageDiv.classList.add('batch-load'); // if it was intended for a fragment
       }
-      // For updates, main text and thoughts are handled by updateAIMessage or setupThoughtsDisplay called from there.
-      // appendMessage when messageIdToUpdate is present is mostly for ensuring the messageDiv exists.
-      // So, we'll mostly clear and let updateAIMessage fill.
-      // However, this function signature with messageIdToUpdate might be part of a specific workflow.
-      // For now, let's assume if messageIdToUpdate is given, it's for initial AI message shell creation in streaming.
-      // And actual content updates will be handled by updateAIMessage.
 
-    } else {
-      messageDiv = document.createElement('div');
-      messageDiv.classList.add('message', `${sender}-message`);
-    }
-
-    if (fragment && !messageIdToUpdate) {
-      messageDiv.classList.add('batch-load');
-    }
-
-    messageDiv.setAttribute('data-original-text', messageText); // Main answer text
-    // thoughtsForMessage is handled below by setupThoughtsDisplay
-
-    if (imagesHTML && imagesHTML.trim() && !messageIdToUpdate) {
-      const imageContentDiv = document.createElement('div');
-      imageContentDiv.classList.add('image-content');
-      imageContentDiv.innerHTML = imagesHTML;
-      imageContentDiv.querySelectorAll('img').forEach(img => {
-        img.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          imageHandler.showImagePreview(img.src);
-        });
-      });
-      messageDiv.appendChild(imageContentDiv);
-    }
-    
-    // Setup thoughts display (handles creation/removal)
-    // Pass `processMathAndMarkdown` from the outer scope
-    setupThoughtsDisplay(messageDiv, thoughtsForMessage, processMathAndMarkdown);
-
-
-    let textContentDiv = messageDiv.querySelector('.text-content');
-    if (!textContentDiv) {
-        textContentDiv = document.createElement('div');
-        textContentDiv.classList.add('text-content');
-        // Ensure textContentDiv is after thoughtsDiv if thoughtsDiv was added
-        const thoughtsDiv = messageDiv.querySelector('.thoughts-content');
-        if (thoughtsDiv && thoughtsDiv.nextSibling) {
-            messageDiv.insertBefore(textContentDiv, thoughtsDiv.nextSibling);
-        } else {
-            messageDiv.appendChild(textContentDiv);
-        }
-    }
-    try {
-      if (sender === 'user') {
-        textContentDiv.innerText = messageText;
-      } else {
-        textContentDiv.innerHTML = processMathAndMarkdown(messageText);
+      if (fragment && !messageIdToUpdate) {
+        messageDiv.classList.add('batch-load');
       }
-    } catch (error) {
-      console.error('处理数学公式和Markdown失败:', error);
-      textContentDiv.innerText = messageText;
-    }
-    
-    messageDiv.querySelectorAll('a:not(.reference-number)').forEach(link => { // Avoid affecting reference links
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-    });
 
-    messageDiv.querySelectorAll('pre code').forEach(block => {
-      hljs.highlightElement(block);
-    });
+      messageDiv.setAttribute('data-original-text', messageText); // Main answer text
+      // thoughtsForMessage is handled below by setupThoughtsDisplay
 
-    bindInlineImagePreviews(messageDiv);
-
-    // 数学公式已在渲染阶段通过 KaTeX 输出，无需二次 auto-render
-
-    if (!messageIdToUpdate) {
-      if (fragment) {
-        fragment.appendChild(messageDiv);
-      } else {
-        chatContainer.appendChild(messageDiv);
-      }
-    }
-    
-    // 为消息元素添加双击事件监听器，用于展开/折叠 foldMessageContent 创建的 details 元素
-    if (!messageDiv.dataset.dblclickListenerAdded) {
-      messageDiv.addEventListener('dblclick', function(event) { // 使用 function 关键字使 this 指向 messageDiv
-        const detailsElement = this.querySelector('details.folded-message');
-        if (detailsElement) {
-          const summaryElement = detailsElement.querySelector('summary');
-          if (summaryElement && summaryElement.contains(event.target)) {
-            return;
-          }
-
-          const scrollContainer = chatContainer; // chatContainer 来自外部作用域
-          // const scrollYBefore = scrollContainer.scrollTop; // 不再需要
-          // const rectBefore = this.getBoundingClientRect(); // 不再需要
-
-          // 切换 details 元素的 open 状态
-          if (detailsElement.hasAttribute('open')) {
-            detailsElement.removeAttribute('open');
-          } else {
-            detailsElement.setAttribute('open', '');
-          }
-
-          // 使用 requestAnimationFrame 等待浏览器完成布局更新
-          requestAnimationFrame(() => {
-            const messageTopRelativeToViewport = this.getBoundingClientRect().top;
-            const scrollContainerTopRelativeToViewport = scrollContainer.getBoundingClientRect().top;
-            const offsetToScroll = messageTopRelativeToViewport - scrollContainerTopRelativeToViewport;
-            scrollContainer.scrollTop += offsetToScroll;
+      if (imagesHTML && imagesHTML.trim() && !messageIdToUpdate) {
+        const imageContentDiv = document.createElement('div');
+        imageContentDiv.classList.add('image-content');
+        imageContentDiv.innerHTML = imagesHTML;
+        imageContentDiv.querySelectorAll('img').forEach(img => {
+          img.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            imageHandler.showImagePreview(img.src);
           });
+        });
+        messageDiv.appendChild(imageContentDiv);
+      }
+      
+      // Setup thoughts display (handles creation/removal)
+      // Pass `processMathAndMarkdown` from the outer scope
+      setupThoughtsDisplay(messageDiv, thoughtsForMessage, processMathAndMarkdown);
+
+
+      let textContentDiv = messageDiv.querySelector('.text-content');
+      if (!textContentDiv) {
+          textContentDiv = document.createElement('div');
+          textContentDiv.classList.add('text-content');
+          // Ensure textContentDiv is after thoughtsDiv if thoughtsDiv was added
+          const thoughtsDiv = messageDiv.querySelector('.thoughts-content');
+          if (thoughtsDiv && thoughtsDiv.nextSibling) {
+              messageDiv.insertBefore(textContentDiv, thoughtsDiv.nextSibling);
+          } else {
+              messageDiv.appendChild(textContentDiv);
+          }
+      }
+      try {
+        if (sender === 'user') {
+          textContentDiv.innerText = messageText;
+        } else {
+          textContentDiv.innerHTML = processMathAndMarkdown(messageText);
         }
+      } catch (error) {
+        console.error('处理数学公式和Markdown失败:', error);
+        textContentDiv.innerText = messageText;
+      }
+      
+      messageDiv.querySelectorAll('a:not(.reference-number)').forEach(link => { // Avoid affecting reference links
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
       });
-      messageDiv.dataset.dblclickListenerAdded = 'true';
+
+      messageDiv.querySelectorAll('pre code').forEach(block => {
+        hljs.highlightElement(block);
+      });
+
+      bindInlineImagePreviews(messageDiv);
+
+      // 数学公式已在渲染阶段通过 KaTeX 输出，无需二次 auto-render
+
+      if (!messageIdToUpdate) {
+        if (fragment) {
+          fragment.appendChild(messageDiv);
+        } else if (targetContainer) {
+          targetContainer.appendChild(messageDiv);
+        }
+      }
+      
+      // 为消息元素添加双击事件监听器，用于展开/折叠 foldMessageContent 创建的 details 元素
+      if (!messageDiv.dataset.dblclickListenerAdded) {
+        messageDiv.addEventListener('dblclick', function(event) { // 使用 function 关键字使 this 指向 messageDiv
+          const detailsElement = this.querySelector('details.folded-message');
+          if (detailsElement) {
+            const summaryElement = detailsElement.querySelector('summary');
+            if (summaryElement && summaryElement.contains(event.target)) {
+              return;
+            }
+
+            const scrollContainer = targetContainer || chatContainer; // chatContainer 来自外部作用域
+            // const scrollYBefore = scrollContainer.scrollTop; // 不再需要
+            // const rectBefore = this.getBoundingClientRect(); // 不再需要
+
+            // 切换 details 元素的 open 状态
+            if (detailsElement.hasAttribute('open')) {
+              detailsElement.removeAttribute('open');
+            } else {
+              detailsElement.setAttribute('open', '');
+            }
+
+            // 使用 requestAnimationFrame 等待浏览器完成布局更新
+            requestAnimationFrame(() => {
+              const messageTopRelativeToViewport = this.getBoundingClientRect().top;
+              const scrollContainerTopRelativeToViewport = scrollContainer.getBoundingClientRect().top;
+              const offsetToScroll = messageTopRelativeToViewport - scrollContainerTopRelativeToViewport;
+              scrollContainer.scrollTop += offsetToScroll;
+            });
+          }
+        });
+        messageDiv.dataset.dblclickListenerAdded = 'true';
+      }
+    } else {
+      messageDiv = null;
     }
     
     if (!skipHistory) {
@@ -319,16 +363,30 @@ export function createMessageProcessor(appContext) {
           if (thoughtsForMessage !== undefined) { // Allow setting thoughts to null/empty
              node.thoughtsRaw = thoughtsForMessage;
           }
+          if (historyPatch && typeof historyPatch === 'object') {
+            Object.assign(node, historyPatch);
+          }
         } else {
              console.warn(`appendMessage: History node not found for update: ${messageIdToUpdate}`);
         }
       } else {
         const processedContent = imageHandler.processImageTags(messageText, imagesHTML);
-        node = chatHistoryManager.addMessageToTree(
-          sender === 'user' ? 'user' : 'assistant',
-          processedContent,
-          chatHistoryManager.chatHistory.currentNode
-        );
+        const addWithOptions = typeof chatHistoryManager.addMessageToTreeWithOptions === 'function'
+          && (preserveCurrentNode || historyParentId !== chatHistoryManager.chatHistory.currentNode);
+        if (addWithOptions) {
+          node = chatHistoryManager.addMessageToTreeWithOptions(
+            sender === 'user' ? 'user' : 'assistant',
+            processedContent,
+            historyParentId,
+            { preserveCurrentNode }
+          );
+        } else {
+          node = chatHistoryManager.addMessageToTree(
+            sender === 'user' ? 'user' : 'assistant',
+            processedContent,
+            historyParentId
+          );
+        }
         if (thoughtsForMessage) {
           node.thoughtsRaw = thoughtsForMessage;
         }
@@ -346,6 +404,10 @@ export function createMessageProcessor(appContext) {
           }
         }
 
+        if (node && historyPatch && typeof historyPatch === 'object') {
+          Object.assign(node, historyPatch);
+        }
+
         // 关键：仅在“首条用户消息”写入页面元数据快照，用于固定会话来源页。
         // 这样即使在 AI 生成过程中用户切换到其它标签页，最终落盘的会话 URL/标题也不会被错误覆盖。
         try {
@@ -361,18 +423,29 @@ export function createMessageProcessor(appContext) {
         } catch (e) {
           console.warn('写入首条用户消息 pageMeta 失败（将回退为保存时读取 pageInfo）:', e);
         }
-        messageDiv.setAttribute('data-message-id', node.id);
-        // 初次创建 AI 消息时插入一个空的 API footer，占位以便样式稳定
-        if (sender === 'ai') {
-          const apiFooter = document.createElement('div');
-          apiFooter.className = 'api-footer';
-          messageDiv.appendChild(apiFooter);
+        if (messageDiv && node) {
+          messageDiv.setAttribute('data-message-id', node.id);
+          // 初次创建 AI 消息时插入一个空的 API footer，占位以便样式稳定
+          if (sender === 'ai') {
+            const apiFooter = document.createElement('div');
+            apiFooter.className = 'api-footer';
+            messageDiv.appendChild(apiFooter);
+          }
         }
       }
 
-      if (sender === 'ai' && !messageIdToUpdate) {
+      if (sender === 'ai' && !messageIdToUpdate && messageDiv) {
         messageDiv.classList.add('updating');
       }
+    }
+
+    // 如果存在划词线程管理器，则在渲染后补充高亮装饰
+    try {
+      if (messageDiv && node) {
+        services.selectionThreadManager?.decorateMessageElement?.(messageDiv, node);
+      }
+    } catch (e) {
+      console.warn('应用划词线程高亮失败:', e);
     }
     return messageDiv;
   }
@@ -385,7 +458,7 @@ export function createMessageProcessor(appContext) {
    * @param {Object|null} groundingMetadata - 引用元数据对象，包含引用信息
    */
   function updateAIMessage(messageId, newAnswerContent, newThoughtsRaw, groundingMetadata) {
-    const messageDiv = chatContainer.querySelector(`[data-message-id="${messageId}"]`);
+    const messageDiv = resolveMessageElement(messageId);
     const node = chatHistoryManager.chatHistory.messages.find(msg => msg.id === messageId);
 
     // 统一拆分 <think> 思考段落，保证思考摘要独立存储与展示
@@ -494,7 +567,12 @@ export function createMessageProcessor(appContext) {
         renderSourcesList(sourcesContainer, processedResult, groundingMetadata);
       }
     }
-    scrollToBottom();
+    try {
+      services.selectionThreadManager?.decorateMessageElement?.(messageDiv, node);
+    } catch (e) {
+      console.warn('更新 AI 消息时应用划词线程高亮失败:', e);
+    }
+    scrollToBottom(resolveScrollContainerForMessage(messageDiv));
   }
 
   /**

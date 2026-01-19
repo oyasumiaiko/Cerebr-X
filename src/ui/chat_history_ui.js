@@ -973,6 +973,9 @@ export function createChatHistoryUI(appContext) {
 
     // 遍历对话中的每条消息并显示
     for (const msg of fullConversation.messages) {
+      if (msg?.threadId || msg?.threadHiddenSelection) {
+        continue;
+      }
       normalizeThinkingForMessage(msg);
       const role = msg.role.toLowerCase() === 'assistant' ? 'ai' : msg.role;
       let messageElem = null;
@@ -1063,6 +1066,11 @@ export function createChatHistoryUI(appContext) {
           ? `API uuid: ${msg.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}${thoughtFlag}`
           : footer.title;
       } catch (_) {}
+
+      // 划词线程：根据历史节点补回高亮
+      try {
+        services.selectionThreadManager?.decorateMessageElement?.(messageElem, msg);
+      } catch (_) {}
     }
 
     // 批量插入：一次性提交到 DOM，显著降低大对话恢复时的卡顿/延迟
@@ -1071,7 +1079,10 @@ export function createChatHistoryUI(appContext) {
     // 修改: 使用 services.chatHistoryManager.chatHistory 访问数据对象
     services.chatHistoryManager.chatHistory.messages = fullConversation.messages.slice();
     services.chatHistoryManager.chatHistory.root = fullConversation.messages.length > 0 ? fullConversation.messages[0].id : null;
-    services.chatHistoryManager.chatHistory.currentNode = fullConversation.messages.length > 0 ? fullConversation.messages[fullConversation.messages.length - 1].id : null;
+    const lastMainMessage = [...fullConversation.messages].reverse().find(m => !m?.threadId && !m?.threadHiddenSelection) || null;
+    services.chatHistoryManager.chatHistory.currentNode = lastMainMessage
+      ? lastMainMessage.id
+      : (fullConversation.messages.length > 0 ? fullConversation.messages[fullConversation.messages.length - 1].id : null);
     // 保存加载的对话记录ID，用于后续更新操作
     currentConversationId = fullConversation.id;
     

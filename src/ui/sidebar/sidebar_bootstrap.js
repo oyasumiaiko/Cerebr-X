@@ -9,6 +9,7 @@ import { createSettingsManager } from '../settings_manager.js';
 import { createContextMenuManager } from '../context_menu_manager.js';
 import { createUIManager } from '../ui_manager.js';
 import { createInputController } from '../input_controller.js';
+import { createSelectionThreadManager } from '../selection_thread_manager.js';
 import { createConversationPresence } from '../../utils/conversation_presence.js';
 import { applyStandaloneAdjustments } from './sidebar_app_context.js';
 
@@ -23,6 +24,7 @@ export async function initializeSidebarServices(appContext) {
   const {
     chatHistory,
     addMessageToTree,
+    addMessageToTreeWithOptions,
     getCurrentConversationChain,
     clearHistory,
     deleteMessage,
@@ -31,6 +33,7 @@ export async function initializeSidebarServices(appContext) {
   appContext.services.chatHistoryManager = {
     chatHistory,
     addMessageToTree,
+    addMessageToTreeWithOptions,
     getCurrentConversationChain,
     clearHistory,
     deleteMessage,
@@ -63,10 +66,12 @@ export async function initializeSidebarServices(appContext) {
 
   appContext.services.uiManager = createUIManager(appContext);
   appContext.services.contextMenuManager = createContextMenuManager(appContext);
+  appContext.services.selectionThreadManager = createSelectionThreadManager(appContext);
 
   // 初始化 UI/上下文菜单管理器，确保后续事件注册时可立即使用。
   appContext.services.contextMenuManager.init();
   appContext.services.uiManager.init();
+  appContext.services.selectionThreadManager.init();
 
   await appContext.services.settingsManager.init();
   applyStandaloneAdjustments(appContext);

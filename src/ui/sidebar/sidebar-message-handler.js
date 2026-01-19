@@ -223,6 +223,12 @@
         };
       }).filter((item) => item.text.trim().length > 0);
       resetNavigation();
+      updateEmptyStateClass();
+    }
+
+    function updateEmptyStateClass() {
+      const hasMessage = !!chatContainer.querySelector('.message');
+      document.body.classList.toggle('chat-empty', !hasMessage);
     }
 
     function scheduleHistoryRebuild() {

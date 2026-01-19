@@ -121,6 +121,42 @@ function addMessageToTree(chatHistory, role, content, parentId = null) {
 }
 
 /**
+ * 新增：在聊天历史中添加消息节点，并允许控制是否更新 currentNode。
+ *
+ * 设计用途：
+ * - 划词线程等“分支消息”需要挂到指定 parentId，但不希望影响主对话的 currentNode；
+ * - 通过 preserveCurrentNode 保持主链指针不变，避免影响后续正常对话。
+ *
+ * @param {ChatHistory} chatHistory
+ * @param {string} role
+ * @param {any} content
+ * @param {string|null} [parentId=null]
+ * @param {{preserveCurrentNode?: boolean}} [options]
+ * @returns {MessageNode}
+ */
+function addMessageToTreeWithOptions(chatHistory, role, content, parentId = null, options = {}) {
+  const node = createMessageNode(role, content, parentId);
+  chatHistory.messages.push(node);
+
+  if (parentId) {
+    const parentNode = findMessageNode(chatHistory, parentId);
+    if (parentNode) {
+      parentNode.children.push(node.id);
+    }
+  }
+
+  if (!chatHistory.root) {
+    chatHistory.root = node.id;
+  }
+
+  if (!options?.preserveCurrentNode) {
+    chatHistory.currentNode = node.id;
+  }
+
+  return node;
+}
+
+/**
  * 获取当前对话的完整消息链（从根节点到当前节点）
  * @param {ChatHistory} chatHistory - 聊天历史对象
  * @returns {Array<MessageNode>} - 从最早到最新的消息节点数组
@@ -317,6 +353,8 @@ export function createChatHistoryManager() {
   return {
     chatHistory,
     addMessageToTree: (role, content, parentId = null) => addMessageToTree(chatHistory, role, content, parentId),
+    addMessageToTreeWithOptions: (role, content, parentId = null, options = {}) =>
+      addMessageToTreeWithOptions(chatHistory, role, content, parentId, options),
     getCurrentConversationChain: () => getCurrentConversationChain(chatHistory),
     clearHistory: () => clearChatHistory(chatHistory),
     deleteMessage: (messageId) => deleteMessageFromHistory(chatHistory, messageId),

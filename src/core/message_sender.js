@@ -29,8 +29,10 @@ export function createMessageSender(appContext) {
   const chatHistoryUI = services.chatHistoryUI;
   const chatHistoryManager = services.chatHistoryManager;
   const inputController = services.inputController;
+  const selectionThreadManager = services.selectionThreadManager;
   const getCurrentConversationChain = chatHistoryManager.getCurrentConversationChain;
   const chatContainer = dom.chatContainer;
+  const threadContainer = dom.threadContainer;
   const messageInput = dom.messageInput; // 保持兼容：占位符/样式仍可直接操作
   const imageContainer = dom.imageContainer; // 将逐步迁移到 inputController
   const scrollToBottom = utils.scrollToBottom;
@@ -280,6 +282,166 @@ export function createMessageSender(appContext) {
     }
 
     return Object.keys(result).length > 0 ? result : null;
+  }
+
+  /**
+   * 解析当前激活的“划词线程上下文”。
+   *
+   * 设计要点：
+   * - 只读取 selectionThreadManager 状态，不主动创建任何历史节点；
+   * - 若锚点消息不存在，则认为线程已失效，提示用户并退出线程模式；
+   * - 返回值仅用于后续“发送时”逻辑判断。
+   *
+   * @returns {{threadId: string, anchorMessageId: string, selectionText: string, annotation: Object}|null}
+   */
+  function resolveActiveThreadContext() {
+    if (!selectionThreadManager?.isThreadModeActive?.()) return null;
+    const threadId = selectionThreadManager.getActiveThreadId?.();
+    if (!threadId) return null;
+    const info = selectionThreadManager.findThreadById?.(threadId);
+    if (!info || !info.annotation) return null;
+    const anchorMessageId = info.anchorMessageId || selectionThreadManager.getActiveAnchorMessageId?.();
+    if (!anchorMessageId) return null;
+
+    const anchorNode = chatHistoryManager?.chatHistory?.messages?.find(m => m.id === anchorMessageId);
+    if (!anchorNode) {
+      if (typeof showNotification === 'function') {
+        showNotification({ message: '划词线程锚点已丢失，已退出线程模式', type: 'warning' });
+      }
+      selectionThreadManager.exitThread?.();
+      return null;
+    }
+
+    return {
+      threadId,
+      anchorMessageId,
+      selectionText: info.annotation?.selectionText || selectionThreadManager.getActiveSelectionText?.() || '',
+      annotation: info.annotation
+    };
+  }
+
+  /**
+   * 线程消息的历史补丁字段（用于标记“该消息属于某条划词线程”）。
+   * @param {Object|null} threadContext
+   * @returns {Object|null}
+   */
+  function buildThreadHistoryPatch(threadContext) {
+    if (!threadContext) return null;
+    return {
+      threadId: threadContext.threadId,
+      threadAnchorId: threadContext.anchorMessageId,
+      threadSelectionText: threadContext.selectionText || '',
+      threadRootId: threadContext.annotation?.rootMessageId || null
+    };
+  }
+
+  /**
+   * 确保线程根节点存在（隐藏的“> 选中文本”用户消息）。
+   * @param {Object} threadContext
+   * @returns {string|null} rootMessageId
+   */
+  function ensureThreadRootMessage(threadContext) {
+    if (!threadContext || !threadContext.annotation) return null;
+    if (threadContext.annotation.rootMessageId) {
+      threadContext.rootMessageId = threadContext.annotation.rootMessageId;
+      return threadContext.annotation.rootMessageId;
+    }
+
+    const selectionText = threadContext.selectionText || '';
+    const content = selectionText ? `> ${selectionText}` : '>';
+    const node = chatHistoryManager.addMessageToTreeWithOptions(
+      'user',
+      content,
+      threadContext.anchorMessageId,
+      { preserveCurrentNode: true }
+    );
+
+    if (!node) return null;
+    node.threadId = threadContext.threadId;
+    node.threadAnchorId = threadContext.anchorMessageId;
+    node.threadSelectionText = threadContext.selectionText || '';
+    node.threadHiddenSelection = true;
+    node.threadMatchIndex = Number.isFinite(threadContext.annotation.matchIndex)
+      ? threadContext.annotation.matchIndex
+      : 0;
+
+    threadContext.annotation.rootMessageId = node.id;
+    threadContext.annotation.lastMessageId = node.id;
+    threadContext.rootMessageId = node.id;
+    threadContext.lastMessageId = node.id;
+    return node.id;
+  }
+
+  /**
+   * 更新线程的最新消息 ID（用于拼接上下文/恢复线程）。
+   * @param {Object|null} threadContext
+   * @param {string|null} messageId
+   */
+  function updateThreadLastMessage(threadContext, messageId) {
+    if (!threadContext || !threadContext.annotation || !messageId) return;
+    threadContext.annotation.lastMessageId = messageId;
+    threadContext.lastMessageId = messageId;
+  }
+
+  /**
+   * 构造“主链 + 线程链”的上下文序列。
+   * - 主链：从根到锚点消息；
+   * - 线程链：从隐藏选中文本到线程最新消息。
+   *
+   * @param {Object|null} threadContext
+   * @param {string|null} [lastMessageIdOverride]
+   * @returns {Array<Object>}
+   */
+  function buildThreadConversationChain(threadContext, lastMessageIdOverride = null) {
+    if (!threadContext) return getCurrentConversationChain();
+    const nodes = chatHistoryManager?.chatHistory?.messages || [];
+    const findNode = (id) => nodes.find(m => m.id === id) || null;
+
+    const mainChain = [];
+    let currentId = threadContext.anchorMessageId;
+    while (currentId) {
+      const node = findNode(currentId);
+      if (!node) break;
+      mainChain.unshift(node);
+      currentId = node.parentId;
+    }
+
+    const rootId = threadContext.annotation?.rootMessageId || null;
+    const lastId = lastMessageIdOverride || threadContext.annotation?.lastMessageId || rootId;
+    const threadChain = [];
+    if (rootId && lastId) {
+      let threadCurrentId = lastId;
+      while (threadCurrentId) {
+        const node = findNode(threadCurrentId);
+        if (!node) break;
+        threadChain.unshift(node);
+        if (threadCurrentId === rootId) break;
+        threadCurrentId = node.parentId;
+      }
+      if (threadChain.length && threadChain[0].id !== rootId) {
+        const rootNode = findNode(rootId);
+        if (rootNode) threadChain.unshift(rootNode);
+      }
+    }
+
+    return mainChain.concat(threadChain);
+  }
+
+  /**
+   * 线程滚动容器解析：
+   * - 侧栏内联模式：线程容器嵌套在 chatContainer，应滚动 chatContainer；
+   * - 全屏双栏模式：线程容器独立滚动。
+   *
+   * @param {Object|null} threadContext
+   * @returns {HTMLElement|null}
+   */
+  function resolveThreadScrollContainer(threadContext) {
+    const container = threadContext?.container || null;
+    if (!container) return null;
+    const isNested = typeof container.closest === 'function'
+      ? !!container.closest('#chat-container')
+      : false;
+    return isNested ? chatContainer : container;
   }
 
   /**
@@ -885,9 +1047,32 @@ export function createMessageSender(appContext) {
     // 允许在“强制发送完整历史”或“重新生成模式”下继续执行（不新增用户消息）
     if (isEmptyMessage && !regenerateMode && !forceSendFullHistory) return;
 
+    let activeThreadContext = null;
     // 获取当前提示词设置
     const promptsConfig = promptSettingsManager.getPrompts();
     const currentPromptType = specificPromptType || messageProcessor.getPromptTypeFromContent(messageText, promptsConfig);
+
+    const threadContextCandidate = resolveActiveThreadContext();
+    if (threadContextCandidate && threadContainer) {
+      // 重新生成时，仅当目标消息属于当前线程才启用线程上下文
+      let shouldUseThreadContext = true;
+      if (regenerateMode) {
+        const targetId = (typeof targetAiMessageId === 'string' && targetAiMessageId.trim())
+          ? targetAiMessageId.trim()
+          : (typeof messageId === 'string' && messageId.trim() ? messageId.trim() : '');
+        if (targetId) {
+          const targetNode = chatHistoryManager?.chatHistory?.messages?.find(m => m.id === targetId) || null;
+          shouldUseThreadContext = !!(targetNode && targetNode.threadId === threadContextCandidate.threadId);
+        }
+      }
+
+      if (shouldUseThreadContext) {
+        activeThreadContext = threadContextCandidate;
+        activeThreadContext.container = threadContainer;
+        activeThreadContext.rootMessageId = activeThreadContext.annotation?.rootMessageId || null;
+        activeThreadContext.lastMessageId = activeThreadContext.annotation?.lastMessageId || null;
+      }
+    }
 
     // 重新生成“指定 AI 消息”的场景：如果提供 targetAiMessageId，则尝试进入“原地替换”模式。
     // 说明：
@@ -953,7 +1138,9 @@ export function createMessageSender(appContext) {
 
       // 清理与本次尝试相关的 UI 状态
       if (attemptState.aiMessageId) {
-        const aiEl = chatContainer.querySelector(`[data-message-id="${attemptState.aiMessageId}"]`);
+        const selector = `[data-message-id="${attemptState.aiMessageId}"]`;
+        const aiEl = chatContainer.querySelector(selector)
+          || (threadContainer ? threadContainer.querySelector(selector) : null);
         if (aiEl) {
           aiEl.classList.remove('updating');
           aiEl.classList.remove('regenerating');
@@ -999,16 +1186,62 @@ export function createMessageSender(appContext) {
           messageText,
           promptsConfig
         });
-        userMessageDiv = messageProcessor.appendMessage(
-          messageText,
-          'user',
-          false,
-          null,
-          inputController ? inputController.getImagesHTML() : imageContainer.innerHTML,
-          null,
-          null,
-          { promptType: currentPromptType || 'none', promptMeta: promptMetaForHistory }
-        );
+        const historyMeta = { promptType: currentPromptType || 'none', promptMeta: promptMetaForHistory };
+
+        if (activeThreadContext) {
+          // 线程模式：先补齐隐藏的“> 选中文本”节点，再把用户消息挂在其后
+          const threadRootId = ensureThreadRootMessage(activeThreadContext);
+          if (threadRootId) {
+            const historyParentId = activeThreadContext.annotation?.lastMessageId || threadRootId;
+            const historyPatch = buildThreadHistoryPatch(activeThreadContext);
+            userMessageDiv = messageProcessor.appendMessage(
+              messageText,
+              'user',
+              false,
+              null,
+              inputController ? inputController.getImagesHTML() : imageContainer.innerHTML,
+              null,
+              null,
+              historyMeta,
+              {
+                container: activeThreadContext.container,
+                historyParentId,
+                preserveCurrentNode: true,
+                historyPatch
+              }
+            );
+
+            if (userMessageDiv) {
+              const userMessageId = userMessageDiv.getAttribute('data-message-id') || '';
+              if (userMessageId) {
+                activeThreadContext.userMessageId = userMessageId;
+                updateThreadLastMessage(activeThreadContext, userMessageId);
+              }
+            }
+          } else {
+            activeThreadContext = null;
+          }
+        }
+
+        if (!userMessageDiv) {
+          userMessageDiv = messageProcessor.appendMessage(
+            messageText,
+            'user',
+            false,
+            null,
+            inputController ? inputController.getImagesHTML() : imageContainer.innerHTML,
+            null,
+            null,
+            historyMeta
+          );
+        }
+      }
+
+      if (activeThreadContext) {
+        if (activeThreadContext.userMessageId) {
+          activeThreadContext.parentMessageIdForAi = activeThreadContext.userMessageId;
+        }
+        attempt.threadContext = activeThreadContext;
       }
 
       // 清空输入区域
@@ -1021,7 +1254,9 @@ export function createMessageSender(appContext) {
       if (regenerateMode && normalizedTargetAiMessageId) {
         try {
           const node = chatHistoryManager?.chatHistory?.messages?.find(m => m.id === normalizedTargetAiMessageId) || null;
-          const el = chatContainer.querySelector(`[data-message-id="${normalizedTargetAiMessageId}"]`);
+          const selector = `[data-message-id="${normalizedTargetAiMessageId}"]`;
+          const el = chatContainer.querySelector(selector)
+            || (threadContainer ? threadContainer.querySelector(selector) : null);
           const isAssistantNode = !!(node && node.role === 'assistant');
           const isAiElement = !!(el && el.classList && el.classList.contains('ai-message'));
           canUpdateExistingAiMessage = !!(isAssistantNode && isAiElement);
@@ -1042,7 +1277,8 @@ export function createMessageSender(appContext) {
 
             // 若目标并非最后一条 AI 消息，关闭自动滚动，避免视角被强行拉到底部
             try {
-              const aiMessages = chatContainer.querySelectorAll('.message.ai-message');
+              const aiScope = (threadContainer && el && threadContainer.contains(el)) ? threadContainer : chatContainer;
+              const aiMessages = aiScope.querySelectorAll('.message.ai-message');
               const lastAi = aiMessages.length > 0 ? aiMessages[aiMessages.length - 1] : null;
               if (lastAi && lastAi !== el) {
                 shouldAutoScroll = false;
@@ -1057,7 +1293,8 @@ export function createMessageSender(appContext) {
 
       // 添加加载状态消息（仅在“追加新消息”模式下需要占位）
       if (!canUpdateExistingAiMessage) {
-        loadingMessage = messageProcessor.appendMessage('正在处理...', 'ai', true);
+        const loadingOptions = activeThreadContext ? { container: activeThreadContext.container } : null;
+        loadingMessage = messageProcessor.appendMessage('正在处理...', 'ai', true, null, null, null, null, null, loadingOptions);
         attempt.loadingMessage = loadingMessage;
         loadingMessage.classList.add('loading-message');
         // 让“等待回复”占位消息也带有 updating 状态，便于右键菜单显示“停止更新”
@@ -1122,9 +1359,13 @@ export function createMessageSender(appContext) {
       updateLoadingStatus(loadingMessage, '正在构建消息...', { stage: 'compose_messages' });
 
       // 构建消息数组（改为纯函数 composer）
-      conversationChain = Array.isArray(conversationSnapshot) && conversationSnapshot.length > 0
-        ? conversationSnapshot
-        : getCurrentConversationChain();
+      if (Array.isArray(conversationSnapshot) && conversationSnapshot.length > 0) {
+        conversationChain = conversationSnapshot;
+      } else if (activeThreadContext) {
+        conversationChain = buildThreadConversationChain(activeThreadContext);
+      } else {
+        conversationChain = getCurrentConversationChain();
+      }
       // 解析 api 参数（若提供）。发送层不再做任何策略推断
       if (api != null && typeof apiManager.resolveApiParam === 'function') {
         try { preferredApiConfig = apiManager.resolveApiParam(api); } catch (_) { preferredApiConfig = null; }
@@ -1353,14 +1594,15 @@ export function createMessageSender(appContext) {
         messageElement = loadingMessage;
         messageElement.textContent = errorMessageText;
       } else {
-        messageElement = messageProcessor.appendMessage(errorMessageText, 'ai', true);
+        const errorOptions = activeThreadContext ? { container: activeThreadContext.container } : null;
+        messageElement = messageProcessor.appendMessage(errorMessageText, 'ai', true, null, null, null, null, null, errorOptions);
       }
 
       if (messageElement) {
         messageElement.classList.add('error-message');
         messageElement.classList.remove('loading-message');
         messageElement.classList.remove('updating');
-        scrollToBottom();
+        scrollToBottom(resolveThreadScrollContainer(activeThreadContext));
       }
 
       if (autoRetryEnabled && typeof showNotification === 'function') {
@@ -1676,6 +1918,9 @@ export function createMessageSender(appContext) {
       { stage: 'stream_wait_first_token', apiBase: usedApiConfig?.baseUrl || '', modelName: usedApiConfig?.modelName || '' }
     );
 
+    const threadContext = attemptState?.threadContext || null;
+    const threadScrollContainer = resolveThreadScrollContainer(threadContext);
+
     function applyApiMetaToMessage(messageId, apiConfig, messageDiv) {
       try {
         if (!messageId) return;
@@ -1685,7 +1930,10 @@ export function createMessageSender(appContext) {
           node.apiDisplayName = apiConfig?.displayName || '';
           node.apiModelId = apiConfig?.modelName || '';
         }
-        renderApiFooter(messageDiv || chatContainer.querySelector(`[data-message-id="${messageId}"]`), node);
+        const selector = `[data-message-id="${messageId}"]`;
+        const fallbackEl = chatContainer.querySelector(selector)
+          || (threadContext?.container ? threadContext.container.querySelector(selector) : null);
+        renderApiFooter(messageDiv || fallbackEl, node);
       } catch (e) {
         console.warn('记录/渲染API信息失败:', e);
       }
@@ -1776,7 +2024,8 @@ export function createMessageSender(appContext) {
 	    const uiUpdateThrottler = createAdaptiveUpdateThrottler({
 	      run: (payload) => {
 	        if (!payload || !payload.messageId) return;
-	        const anchor = captureReadingAnchorForRegenerate(chatContainer, payload.messageId, attemptState);
+	        const regenContainer = threadScrollContainer || chatContainer;
+	        const anchor = captureReadingAnchorForRegenerate(regenContainer, payload.messageId, attemptState);
 	        try {
 	          withAutoScrollSuppressed(!!payload.suppressAutoScroll, () => {
 	            messageProcessor.updateAIMessage(
@@ -1787,7 +2036,7 @@ export function createMessageSender(appContext) {
 	            );
 	          });
 	        } finally {
-	          restoreReadingAnchor(chatContainer, anchor);
+	          restoreReadingAnchor(regenContainer, anchor);
 	        }
 	      },
 	      shouldCancel: () => {
@@ -1867,7 +2116,9 @@ export function createMessageSender(appContext) {
 	            }
 	          }
 
-	          const el = chatContainer.querySelector(`[data-message-id="${currentAiMessageId}"]`);
+	          const selector = `[data-message-id="${currentAiMessageId}"]`;
+	          const el = chatContainer.querySelector(selector)
+	            || (threadContext?.container ? threadContext.container.querySelector(selector) : null);
 	          if (el) {
 	            renderApiFooter(el, node);
 	          }
@@ -2061,7 +2312,8 @@ export function createMessageSender(appContext) {
 
 	        if (currentAiMessageId) {
 	          // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
-	          const anchor = captureReadingAnchorForRegenerate(chatContainer, currentAiMessageId, attemptState);
+	          const regenContainer = threadScrollContainer || chatContainer;
+	          const anchor = captureReadingAnchorForRegenerate(regenContainer, currentAiMessageId, attemptState);
 	          try {
 	            withAutoScrollSuppressed(!nowHasAnswerContent, () => {
 	              messageProcessor.updateAIMessage(
@@ -2079,11 +2331,23 @@ export function createMessageSender(appContext) {
 	            console.warn('原地替换 AI 消息失败，将回退为追加新消息:', e);
 	            currentAiMessageId = null;
 	          } finally {
-            restoreReadingAnchor(chatContainer, anchor);
+            restoreReadingAnchor(regenContainer, anchor);
           }
         }
 
         if (!currentAiMessageId) {
+          const threadHistoryPatch = buildThreadHistoryPatch(threadContext);
+          const threadOptions = threadContext
+            ? {
+                container: threadContext.container,
+                historyParentId: threadContext.parentMessageIdForAi
+                  || threadContext.lastMessageId
+                  || threadContext.rootMessageId
+                  || threadContext.anchorMessageId,
+                preserveCurrentNode: true,
+                historyPatch: threadHistoryPatch
+              }
+            : null;
           const newAiMessageDiv = messageProcessor.appendMessage(
             aiResponse,      // 初始完整回答文本
             'ai',
@@ -2091,21 +2355,24 @@ export function createMessageSender(appContext) {
             null,            // fragment = null
             null,            // inline 模式下不再单独传入图片HTML
             aiThoughtsRaw,   // 初始思考过程
-            null             // messageIdToUpdate = null
+            null,            // messageIdToUpdate = null
+            null,
+            threadOptions
           );
 
 	          if (newAiMessageDiv) {
 	            currentAiMessageId = newAiMessageDiv.getAttribute('data-message-id');
 	            // 将本次 AI 消息与 attempt 绑定，便于按消息粒度中止/清理
-	            if (attemptState) {
-	              attemptState.aiMessageId = currentAiMessageId;
-	            }
-	            // 记录 API 元信息并渲染 footer
-	            applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
-	          }
-	          if (nowHasAnswerContent) {
-	            scrollToBottom();
-	          }
+            if (attemptState) {
+              attemptState.aiMessageId = currentAiMessageId;
+            }
+            // 记录 API 元信息并渲染 footer
+            applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
+            updateThreadLastMessage(threadContext, currentAiMessageId);
+          }
+          if (nowHasAnswerContent) {
+            scrollToBottom(threadScrollContainer);
+          }
         }
 
 	        // 记录“正文已出现”：若首帧只包含思考过程，则保持 false，待正文首次出现时强制刷新一次 UI。
@@ -2280,7 +2547,8 @@ export function createMessageSender(appContext) {
               
 	              if (currentAiMessageId) {
 	                  // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
-	                  const anchor = captureReadingAnchorForRegenerate(chatContainer, currentAiMessageId, attemptState);
+	                  const regenContainer = threadScrollContainer || chatContainer;
+	                  const anchor = captureReadingAnchorForRegenerate(regenContainer, currentAiMessageId, attemptState);
 	                  try {
 	                    withAutoScrollSuppressed(!nowHasAnswerContent, () => {
 	                      messageProcessor.updateAIMessage(
@@ -2298,13 +2566,25 @@ export function createMessageSender(appContext) {
 	                    console.warn('原地替换 AI 消息失败，将回退为追加新消息:', e);
 	                    currentAiMessageId = null;
 	                  } finally {
-                    restoreReadingAnchor(chatContainer, anchor);
+                    restoreReadingAnchor(regenContainer, anchor);
                   }
               }
 
               if (!currentAiMessageId) {
                 // 【创建消息】调用 appendMessage 来创建新的AI消息DOM元素
                 // 这是获取唯一 messageId 的关键步骤
+                const threadHistoryPatch = buildThreadHistoryPatch(threadContext);
+                const threadOptions = threadContext
+                  ? {
+                      container: threadContext.container,
+                      historyParentId: threadContext.parentMessageIdForAi
+                        || threadContext.lastMessageId
+                        || threadContext.rootMessageId
+                        || threadContext.anchorMessageId,
+                      preserveCurrentNode: true,
+                      historyPatch: threadHistoryPatch
+                    }
+                  : null;
                 const newAiMessageDiv = messageProcessor.appendMessage(
                     aiResponse,     // 传入初始的文本内容
                     'ai',           // 指定发送者为 'ai'
@@ -2312,7 +2592,9 @@ export function createMessageSender(appContext) {
                     null,           // fragment: null, 直接添加到DOM
                     null,           // imagesHTML: null
                     aiThoughtsRaw,  // initialThoughtsRaw: 传入初始的思考内容
-                    null            // messageIdToUpdate: null, 因为是创建新消息
+                    null,           // messageIdToUpdate: null, 因为是创建新消息
+                    null,
+                    threadOptions
                 );
                 
                 // 从新创建的DOM元素中获取并保存 messageId
@@ -2324,11 +2606,12 @@ export function createMessageSender(appContext) {
                     }
                     // 记录 API 元信息并渲染 footer
                     applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
+                    updateThreadLastMessage(threadContext, currentAiMessageId);
                 }
                 
 	                // 自动滚动到聊天底部（仅在正文开始出现时触发）
 	                if (nowHasAnswerContent) {
-	                  scrollToBottom();
+	                  scrollToBottom(threadScrollContainer);
 	                }
               }
 
@@ -2377,6 +2660,9 @@ export function createMessageSender(appContext) {
       { stage: 'non_stream_read_body', apiBase: usedApiConfig?.baseUrl || '', modelName: usedApiConfig?.modelName || '' }
     );
 
+    const threadContext = attemptState?.threadContext || null;
+    const threadScrollContainer = resolveThreadScrollContainer(threadContext);
+
     function applyApiMetaToMessage(messageId, apiConfig, messageDiv) {
       try {
         if (!messageId) return;
@@ -2386,7 +2672,10 @@ export function createMessageSender(appContext) {
           node.apiDisplayName = apiConfig?.displayName || '';
           node.apiModelId = apiConfig?.modelName || '';
         }
-        renderApiFooter(messageDiv || chatContainer.querySelector(`[data-message-id="${messageId}"]`), node);
+        const selector = `[data-message-id="${messageId}"]`;
+        const fallbackEl = chatContainer.querySelector(selector)
+          || (threadContext?.container ? threadContext.container.querySelector(selector) : null);
+        renderApiFooter(messageDiv || fallbackEl, node);
       } catch (e) {
         console.warn('记录/渲染API信息失败:', e);
       }
@@ -2599,9 +2888,12 @@ export function createMessageSender(appContext) {
     if (existingMessageId) {
       try {
         const existingNode = chatHistoryManager.chatHistory.messages.find(m => m.id === existingMessageId);
-        const existingEl = chatContainer.querySelector(`[data-message-id="${existingMessageId}"]`);
+        const selector = `[data-message-id="${existingMessageId}"]`;
+        const existingEl = chatContainer.querySelector(selector)
+          || (threadContext?.container ? threadContext.container.querySelector(selector) : null);
         if (existingNode && existingNode.role === 'assistant' && existingEl && existingEl.classList.contains('ai-message')) {
-          const anchor = captureReadingAnchorForRegenerate(chatContainer, existingMessageId, attemptState);
+          const regenContainer = threadScrollContainer || chatContainer;
+          const anchor = captureReadingAnchorForRegenerate(regenContainer, existingMessageId, attemptState);
           try {
             messageProcessor.updateAIMessage(existingMessageId, answer || '', thoughts || '', null);
             // 重新生成（原地替换）：一旦开始写回新内容，旧签名就不再匹配，必须先清空
@@ -2633,10 +2925,10 @@ export function createMessageSender(appContext) {
 	                console.warn('记录 OpenAI 兼容推理元信息失败（非流式，原地替换）:', e);
 	              }
 	            }
-            if (!anchor) scrollToBottom();
+            if (!anchor) scrollToBottom(threadScrollContainer);
             return;
           } finally {
-            restoreReadingAnchor(chatContainer, anchor);
+            restoreReadingAnchor(regenContainer, anchor);
           }
         }
       } catch (e) {
@@ -2645,6 +2937,18 @@ export function createMessageSender(appContext) {
     }
 
     // 回退：创建新消息（旧行为）
+    const threadHistoryPatch = buildThreadHistoryPatch(threadContext);
+    const threadOptions = threadContext
+      ? {
+          container: threadContext.container,
+          historyParentId: threadContext.parentMessageIdForAi
+            || threadContext.lastMessageId
+            || threadContext.rootMessageId
+            || threadContext.anchorMessageId,
+          preserveCurrentNode: true,
+          historyPatch: threadHistoryPatch
+        }
+      : null;
     const newAiMessageDiv = messageProcessor.appendMessage(
       answer || '',
       'ai',
@@ -2652,7 +2956,9 @@ export function createMessageSender(appContext) {
       null,
       null,          // 非流式 Gemini 使用内联图片
       thoughts || '',
-      null
+      null,
+      null,
+      threadOptions
     );
     if (newAiMessageDiv) {
       const messageId = newAiMessageDiv.getAttribute('data-message-id');
@@ -2661,6 +2967,7 @@ export function createMessageSender(appContext) {
         attemptState.aiMessageId = messageId;
       }
       applyApiMetaToMessage(messageId, usedApiConfig, newAiMessageDiv);
+      updateThreadLastMessage(threadContext, messageId);
       // 在历史节点上记录推理签名，供后续多轮对话回传使用，并刷新 footer 标记
       if (thoughtSignature) {
         try {
@@ -2693,7 +3000,7 @@ export function createMessageSender(appContext) {
 	        }
 	      }
     }
-    scrollToBottom();
+    scrollToBottom(threadScrollContainer);
   }
 
   /**
