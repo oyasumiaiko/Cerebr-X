@@ -47,9 +47,10 @@ export function createSelectionThreadManager(appContext) {
 
   let bubbleEl = null;
   let bubbleHeaderEl = null;
-  let bubbleIconEl = null;
   let bubbleTitleEl = null;
   let bubbleContentEl = null;
+  let bubbleContentTextEl = null;
+  let bubbleContentIconEl = null;
 
   function ensureBubble() {
     if (bubbleEl) return;
@@ -60,23 +61,27 @@ export function createSelectionThreadManager(appContext) {
     bubbleHeaderEl = document.createElement('div');
     bubbleHeaderEl.className = 'selection-thread-bubble__header';
 
-    bubbleIconEl = document.createElement('div');
-    bubbleIconEl.className = 'selection-thread-bubble__icon';
-    bubbleHeaderEl.appendChild(bubbleIconEl);
-
     bubbleTitleEl = document.createElement('div');
     bubbleTitleEl.className = 'selection-thread-bubble__title';
     bubbleHeaderEl.appendChild(bubbleTitleEl);
 
     bubbleContentEl = document.createElement('div');
     bubbleContentEl.className = 'selection-thread-bubble__content';
+    bubbleContentTextEl = document.createElement('div');
+    bubbleContentTextEl.className = 'selection-thread-bubble__content-text';
+    bubbleContentIconEl = document.createElement('div');
+    bubbleContentIconEl.className = 'selection-thread-bubble__content-icon';
+    bubbleContentEl.appendChild(bubbleContentTextEl);
+    bubbleContentEl.appendChild(bubbleContentIconEl);
 
     bubbleEl.appendChild(bubbleHeaderEl);
     bubbleEl.appendChild(bubbleContentEl);
     bubbleEl.addEventListener('mouseenter', handleBubbleMouseEnter);
     bubbleEl.addEventListener('mouseleave', handleBubbleMouseLeave);
     bubbleEl.addEventListener('click', handleBubbleClick);
-    document.body.appendChild(bubbleEl);
+    const host = chatContainer || document.body;
+    // 气泡挂在聊天滚动容器内，确保随消息滚动而移动。
+    host.appendChild(bubbleEl);
   }
 
   function handleBubbleMouseEnter() {
@@ -129,21 +134,25 @@ export function createSelectionThreadManager(appContext) {
 
     bubbleTitleEl.textContent = title;
     bubbleTitleEl.style.display = title ? 'block' : 'none';
-    bubbleContentEl.textContent = content;
-    bubbleContentEl.style.display = content ? 'block' : 'none';
+    const hasContent = !!content;
+    bubbleContentTextEl.textContent = content;
+    bubbleContentTextEl.style.display = hasContent ? 'block' : 'none';
 
     if (iconClass) {
-      bubbleIconEl.innerHTML = '';
+      bubbleContentIconEl.innerHTML = '';
       const icon = document.createElement('i');
       icon.className = iconClass;
-      bubbleIconEl.appendChild(icon);
-      bubbleIconEl.style.display = 'flex';
+      bubbleContentIconEl.appendChild(icon);
+      bubbleContentIconEl.style.display = 'flex';
+      bubbleContentEl.classList.add('selection-thread-bubble__content--icon');
     } else {
-      bubbleIconEl.innerHTML = '';
-      bubbleIconEl.style.display = 'none';
+      bubbleContentIconEl.innerHTML = '';
+      bubbleContentIconEl.style.display = 'none';
+      bubbleContentEl.classList.remove('selection-thread-bubble__content--icon');
     }
 
-    bubbleHeaderEl.style.display = (title || iconClass) ? 'flex' : 'none';
+    bubbleContentEl.style.display = hasContent ? '' : 'none';
+    bubbleHeaderEl.style.display = title ? 'flex' : 'none';
 
     state.bubbleClickHandler = typeof onClick === 'function' ? onClick : null;
     bubbleEl.classList.toggle('selection-thread-bubble--action', !!state.bubbleClickHandler);
@@ -174,21 +183,35 @@ export function createSelectionThreadManager(appContext) {
   function positionBubble(rect) {
     if (!bubbleEl || !rect) return;
     const padding = 12;
-    const viewportW = window.innerWidth;
-    const viewportH = window.innerHeight;
+    // 说明：把 viewport 坐标换算为滚动容器的内容坐标（包含 scrollTop/Left），
+    // 这样气泡定位随内容滚动，不再“固定在屏幕上”。
+    const host = chatContainer || document.body;
+    const hostRect = host.getBoundingClientRect ? host.getBoundingClientRect() : { left: 0, top: 0 };
+    const scrollLeft = Number.isFinite(host.scrollLeft) ? host.scrollLeft : 0;
+    const scrollTop = Number.isFinite(host.scrollTop) ? host.scrollTop : 0;
+    const hostWidth = Number.isFinite(host.clientWidth) ? host.clientWidth : window.innerWidth;
+    const hostHeight = Number.isFinite(host.clientHeight) ? host.clientHeight : window.innerHeight;
 
     const bubbleRect = bubbleEl.getBoundingClientRect();
-    let left = rect.left + rect.width / 2 - bubbleRect.width / 2;
-    let top = rect.top - bubbleRect.height - 10;
+    const anchorCenterX = rect.left - hostRect.left + scrollLeft + rect.width / 2;
+    const anchorTop = rect.top - hostRect.top + scrollTop;
+    const anchorBottom = rect.bottom - hostRect.top + scrollTop;
+    let left = anchorCenterX - bubbleRect.width / 2;
+    let top = anchorTop - bubbleRect.height - 10;
     let placement = 'top';
 
-    if (top < padding) {
-      top = rect.bottom + 10;
+    const visibleTop = scrollTop + padding;
+    const visibleBottom = scrollTop + hostHeight - padding;
+    if (top < visibleTop) {
+      top = anchorBottom + 10;
       placement = 'bottom';
     }
 
-    left = Math.max(padding, Math.min(left, viewportW - bubbleRect.width - padding));
-    top = Math.max(padding, Math.min(top, viewportH - bubbleRect.height - padding));
+    const minLeft = scrollLeft + padding;
+    const maxLeft = scrollLeft + hostWidth - bubbleRect.width - padding;
+    if (Number.isFinite(minLeft) && Number.isFinite(maxLeft)) {
+      left = Math.max(minLeft, Math.min(left, maxLeft));
+    }
 
     bubbleEl.style.left = `${Math.round(left)}px`;
     bubbleEl.style.top = `${Math.round(top)}px`;
@@ -861,7 +884,7 @@ export function createSelectionThreadManager(appContext) {
     showBubbleAtRect(rect, {
       title: existingThread ? '划词对话' : '',
       content: previewText,
-      iconClass: showQuoteIcon ? 'fa-solid fa-quote-left' : '',
+      iconClass: showQuoteIcon ? 'fa-solid fa-quote-right' : '',
       onClick: () => {
         if (existingThread) {
           enterThread(existingThread.id);
@@ -878,8 +901,7 @@ export function createSelectionThreadManager(appContext) {
         clearSelectionRanges();
       },
       pinned: true,
-      type: 'selection',
-      variant: showQuoteIcon ? 'icon' : ''
+      type: 'selection'
     });
   }
 

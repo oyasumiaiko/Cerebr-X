@@ -403,6 +403,7 @@ body.standalone-mode #empty-state-repomix {
     height: 100%;
     flex: 1;
     min-width: 0;
+    position: relative;
     overflow-y: auto;
     overflow-x: hidden;
     overscroll-behavior: contain;
@@ -1993,9 +1994,9 @@ input:checked + .slider::before {
 
 /* 划词线程气泡提示 */
 .selection-thread-bubble {
-    position: fixed;
+    position: absolute;
     z-index: 2100;
-    max-width: min(360px, calc(100vw - 40px));
+    max-width: min(360px, calc(100% - 40px));
     padding: 10px 12px;
     border-radius: 12px;
     --selection-thread-bubble-bg: color-mix(in srgb, var(--cerebr-bg-color) 92%, transparent);
@@ -2046,18 +2047,6 @@ input:checked + .slider::before {
     margin-bottom: 6px;
 }
 
-.selection-thread-bubble__icon {
-    width: 26px;
-    height: 26px;
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--cerebr-input-bg) 75%, transparent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-    color: var(--cerebr-text-color);
-}
-
 .selection-thread-bubble__title {
     font-size: 12px;
     font-weight: 600;
@@ -2069,18 +2058,25 @@ input:checked + .slider::before {
     white-space: pre-wrap;
 }
 
-.selection-thread-bubble[data-variant="icon"] {
-    padding: 8px 10px;
+.selection-thread-bubble__content--icon {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
 }
 
-.selection-thread-bubble[data-variant="icon"] .selection-thread-bubble__header {
-    margin-bottom: 0;
+.selection-thread-bubble__content-text {
+    flex: 1;
+    min-width: 0;
+    white-space: pre-wrap;
+}
+
+.selection-thread-bubble__content-icon {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
     justify-content: center;
-}
-
-.selection-thread-bubble[data-variant="icon"] .selection-thread-bubble__title,
-.selection-thread-bubble[data-variant="icon"] .selection-thread-bubble__content {
-    display: none;
+    font-size: 14px;
+    color: var(--cerebr-text-color);
 }
 
 /* 链接样式 */
