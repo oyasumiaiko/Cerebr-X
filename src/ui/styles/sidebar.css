@@ -504,6 +504,7 @@ body.thread-mode-active #thread-panel {
     border: 1px dashed color-mix(in srgb, var(--cerebr-border-color) 60%, transparent);
     background: color-mix(in srgb, var(--cerebr-bg-color) 90%, transparent);
     color: var(--cerebr-text-color);
+    font-size: var(--cerebr-font-size);
 }
 
 .thread-selection-banner__header {
@@ -514,7 +515,7 @@ body.thread-mode-active #thread-panel {
 }
 
 .thread-selection-banner__label {
-    font-size: 14px;
+    font-size: 0.95em;
     font-weight: 600;
     letter-spacing: 0.2px;
     opacity: 0.8;
@@ -533,12 +534,18 @@ body.thread-mode-active #thread-panel {
     background: color-mix(in srgb, var(--cerebr-input-bg) 85%, transparent);
     color: var(--cerebr-text-color);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 0.9em;
     min-height: 28px;
 }
 
+.thread-selection-banner__button--confirm {
+    border-color: color-mix(in srgb, var(--cerebr-highlight) 55%, transparent);
+    background: color-mix(in srgb, var(--cerebr-highlight) 12%, var(--cerebr-input-bg) 88%);
+    color: var(--cerebr-highlight);
+}
+
 .thread-selection-banner__text {
-    font-size: 12px;
+    font-size: 0.88em;
     line-height: 1.5;
     white-space: pre-wrap;
 }
@@ -2037,6 +2044,7 @@ input:checked + .slider::before {
     backdrop-filter: blur(10px);
     display: none;
     color: var(--cerebr-text-color);
+    font-size: var(--cerebr-font-size);
 }
 
 .selection-thread-bubble::after {
@@ -2078,12 +2086,12 @@ input:checked + .slider::before {
 }
 
 .selection-thread-bubble__title {
-    font-size: 12px;
+    font-size: 0.9em;
     font-weight: 600;
 }
 
 .selection-thread-bubble__content {
-    font-size: 12px;
+    font-size: 0.9em;
     line-height: 1.5;
     white-space: pre-wrap;
 }
@@ -2105,8 +2113,37 @@ input:checked + .slider::before {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    gap: 6px;
+    font-size: 0.95em;
     color: var(--cerebr-text-color);
+}
+
+.selection-thread-bubble__icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+    background: color-mix(in srgb, var(--cerebr-input-bg) 80%, transparent);
+    color: var(--cerebr-text-color);
+    cursor: pointer;
+}
+
+.selection-thread-bubble__icon-button:hover {
+    background: color-mix(in srgb, var(--cerebr-input-bg) 92%, transparent);
+}
+
+.selection-thread-bubble__icon-button.is-disabled,
+.selection-thread-bubble__icon-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.selection-thread-bubble__icon-static {
+    opacity: 0.85;
 }
 
 /* 链接样式 */

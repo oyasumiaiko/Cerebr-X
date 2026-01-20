@@ -18,6 +18,8 @@ export function createSelectionThreadManager(appContext) {
   const chatHistoryManager = services.chatHistoryManager;
   const chatHistoryUI = services.chatHistoryUI;
   const messageProcessor = services.messageProcessor;
+  const messageSender = services.messageSender;
+  const promptSettingsManager = services.promptSettingsManager;
   const imageHandler = services.imageHandler;
   const apiManager = services.apiManager;
   const showNotification = utils?.showNotification;
@@ -32,7 +34,8 @@ export function createSelectionThreadManager(appContext) {
     bubbleHovered: false,
     highlightHovered: false,
     bubbleHideTimer: null,
-    bubbleClickHandler: null
+    bubbleClickHandler: null,
+    bubbleActionHandlers: new Map()
   };
 
   const threadPanelHome = {
@@ -78,7 +81,7 @@ export function createSelectionThreadManager(appContext) {
     bubbleEl.appendChild(bubbleContentEl);
     bubbleEl.addEventListener('mouseenter', handleBubbleMouseEnter);
     bubbleEl.addEventListener('mouseleave', handleBubbleMouseLeave);
-    bubbleEl.addEventListener('click', handleBubbleClick);
+    bubbleEl.addEventListener('click', handleBubbleClick, true);
     const host = chatContainer || document.body;
     // 气泡挂在聊天滚动容器内，确保随消息滚动而移动，同时不打断“最后一条消息”的底部间距。
     if (host.firstChild) {
@@ -99,6 +102,25 @@ export function createSelectionThreadManager(appContext) {
   }
 
   function handleBubbleClick(event) {
+    if (event && bubbleEl) {
+      const actionButton = event.target?.closest?.('.selection-thread-bubble__icon-button');
+      const actionId = actionButton?.dataset?.actionId || '';
+      // 调试：确认气泡动作按钮是否收到点击事件
+      if (actionId) {
+        console.log('[划词气泡] 点击动作按钮:', actionId);
+      } else {
+        console.log('[划词气泡] 点击气泡主体');
+      }
+      if (actionId && state.bubbleActionHandlers?.has(actionId)) {
+        event.preventDefault();
+        event.stopPropagation();
+        const handler = state.bubbleActionHandlers.get(actionId);
+        if (typeof handler === 'function') {
+          handler();
+        }
+        return;
+      }
+    }
     if (typeof state.bubbleClickHandler !== 'function') return;
     event.preventDefault();
     event.stopPropagation();
@@ -130,6 +152,7 @@ export function createSelectionThreadManager(appContext) {
       title = '',
       content = '',
       iconClass = '',
+      iconButtons = null,
       onClick = null,
       pinned = false,
       type = 'preview',
@@ -142,7 +165,40 @@ export function createSelectionThreadManager(appContext) {
     bubbleContentTextEl.textContent = content;
     bubbleContentTextEl.style.display = hasContent ? 'block' : 'none';
 
-    if (iconClass) {
+    state.bubbleActionHandlers?.clear?.();
+    if (Array.isArray(iconButtons) && iconButtons.length) {
+      bubbleContentIconEl.innerHTML = '';
+      iconButtons.forEach((button, index) => {
+        if (!button || !button.iconClass) return;
+        const iconButton = document.createElement('button');
+        iconButton.type = 'button';
+        iconButton.className = `selection-thread-bubble__icon-button${button.className ? ` ${button.className}` : ''}`;
+        if (button.title) iconButton.title = button.title;
+        const actionId = `bubble_action_${Date.now()}_${index}`;
+        iconButton.dataset.actionId = actionId;
+        if (typeof button.onClick === 'function') {
+          state.bubbleActionHandlers.set(actionId, button.onClick);
+        }
+        if (button.disabled) {
+          iconButton.disabled = true;
+          iconButton.classList.add('is-disabled');
+        }
+        const icon = document.createElement('i');
+        icon.className = button.iconClass;
+        iconButton.appendChild(icon);
+        bubbleContentIconEl.appendChild(iconButton);
+      });
+      if (iconClass) {
+        const icon = document.createElement('i');
+        icon.className = `${iconClass} selection-thread-bubble__icon-static`;
+        bubbleContentIconEl.appendChild(icon);
+      }
+      bubbleContentIconEl.style.display = bubbleContentIconEl.childElementCount ? 'flex' : 'none';
+      bubbleContentEl.classList.toggle(
+        'selection-thread-bubble__content--icon',
+        bubbleContentIconEl.childElementCount > 0
+      );
+    } else if (iconClass) {
       bubbleContentIconEl.innerHTML = '';
       const icon = document.createElement('i');
       icon.className = iconClass;
@@ -236,6 +292,7 @@ export function createSelectionThreadManager(appContext) {
     state.bubbleHovered = false;
     state.highlightHovered = false;
     state.bubbleClickHandler = null;
+    state.bubbleActionHandlers?.clear?.();
   }
 
   function isFullscreenLayout() {
@@ -497,13 +554,39 @@ export function createSelectionThreadManager(appContext) {
     const actions = document.createElement('div');
     actions.className = 'thread-selection-banner__actions';
 
+    const confirmButton = document.createElement('button');
+    confirmButton.className = 'thread-selection-banner__button thread-selection-banner__button--confirm';
+    confirmButton.setAttribute('type', 'button');
+    confirmButton.textContent = '确认删除';
+    confirmButton.style.display = 'none';
+
     const deleteButton = document.createElement('button');
     deleteButton.className = 'thread-selection-banner__button thread-selection-banner__button--delete';
     deleteButton.setAttribute('type', 'button');
     deleteButton.textContent = '删除';
+    const resetDeleteConfirm = () => {
+      confirmButton.style.display = 'none';
+      deleteButton.textContent = '删除';
+      deleteButton.dataset.confirmArmed = 'false';
+    };
+    // 两段式确认：先点击“删除”露出左侧确认按钮，再移动鼠标点击确认按钮执行删除。
     deleteButton.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
+      const isArmed = deleteButton.dataset.confirmArmed === 'true';
+      if (isArmed) {
+        resetDeleteConfirm();
+        return;
+      }
+      deleteButton.dataset.confirmArmed = 'true';
+      deleteButton.textContent = '取消';
+      confirmButton.style.display = 'inline-flex';
+    });
+
+    confirmButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      resetDeleteConfirm();
       deleteActiveThread();
     });
 
@@ -514,9 +597,11 @@ export function createSelectionThreadManager(appContext) {
     exitButton.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
+      resetDeleteConfirm();
       exitThread();
     });
 
+    actions.appendChild(confirmButton);
     actions.appendChild(deleteButton);
     actions.appendChild(exitButton);
 
@@ -901,6 +986,62 @@ export function createSelectionThreadManager(appContext) {
     } catch (_) {}
   }
 
+  function runSelectionPromptInThread(anchorNode, selectionInfo, messageElement, existingThread) {
+    const selectionText = (selectionInfo?.selectionText || '').trim();
+    if (!selectionText) {
+      showNotification?.({ message: '选中内容为空，无法发送划词提示', type: 'warning' });
+      console.warn('[划词气泡] 选中内容为空，跳过发送');
+      return false;
+    }
+
+    if (!promptSettingsManager?.getPrompts) {
+      showNotification?.({ message: '未找到划词提示词配置', type: 'warning' });
+      console.warn('[划词气泡] promptSettingsManager 未就绪');
+      return false;
+    }
+
+    const prompts = promptSettingsManager.getPrompts();
+    const selectionPromptText = (prompts?.selection?.prompt || '').trim();
+    if (!selectionPromptText) {
+      showNotification?.({ message: '尚未配置划词提示词，请在设置中补充', type: 'warning' });
+      console.warn('[划词气泡] 划词提示词为空');
+      return false;
+    }
+
+    if (!messageSender?.sendMessage) {
+      showNotification?.({ message: '发送器未就绪，暂时无法发送', type: 'warning' });
+      console.warn('[划词气泡] messageSender 未就绪');
+      return false;
+    }
+
+    console.log('[划词气泡] 准备发送划词提示', { selectionText });
+    let targetThread = existingThread;
+    if (!targetThread) {
+      const created = createThreadAnnotation(anchorNode, selectionInfo);
+      if (!created) {
+        showNotification?.({ message: '创建划词对话失败', type: 'warning' });
+        console.warn('[划词气泡] 创建线程失败');
+        return false;
+      }
+      decorateMessageElement(messageElement, anchorNode);
+      targetThread = created;
+    }
+
+    // 进入线程后，用划词提示词自动发送一条消息（效果等同于手动使用划词提示词）。
+    enterThread(targetThread.id);
+    const userMessageText = selectionPromptText.replace('<SELECTION>', selectionText);
+    const apiPref = (prompts.selection?.model || '').trim();
+    const apiParam = apiPref || 'follow_current';
+    console.log('[划词气泡] 发送参数', { api: apiParam, message: userMessageText });
+    messageSender.sendMessage({
+      originalMessageText: userMessageText,
+      specificPromptType: 'selection',
+      promptMeta: { selectionText },
+      api: apiParam
+    });
+    return true;
+  }
+
   function showSelectionBubble(selectionInfo, messageElement, range) {
     if (!selectionInfo || !messageElement || !range) return;
     const rect = range.getBoundingClientRect();
@@ -911,6 +1052,10 @@ export function createSelectionThreadManager(appContext) {
     if (!anchorNode) return;
 
     const existingThread = findThreadBySelection(anchorNode, selectionInfo.selectionText, selectionInfo.matchIndex);
+    console.log('[划词气泡] 展示气泡', {
+      selectionText: selectionInfo.selectionText,
+      hasExistingThread: !!existingThread
+    });
     state.pendingSelection = {
       messageId,
       selectionText: selectionInfo.selectionText,
@@ -927,6 +1072,24 @@ export function createSelectionThreadManager(appContext) {
       title: existingThread ? '划词对话' : '',
       content: previewText,
       iconClass: showQuoteIcon ? 'fa-solid fa-quote-right' : '',
+      iconButtons: [
+        {
+          iconClass: 'fa-solid fa-paper-plane',
+          title: '使用划词提示词发送',
+          onClick: () => {
+            const didSend = runSelectionPromptInThread(
+              anchorNode,
+              selectionInfo,
+              messageElement,
+              existingThread
+            );
+            if (didSend) {
+              hideBubble(true);
+              clearSelectionRanges();
+            }
+          }
+        }
+      ],
       onClick: () => {
         if (existingThread) {
           enterThread(existingThread.id);
@@ -1078,7 +1241,10 @@ export function createSelectionThreadManager(appContext) {
     return !!state.activeThreadId;
   }
 
-  function handleSelectionMouseUp() {
+  function handleSelectionMouseUp(event) {
+    if (event && bubbleEl && bubbleEl.contains(event.target)) {
+      return;
+    }
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) {
       if (!state.bubblePinned) hideBubble();
