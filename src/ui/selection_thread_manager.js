@@ -80,8 +80,12 @@ export function createSelectionThreadManager(appContext) {
     bubbleEl.addEventListener('mouseleave', handleBubbleMouseLeave);
     bubbleEl.addEventListener('click', handleBubbleClick);
     const host = chatContainer || document.body;
-    // 气泡挂在聊天滚动容器内，确保随消息滚动而移动。
-    host.appendChild(bubbleEl);
+    // 气泡挂在聊天滚动容器内，确保随消息滚动而移动，同时不打断“最后一条消息”的底部间距。
+    if (host.firstChild) {
+      host.insertBefore(bubbleEl, host.firstChild);
+    } else {
+      host.appendChild(bubbleEl);
+    }
   }
 
   function handleBubbleMouseEnter() {
