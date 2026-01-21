@@ -87,9 +87,10 @@ export function createChatHistoryUI(appContext) {
   const galleryCache = {
     items: [],
     loaded: false,
-    lastLoadTs: 0
+    lastLoadTs: 0,
+    loadingPromise: null
   };
-  const GALLERY_IMAGE_LIMIT = 500;
+  const GALLERY_RENDER_BATCH_SIZE = 120;
 
   function createEmptySearchCache() {
     return {
@@ -107,11 +108,16 @@ export function createChatHistoryUI(appContext) {
     galleryCache.items = [];
     galleryCache.loaded = false;
     galleryCache.lastLoadTs = 0;
+    galleryCache.loadingPromise = null;
     try {
       const panel = document.getElementById('chat-history-panel');
       if (panel) {
         const galleryContent = panel.querySelector('.history-tab-content[data-tab="gallery"]');
         if (galleryContent) {
+          if (galleryContent._galleryObserver) {
+            galleryContent._galleryObserver.disconnect();
+            galleryContent._galleryObserver = null;
+          }
           galleryContent.dataset.rendered = '';
           if (!galleryContent.classList.contains('active')) {
             galleryContent.innerHTML = '';
@@ -3646,94 +3652,145 @@ export function createChatHistoryUI(appContext) {
     if (!forceRefresh && galleryCache.loaded) {
       return galleryCache.items;
     }
-    const metas = await getAllConversationMetadataWithCache(false);
-    // 按最新时间降序扫描，确保相册优先收录最新图片并支持提前截断。
-    const sortedMetas = Array.isArray(metas)
-      ? [...metas].sort((a, b) => (Number(b?.endTime) || 0) - (Number(a?.endTime) || 0))
-      : [];
-    let downloadRoot = null;
-    try {
-      downloadRoot = await loadDownloadRoot();
-    } catch (_) {}
+    if (galleryCache.loadingPromise) {
+      return galleryCache.loadingPromise;
+    }
 
-    const images = [];
-    const seenKeys = new Set();
-    let minTimestamp = null;
-
-    // 相册专用：避免逐条 await，优先用已缓存的下载根路径拼接。
-    const resolveImageUrlForGallery = (imageUrlObj) => {
-      if (!imageUrlObj) return '';
-      const rawUrl = typeof imageUrlObj.url === 'string' ? imageUrlObj.url : '';
-      const relPath = typeof imageUrlObj.path === 'string' ? imageUrlObj.path : '';
-      if (rawUrl.startsWith('file://')) return rawUrl;
-      if (relPath) {
-        const fileUrl = downloadRoot ? buildFileUrlFromRelative(relPath, downloadRoot) : null;
-        return fileUrl || relPath;
-      }
-      if (rawUrl) {
-        if (/^(https?:|data:|blob:|chrome-extension:|moz-extension:)/i.test(rawUrl)) return rawUrl;
-        const fileUrl = downloadRoot ? buildFileUrlFromRelative(rawUrl, downloadRoot) : null;
-        return fileUrl || rawUrl;
-      }
-      return '';
-    };
-
-    for (let i = 0; i < sortedMetas.length; i++) {
-      const meta = sortedMetas[i];
-      const endTime = Number(meta?.endTime) || 0;
-      // 已达到数量上限时，若后续会话的 endTime 不可能超过当前最旧图片，则可提前停止扫描。
-      if (minTimestamp != null && endTime <= minTimestamp) {
-        break;
+    const runPromise = (async () => {
+      if (forceRefresh) {
+        galleryCache.items = [];
+        galleryCache.loaded = false;
+        galleryCache.lastLoadTs = 0;
       }
 
-      const conv = await getConversationById(meta.id, true);
-      if (!conv || !Array.isArray(conv.messages)) continue;
-      const convDomain = getDisplayUrl(conv.url);
+      const metas = await getAllConversationMetadataWithCache(forceRefresh);
+      // 按最新时间降序扫描，确保相册默认按时间倒序展示。
+      const sortedMetas = Array.isArray(metas)
+        ? [...metas].sort((a, b) => (Number(b?.endTime) || 0) - (Number(a?.endTime) || 0))
+        : [];
+      let downloadRoot = null;
+      try {
+        downloadRoot = await loadDownloadRoot();
+      } catch (_) {}
 
-      for (let m = conv.messages.length - 1; m >= 0; m--) {
-        const msg = conv.messages[m];
-        const timestamp = Number(msg?.timestamp || conv.endTime || conv.startTime || Date.now());
-        const normalizedContent = normalizeStoredMessageContent(msg?.content);
-        if (!Array.isArray(normalizedContent)) continue;
+      // 相册专用：避免逐条 await，优先用已缓存的下载根路径拼接。
+      const resolveImageUrlForGallery = (imageUrlObj) => {
+        if (!imageUrlObj) return '';
+        const rawUrl = typeof imageUrlObj.url === 'string' ? imageUrlObj.url : '';
+        const relPath = typeof imageUrlObj.path === 'string' ? imageUrlObj.path : '';
+        if (rawUrl.startsWith('file://')) return rawUrl;
+        if (relPath) {
+          const fileUrl = downloadRoot ? buildFileUrlFromRelative(relPath, downloadRoot) : null;
+          return fileUrl || relPath;
+        }
+        if (rawUrl) {
+          if (/^(https?:|data:|blob:|chrome-extension:|moz-extension:)/i.test(rawUrl)) return rawUrl;
+          const fileUrl = downloadRoot ? buildFileUrlFromRelative(rawUrl, downloadRoot) : null;
+          return fileUrl || rawUrl;
+        }
+        return '';
+      };
 
-        for (let idx = normalizedContent.length - 1; idx >= 0; idx--) {
-          const part = normalizedContent[idx];
-          if (!part || part.type !== 'image_url' || !part.image_url) continue;
-          const resolvedUrl = resolveImageUrlForGallery(part.image_url);
-          if (!resolvedUrl) continue;
-          const rawKey = part.image_url.path || part.image_url.url || resolvedUrl;
-          const key = `${conv.id || 'conv'}_${msg.id || idx}_${idx}_${rawKey}`;
-          if (seenKeys.has(key)) continue;
-          seenKeys.add(key);
-          images.push({
+      const normalizeGalleryRel = (p) => normalizePath(p || '').replace(/^\/+/, '').toLowerCase();
+      const buildGalleryImageKey = (imageUrlObj, resolvedUrl) => {
+        // 优先用相对路径做去重，避免分支对话重复图片反复出现
+        const rawPath = typeof imageUrlObj?.path === 'string' ? imageUrlObj.path.trim() : '';
+        if (rawPath) return `rel:${normalizeGalleryRel(rawPath)}`;
+        const rawUrl = typeof imageUrlObj?.url === 'string' ? imageUrlObj.url.trim() : '';
+        if (rawUrl.startsWith('file://')) {
+          const rel = fileUrlToRelative(rawUrl);
+          if (rel) return `rel:${normalizeGalleryRel(rel)}`;
+        }
+        if (resolvedUrl && resolvedUrl.startsWith('file://')) {
+          const rel = fileUrlToRelative(resolvedUrl);
+          if (rel) return `rel:${normalizeGalleryRel(rel)}`;
+        }
+        const fallback = rawUrl || resolvedUrl || '';
+        return fallback ? `url:${fallback}` : '';
+      };
+
+      // 先收集“带图片的消息”，按时间倒序处理，确保同一消息图片连续且去重保留最新记录
+      const messageEntries = [];
+      let seq = 0;
+      for (let i = 0; i < sortedMetas.length; i++) {
+        const meta = sortedMetas[i];
+        const conv = await getConversationById(meta.id, true);
+        if (!conv || !Array.isArray(conv.messages)) continue;
+        const convDomain = getDisplayUrl(conv.url);
+
+        for (let m = conv.messages.length - 1; m >= 0; m--) {
+          const msg = conv.messages[m];
+          const timestamp = Number(msg?.timestamp || conv.endTime || conv.startTime || Date.now());
+          const normalizedContent = normalizeStoredMessageContent(msg?.content);
+          if (!Array.isArray(normalizedContent)) continue;
+
+          const imageParts = [];
+          for (let idx = 0; idx < normalizedContent.length; idx++) {
+            const part = normalizedContent[idx];
+            if (!part || part.type !== 'image_url' || !part.image_url) continue;
+            imageParts.push({ imageUrl: part.image_url, partIndex: idx });
+          }
+          if (!imageParts.length) continue;
+
+          messageEntries.push({
             conversationId: conv.id,
             messageId: msg.id,
-            url: resolvedUrl,
+            messageKey: `${conv.id || 'conv'}_${msg.id || m}`,
             timestamp,
             summary: conv.summary || '',
             title: conv.title || '',
-            domain: convDomain || '未知来源'
+            domain: convDomain || '未知来源',
+            imageParts,
+            seq
+          });
+          seq += 1;
+        }
+      }
+
+      messageEntries.sort((a, b) => {
+        const diff = Number(b.timestamp || 0) - Number(a.timestamp || 0);
+        if (diff !== 0) return diff;
+        return a.seq - b.seq;
+      });
+
+      const seenKeys = new Set();
+      const images = [];
+      for (const entry of messageEntries) {
+        // 同一条消息的图片保持连续，便于相册聚类查看
+        const orderedParts = entry.imageParts.slice().sort((a, b) => a.partIndex - b.partIndex);
+        for (const part of orderedParts) {
+          const resolvedUrl = resolveImageUrlForGallery(part.imageUrl);
+          if (!resolvedUrl) continue;
+          const dedupeKey = buildGalleryImageKey(part.imageUrl, resolvedUrl);
+          if (!dedupeKey || seenKeys.has(dedupeKey)) continue;
+          seenKeys.add(dedupeKey);
+          images.push({
+            conversationId: entry.conversationId,
+            messageId: entry.messageId,
+            messageKey: entry.messageKey,
+            url: resolvedUrl,
+            timestamp: entry.timestamp,
+            summary: entry.summary || '',
+            title: entry.title || '',
+            domain: entry.domain || '未知来源'
           });
         }
       }
 
-      if (images.length >= GALLERY_IMAGE_LIMIT) {
-        images.sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
-        if (images.length > GALLERY_IMAGE_LIMIT) {
-          images.length = GALLERY_IMAGE_LIMIT;
-        }
-        minTimestamp = Number(images[images.length - 1]?.timestamp || 0);
+      galleryCache.items = images;
+      galleryCache.loaded = true;
+      galleryCache.lastLoadTs = Date.now();
+      return images;
+    })();
+
+    galleryCache.loadingPromise = runPromise;
+    try {
+      return await runPromise;
+    } finally {
+      if (galleryCache.loadingPromise === runPromise) {
+        galleryCache.loadingPromise = null;
       }
     }
-
-    images.sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
-    if (images.length > GALLERY_IMAGE_LIMIT) {
-      images.length = GALLERY_IMAGE_LIMIT;
-    }
-    galleryCache.items = images;
-    galleryCache.loaded = true;
-    galleryCache.lastLoadTs = Date.now();
-    return images;
   }
 
   async function renderGalleryTab(container, { forceRefresh = false } = {}) {
@@ -3762,63 +3819,98 @@ export function createChatHistoryUI(appContext) {
         container.dataset.rendered = 'true';
         return;
       }
+
+      if (container._galleryObserver) {
+        container._galleryObserver.disconnect();
+        container._galleryObserver = null;
+      }
+
       const grid = document.createElement('div');
       grid.className = 'gallery-grid';
+      const sentinel = document.createElement('div');
+      sentinel.className = 'gallery-sentinel';
+      sentinel.textContent = '加载更多…';
+      grid.appendChild(sentinel);
 
-      images.forEach((record) => {
-        const item = document.createElement('div');
-        item.className = 'gallery-item';
-
-        const thumb = document.createElement('div');
-        thumb.className = 'gallery-thumb';
-        const img = document.createElement('img');
-        img.src = record.url;
-        img.loading = 'lazy';
-        img.alt = record.summary || record.title || record.domain || '聊天图片';
-        thumb.appendChild(img);
-        item.appendChild(thumb);
-
-        const meta = document.createElement('div');
-        meta.className = 'gallery-meta';
-
-        const metaTitle = document.createElement('div');
-        metaTitle.className = 'gallery-meta-title';
-        metaTitle.textContent = record.summary || record.title || record.domain || '聊天图片';
-        meta.appendChild(metaTitle);
-
-        const metaInfo = document.createElement('div');
-        metaInfo.className = 'gallery-meta-info';
-        metaInfo.textContent = `${formatRelativeTime(new Date(record.timestamp || Date.now()))} · ${record.domain || '未知来源'}`;
-        meta.appendChild(metaInfo);
-
-        item.appendChild(meta);
-
-        item.addEventListener('click', async () => {
-          try {
-            const conversation = await getConversationFromCacheOrLoad(record.conversationId);
-            if (conversation) {
-              await loadConversationIntoChat(conversation, {
-                skipMessageAnimation: true,
-                skipScrollToBottom: true
-              });
-              jumpToMessageById(record.messageId, { highlightClass: 'gallery-highlight', highlightDuration: 1600 });
-            }
-          } catch (error) {
-            console.error('打开图片所属对话失败:', error);
+      let renderedCount = 0;
+      // 分批追加 DOM，避免一次性渲染大量图片导致卡顿/长时间白屏
+      const appendBatch = () => {
+        const nextCount = Math.min(renderedCount + GALLERY_RENDER_BATCH_SIZE, images.length);
+        for (let i = renderedCount; i < nextCount; i++) {
+          const record = images[i];
+          const item = document.createElement('div');
+          item.className = 'gallery-item';
+          if (record.messageKey) {
+            item.dataset.messageKey = record.messageKey;
           }
-        });
 
-        item.addEventListener('contextmenu', (event) => {
-          event.preventDefault();
-          try {
-            window.open(record.url, '_blank', 'noopener');
-          } catch (_) {}
-        });
+          const img = document.createElement('img');
+          img.src = record.url;
+          img.loading = 'lazy';
+          img.decoding = 'async';
+          img.alt = record.summary || record.title || record.domain || '聊天图片';
+          item.appendChild(img);
 
-        grid.appendChild(item);
-      });
+          const overlay = document.createElement('div');
+          overlay.className = 'gallery-overlay';
+          const overlayText = document.createElement('div');
+          overlayText.className = 'gallery-overlay-text';
+          overlayText.textContent = `${formatRelativeTime(new Date(record.timestamp || Date.now()))} · ${record.domain || '未知来源'}`;
+          overlay.appendChild(overlayText);
+          item.appendChild(overlay);
+
+          item.addEventListener('click', async () => {
+            try {
+              const conversation = await getConversationFromCacheOrLoad(record.conversationId);
+              if (conversation) {
+                await loadConversationIntoChat(conversation, {
+                  skipMessageAnimation: true,
+                  skipScrollToBottom: true
+                });
+                jumpToMessageById(record.messageId, { highlightClass: 'gallery-highlight', highlightDuration: 1600 });
+              }
+            } catch (error) {
+              console.error('打开图片所属对话失败:', error);
+            }
+          });
+
+          item.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+            try {
+              window.open(record.url, '_blank', 'noopener');
+            } catch (_) {}
+          });
+
+          grid.insertBefore(item, sentinel);
+        }
+        renderedCount = nextCount;
+        if (renderedCount >= images.length) {
+          if (container._galleryObserver) {
+            container._galleryObserver.disconnect();
+            container._galleryObserver = null;
+          }
+          if (sentinel.parentNode) {
+            sentinel.remove();
+          }
+        }
+      };
 
       container.appendChild(grid);
+      appendBatch();
+
+      if (renderedCount < images.length) {
+        const observer = new IntersectionObserver((entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) {
+            appendBatch();
+          }
+        }, {
+          root: container,
+          rootMargin: '240px 0px'
+        });
+        observer.observe(sentinel);
+        container._galleryObserver = observer;
+      }
+
       container.dataset.rendered = 'true';
     })().catch((error) => {
       console.error('加载图片相册失败:', error);
