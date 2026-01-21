@@ -118,6 +118,10 @@ export function createChatHistoryUI(appContext) {
             galleryContent._galleryObserver.disconnect();
             galleryContent._galleryObserver = null;
           }
+          if (galleryContent._galleryLazyObserver) {
+            galleryContent._galleryLazyObserver.disconnect();
+            galleryContent._galleryLazyObserver = null;
+          }
           galleryContent.dataset.rendered = '';
           if (!galleryContent.classList.contains('active')) {
             galleryContent.innerHTML = '';
@@ -3824,6 +3828,10 @@ export function createChatHistoryUI(appContext) {
         container._galleryObserver.disconnect();
         container._galleryObserver = null;
       }
+      if (container._galleryLazyObserver) {
+        container._galleryLazyObserver.disconnect();
+        container._galleryLazyObserver = null;
+      }
 
       const grid = document.createElement('div');
       grid.className = 'gallery-grid';
@@ -3831,6 +3839,27 @@ export function createChatHistoryUI(appContext) {
       sentinel.className = 'gallery-sentinel';
       sentinel.textContent = '加载更多…';
       grid.appendChild(sentinel);
+
+      const placeholderSrc = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+      // 仅在接近可视区域时加载图片，避免一次性解码过多大图导致卡顿
+      const lazyObserver = (typeof IntersectionObserver === 'function')
+        ? new IntersectionObserver((entries, observer) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) return;
+            const img = entry.target;
+            const realSrc = img?.dataset?.src || '';
+            if (realSrc) {
+              img.src = realSrc;
+              img.removeAttribute('data-src');
+            }
+            observer.unobserve(img);
+          });
+        }, {
+          root: container,
+          rootMargin: '400px 0px'
+        })
+        : null;
+      container._galleryLazyObserver = lazyObserver;
 
       let renderedCount = 0;
       // 分批追加 DOM，避免一次性渲染大量图片导致卡顿/长时间白屏
@@ -3845,9 +3874,15 @@ export function createChatHistoryUI(appContext) {
           }
 
           const img = document.createElement('img');
-          img.src = record.url;
           img.loading = 'lazy';
           img.decoding = 'async';
+          if (lazyObserver) {
+            img.src = placeholderSrc;
+            img.dataset.src = record.url;
+            lazyObserver.observe(img);
+          } else {
+            img.src = record.url;
+          }
           img.alt = record.summary || record.title || record.domain || '聊天图片';
           item.appendChild(img);
 
@@ -3888,6 +3923,10 @@ export function createChatHistoryUI(appContext) {
           if (container._galleryObserver) {
             container._galleryObserver.disconnect();
             container._galleryObserver = null;
+          }
+          if (container._galleryLazyObserver) {
+            container._galleryLazyObserver.disconnect();
+            container._galleryLazyObserver = null;
           }
           if (sentinel.parentNode) {
             sentinel.remove();

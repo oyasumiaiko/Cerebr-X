@@ -1962,7 +1962,8 @@ input:checked + .slider::before {
     border-radius: 6px;
     background: color-mix(in srgb, var(--cerebr-control-bg) 82%, transparent);
     cursor: pointer;
-    transition: transform 0.18s ease;
+    content-visibility: auto;
+    contain-intrinsic-size: 96px 96px;
 }
 
 .gallery-item img {
@@ -1970,11 +1971,6 @@ input:checked + .slider::before {
     height: 100%;
     object-fit: cover;
     display: block;
-    transition: transform 0.25s ease;
-}
-
-.gallery-item:hover img {
-    transform: scale(1.03);
 }
 
 .gallery-overlay {
