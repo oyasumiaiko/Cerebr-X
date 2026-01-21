@@ -757,6 +757,7 @@ export function createSelectionThreadManager(appContext) {
     if (!threadContainer || !messageProcessor) return;
     if (state.activeThreadId !== threadId) return;
     const focusMessageId = options?.focusMessageId || '';
+    threadContainer.classList.add('thread-container--static');
     threadContainer.innerHTML = '';
     const info = findThreadById(threadId);
     if (!info || !info.annotation) return;
@@ -843,6 +844,7 @@ export function createSelectionThreadManager(appContext) {
 
       if (messageElem) {
         messageElem.classList.remove('batch-load');
+        messageElem.classList.add('thread-jump-skip-animation');
         messageElem.setAttribute('data-message-id', node.id);
         renderApiFooterForNode(messageElem, node);
       }
@@ -1267,9 +1269,44 @@ export function createSelectionThreadManager(appContext) {
     if (!threadContainer || !messageId) return;
     const target = threadContainer.querySelector(`[data-message-id="${messageId}"]`);
     if (!target) return;
-    target.classList.add('search-highlight');
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setTimeout(() => target.classList.remove('search-highlight'), 1600);
+    const applyScroll = () => {
+      if (!threadContainer || !target) return;
+      const containerRect = threadContainer.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const style = window.getComputedStyle(threadContainer);
+      const paddingTop = parseFloat(style.paddingTop) || 0;
+      const delta = targetRect.top - containerRect.top;
+      const rawTop = threadContainer.scrollTop + delta - paddingTop;
+      const maxTop = Math.max(0, threadContainer.scrollHeight - threadContainer.clientHeight);
+      const nextTop = Math.max(0, Math.min(rawTop, maxTop));
+      threadContainer.scrollTo({ top: nextTop, behavior: 'auto' });
+    };
+
+    applyScroll();
+    requestAnimationFrame(applyScroll);
+
+    const refreshAfterImages = () => applyScroll();
+    const images = target.querySelectorAll('img');
+    if (images.length) {
+      let pending = 0;
+      images.forEach((img) => {
+        if (img.complete) return;
+        pending += 1;
+        const onDone = () => {
+          pending -= 1;
+          if (pending <= 0) {
+            refreshAfterImages();
+          }
+        };
+        img.addEventListener('load', onDone, { once: true });
+        img.addEventListener('error', onDone, { once: true });
+      });
+    }
+
+    target.classList.remove('thread-jump-highlight');
+    void target.offsetWidth;
+    target.classList.add('thread-jump-highlight');
+    setTimeout(() => target.classList.remove('thread-jump-highlight'), 500);
   }
 
   function buildAnnotationHighlightRanges(textContainer, annotations) {
