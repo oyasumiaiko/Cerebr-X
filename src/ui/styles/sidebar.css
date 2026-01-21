@@ -338,7 +338,6 @@ button {
     background: var(--cerebr-button-bg);
     color: var(--cerebr-button-color);
     padding: var(--cerebr-control-padding);
-    box-shadow: var(--cerebr-button-shadow);
     cursor: pointer;
     font-weight: 500;
     display: inline-flex;
