@@ -3619,43 +3619,86 @@ export function createChatHistoryUI(appContext) {
     if (!forceRefresh && galleryCache.loaded) {
       return galleryCache.items;
     }
-    const conversations = await getAllConversations(true);
+    const metas = await getAllConversationMetadataWithCache(false);
+    // 按最新时间降序扫描，确保相册优先收录最新图片并支持提前截断。
+    const sortedMetas = Array.isArray(metas)
+      ? [...metas].sort((a, b) => (Number(b?.endTime) || 0) - (Number(a?.endTime) || 0))
+      : [];
+    let downloadRoot = null;
+    try {
+      downloadRoot = await loadDownloadRoot();
+    } catch (_) {}
+
     const images = [];
     const seenKeys = new Set();
-    for (const conv of conversations) {
+    let minTimestamp = null;
+
+    // 相册专用：避免逐条 await，优先用已缓存的下载根路径拼接。
+    const resolveImageUrlForGallery = (imageUrlObj) => {
+      if (!imageUrlObj) return '';
+      const rawUrl = typeof imageUrlObj.url === 'string' ? imageUrlObj.url : '';
+      const relPath = typeof imageUrlObj.path === 'string' ? imageUrlObj.path : '';
+      if (rawUrl.startsWith('file://')) return rawUrl;
+      if (relPath) {
+        const fileUrl = downloadRoot ? buildFileUrlFromRelative(relPath, downloadRoot) : null;
+        return fileUrl || relPath;
+      }
+      if (rawUrl) {
+        if (/^(https?:|data:|blob:|chrome-extension:|moz-extension:)/i.test(rawUrl)) return rawUrl;
+        const fileUrl = downloadRoot ? buildFileUrlFromRelative(rawUrl, downloadRoot) : null;
+        return fileUrl || rawUrl;
+      }
+      return '';
+    };
+
+    for (let i = 0; i < sortedMetas.length; i++) {
+      const meta = sortedMetas[i];
+      const endTime = Number(meta?.endTime) || 0;
+      // 已达到数量上限时，若后续会话的 endTime 不可能超过当前最旧图片，则可提前停止扫描。
+      if (minTimestamp != null && endTime <= minTimestamp) {
+        break;
+      }
+
+      const conv = await getConversationById(meta.id, true);
       if (!conv || !Array.isArray(conv.messages)) continue;
       const convDomain = getDisplayUrl(conv.url);
-      for (const msg of conv.messages) {
+
+      for (let m = conv.messages.length - 1; m >= 0; m--) {
+        const msg = conv.messages[m];
         const timestamp = Number(msg?.timestamp || conv.endTime || conv.startTime || Date.now());
         const normalizedContent = normalizeStoredMessageContent(msg?.content);
-        if (Array.isArray(normalizedContent)) {
-          for (let idx = 0; idx < normalizedContent.length; idx++) {
-            const part = normalizedContent[idx];
-            if (!part || part.type !== 'image_url' || !part.image_url) continue;
-            const resolvedUrl = await resolveImageUrlForDisplay(part.image_url);
-            if (!resolvedUrl) continue;
-            const rawKey = part.image_url.path || part.image_url.url || resolvedUrl;
-            const key = `${conv.id || 'conv'}_${msg.id || idx}_${idx}_${rawKey}`;
-            if (seenKeys.has(key)) continue;
-            seenKeys.add(key);
-            images.push({
-              conversationId: conv.id,
-              messageId: msg.id,
-              url: resolvedUrl,
-              timestamp,
-              summary: conv.summary || '',
-              title: conv.title || '',
-              domain: convDomain || '未知来源'
-            });
-            if (images.length >= GALLERY_IMAGE_LIMIT) break;
-          }
-        }
-        if (images.length >= GALLERY_IMAGE_LIMIT) {
-          break;
+        if (!Array.isArray(normalizedContent)) continue;
+
+        for (let idx = normalizedContent.length - 1; idx >= 0; idx--) {
+          const part = normalizedContent[idx];
+          if (!part || part.type !== 'image_url' || !part.image_url) continue;
+          const resolvedUrl = resolveImageUrlForGallery(part.image_url);
+          if (!resolvedUrl) continue;
+          const rawKey = part.image_url.path || part.image_url.url || resolvedUrl;
+          const key = `${conv.id || 'conv'}_${msg.id || idx}_${idx}_${rawKey}`;
+          if (seenKeys.has(key)) continue;
+          seenKeys.add(key);
+          images.push({
+            conversationId: conv.id,
+            messageId: msg.id,
+            url: resolvedUrl,
+            timestamp,
+            summary: conv.summary || '',
+            title: conv.title || '',
+            domain: convDomain || '未知来源'
+          });
         }
       }
-      if (images.length >= GALLERY_IMAGE_LIMIT) break;
+
+      if (images.length >= GALLERY_IMAGE_LIMIT) {
+        images.sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+        if (images.length > GALLERY_IMAGE_LIMIT) {
+          images.length = GALLERY_IMAGE_LIMIT;
+        }
+        minTimestamp = Number(images[images.length - 1]?.timestamp || 0);
+      }
     }
+
     images.sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
     if (images.length > GALLERY_IMAGE_LIMIT) {
       images.length = GALLERY_IMAGE_LIMIT;
