@@ -172,10 +172,16 @@ export function createSelectionThreadManager(appContext) {
       const list = document.createElement('div');
       list.className = 'selection-thread-bubble__preview-list';
       contentItems.forEach((item) => {
-        if (!item || !item.messageId) return;
+        const itemId = item?.messageId || item?.threadId || '';
+        if (!item || !itemId) return;
         const entry = document.createElement('div');
         entry.className = 'selection-thread-bubble__preview-item';
-        entry.dataset.messageId = item.messageId;
+        if (item.messageId) {
+          entry.dataset.messageId = item.messageId;
+        }
+        if (item.threadId) {
+          entry.dataset.threadId = item.threadId;
+        }
         entry.setAttribute('role', 'button');
         entry.setAttribute('tabindex', '0');
         if (item.role === 'user') {
@@ -184,6 +190,9 @@ export function createSelectionThreadManager(appContext) {
           entry.classList.add('selection-thread-bubble__preview-item--assistant');
         } else if (item.role) {
           entry.classList.add('selection-thread-bubble__preview-item--system');
+        }
+        if (item.variant) {
+          entry.classList.add(`selection-thread-bubble__preview-item--${item.variant}`);
         }
 
         const contentBox = document.createElement('div');
@@ -630,6 +639,47 @@ export function createSelectionThreadManager(appContext) {
     return summarizePreviewText(stripHtmlToText(normalized || ''));
   }
 
+  function getThreadActivityTimestamp(annotation) {
+    if (!annotation) return 0;
+    const candidateId = annotation.lastMessageId || annotation.rootMessageId || '';
+    const node = chatHistoryManager?.chatHistory?.messages?.find(m => m.id === candidateId);
+    if (node && Number.isFinite(node.timestamp)) {
+      return node.timestamp;
+    }
+    return Number(annotation.createdAt || 0) || 0;
+  }
+
+  function sortThreadsByActivity(threads) {
+    if (!Array.isArray(threads)) return [];
+    return threads.slice().sort((a, b) => getThreadActivityTimestamp(b) - getThreadActivityTimestamp(a));
+  }
+
+  function buildThreadSummaryItems(threads) {
+    if (!Array.isArray(threads) || !threads.length) return [];
+    const sorted = sortThreadsByActivity(threads);
+    return sorted.map((annotation) => {
+      const chain = collectThreadChain(annotation)
+        .filter(node => !node?.threadHiddenSelection);
+      const count = chain.length;
+      let lastUserText = '';
+      for (let i = chain.length - 1; i >= 0; i--) {
+        const node = chain[i];
+        if (node?.role === 'user') {
+          lastUserText = extractPlainTextFromContent(node.content);
+          break;
+        }
+      }
+      if (!lastUserText) {
+        lastUserText = '(暂无用户提问)';
+      }
+      return {
+        threadId: annotation.id,
+        variant: 'thread',
+        text: `共 ${count} 条 · ${lastUserText}`
+      };
+    });
+  }
+
   function buildThreadPreviewLines(threadId, maxItems = 3) {
     const info = findThreadById(threadId);
     if (!info || !info.annotation) return [];
@@ -668,6 +718,36 @@ export function createSelectionThreadManager(appContext) {
         text: safeText.trim() ? safeText : '(空)'
       };
     });
+  }
+
+  function parseThreadIdsFromHighlight(target) {
+    if (!target) return [];
+    const raw = target.dataset.threadIds || target.dataset.threadId || '';
+    return raw.split(',').map(item => item.trim()).filter(Boolean);
+  }
+
+  function buildSelectionInfoFromHighlight(target) {
+    const selectionText = target?.dataset?.selectionText || target?.textContent || '';
+    const matchIndex = Number.isFinite(Number(target?.dataset?.matchIndex))
+      ? Number(target.dataset.matchIndex)
+      : null;
+    const selectionStartOffset = Number.isFinite(Number(target?.dataset?.selectionStartOffset))
+      ? Number(target.dataset.selectionStartOffset)
+      : null;
+    const selectionEndOffset = Number.isFinite(Number(target?.dataset?.selectionEndOffset))
+      ? Number(target.dataset.selectionEndOffset)
+      : null;
+    return {
+      selectionText,
+      matchIndex,
+      selectionStartOffset,
+      selectionEndOffset
+    };
+  }
+
+  function pickPrimaryThread(threads) {
+    const sorted = sortThreadsByActivity(threads);
+    return sorted[0] || null;
   }
 
   function renderThreadSelectionBanner(selectionText) {
@@ -936,28 +1016,33 @@ export function createSelectionThreadManager(appContext) {
   }
 
   function findThreadBySelection(anchorNode, selectionText, matchIndex = null, selectionStartOffset = null) {
-    if (!anchorNode || !selectionText) return null;
+    const threads = findThreadsBySelection(anchorNode, selectionText, matchIndex, selectionStartOffset);
+    return threads.length ? threads[0] : null;
+  }
+
+  function findThreadsBySelection(anchorNode, selectionText, matchIndex = null, selectionStartOffset = null) {
+    if (!anchorNode || !selectionText) return [];
     const annotations = Array.isArray(anchorNode.threadAnnotations) ? anchorNode.threadAnnotations : [];
     const normalizedText = normalizeSelectionText(selectionText);
-    if (!normalizedText) return null;
+    if (!normalizedText) return [];
 
     if (Number.isFinite(selectionStartOffset)) {
       const targetOffset = Math.max(0, selectionStartOffset);
-      const byOffset = annotations.find(item => (
+      const byOffset = annotations.filter(item => (
         normalizeSelectionText(item?.selectionText || '') === normalizedText
         && Number.isFinite(item?.selectionStartOffset)
         && item.selectionStartOffset === targetOffset
       ));
-      if (byOffset) return byOffset;
+      if (byOffset.length) return byOffset;
     }
 
     if (matchIndex == null) {
-      return annotations.find(item => normalizeSelectionText(item?.selectionText || '') === normalizedText) || null;
+      return annotations.filter(item => normalizeSelectionText(item?.selectionText || '') === normalizedText);
     }
-    return annotations.find(item => (
+    return annotations.filter(item => (
       normalizeSelectionText(item?.selectionText || '') === normalizedText
       && item?.matchIndex === matchIndex
-    )) || null;
+    ));
   }
 
   function createThreadAnnotation(anchorNode, info) {
@@ -1314,9 +1399,12 @@ export function createSelectionThreadManager(appContext) {
     const fullText = textContainer.textContent || '';
     const { normalizedText, indexMap } = buildNormalizedTextMap(fullText);
     if (!normalizedText) return [];
-    return annotations.map((annotation) => {
+    // 同一选区允许多个线程，按起止位置分组，避免重复包裹导致嵌套高亮。
+    const grouped = new Map();
+
+    annotations.forEach((annotation) => {
       const selectionText = normalizeSelectionText(annotation?.selectionText || '');
-      if (!selectionText) return null;
+      if (!selectionText) return;
       const matchIndex = Number.isFinite(annotation.matchIndex) ? annotation.matchIndex : 0;
       const hasOffsets = Number.isFinite(annotation.selectionStartOffset)
         && Number.isFinite(annotation.selectionEndOffset)
@@ -1328,37 +1416,61 @@ export function createSelectionThreadManager(appContext) {
 
       if (!hasOffsets || endPos <= startPos || startPos >= normalizedText.length) {
         startPos = findNthOccurrence(normalizedText, selectionText, matchIndex);
-        if (startPos < 0) return null;
+        if (startPos < 0) return;
         endPos = startPos + selectionText.length;
       }
 
       if (endPos > normalizedText.length) {
         endPos = Math.min(normalizedText.length, endPos);
-        if (endPos <= startPos) return null;
+        if (endPos <= startPos) return;
       }
 
       const mappedStart = mapNormalizedIndexToOriginal(indexMap, startPos);
       const mappedEnd = mapNormalizedIndexToOriginal(indexMap, endPos - 1);
-      if (!Number.isFinite(mappedStart) || !Number.isFinite(mappedEnd)) return null;
-      if (mappedEnd + 1 <= mappedStart) return null;
-      return {
-        annotation,
-        startPos: mappedStart,
-        endPos: mappedEnd + 1
-      };
-    }).filter(Boolean);
+      if (!Number.isFinite(mappedStart) || !Number.isFinite(mappedEnd)) return;
+      if (mappedEnd + 1 <= mappedStart) return;
+      const key = `${mappedStart}:${mappedEnd + 1}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          startPos: mappedStart,
+          endPos: mappedEnd + 1,
+          annotations: []
+        });
+      }
+      grouped.get(key).annotations.push(annotation);
+    });
+
+    return Array.from(grouped.values());
   }
 
-  function applyHighlightRange(textContainer, annotation, startPos, endPos) {
-    if (!textContainer || !annotation || startPos < 0 || endPos <= startPos) return;
+  function applyHighlightRange(textContainer, rangeGroup) {
+    if (!textContainer || !rangeGroup) return;
+    const { annotations, startPos, endPos } = rangeGroup;
+    if (!Array.isArray(annotations) || !annotations.length) return;
+    if (startPos < 0 || endPos <= startPos) return;
     const range = resolveRangeFromIndices(textContainer, startPos, endPos);
     if (!range) return;
 
     const span = document.createElement('span');
     span.className = 'thread-highlight';
-    span.dataset.threadId = annotation.id;
-    span.dataset.threadAnchorId = annotation.anchorMessageId || '';
-    span.dataset.selectionText = annotation.selectionText || '';
+    const primary = annotations[0];
+    const threadIds = annotations.map(item => item?.id).filter(Boolean);
+    if (threadIds.length) {
+      span.dataset.threadIds = threadIds.join(',');
+      span.dataset.threadId = threadIds[0];
+      span.dataset.threadCount = String(threadIds.length);
+    }
+    span.dataset.threadAnchorId = primary?.anchorMessageId || '';
+    span.dataset.selectionText = primary?.selectionText || '';
+    if (Number.isFinite(primary?.matchIndex)) {
+      span.dataset.matchIndex = String(primary.matchIndex);
+    }
+    if (Number.isFinite(primary?.selectionStartOffset)) {
+      span.dataset.selectionStartOffset = String(primary.selectionStartOffset);
+    }
+    if (Number.isFinite(primary?.selectionEndOffset)) {
+      span.dataset.selectionEndOffset = String(primary.selectionEndOffset);
+    }
 
     wrapRangeWithSpan(range, span);
   }
@@ -1377,8 +1489,8 @@ export function createSelectionThreadManager(appContext) {
     const ranges = buildAnnotationHighlightRanges(textContainer, annotations);
     // 从后往前包裹高亮，避免前面的高亮拆分文本节点后导致索引偏移。
     ranges.sort((a, b) => b.startPos - a.startPos);
-    ranges.forEach(({ annotation, startPos, endPos }) => {
-      applyHighlightRange(textContainer, annotation, startPos, endPos);
+    ranges.forEach((rangeGroup) => {
+      applyHighlightRange(textContainer, rangeGroup);
     });
   }
 
@@ -1438,6 +1550,20 @@ export function createSelectionThreadManager(appContext) {
     return true;
   }
 
+  function createThreadFromSelection(anchorNode, selectionInfo, messageElement) {
+    if (!anchorNode || !selectionInfo) return null;
+    const created = createThreadAnnotation(anchorNode, selectionInfo);
+    if (!created) {
+      showNotification?.({ message: '创建划词对话失败', type: 'warning' });
+      return null;
+    }
+    if (messageElement) {
+      decorateMessageElement(messageElement, anchorNode);
+    }
+    enterThread(created.id);
+    return created;
+  }
+
   function showSelectionBubble(selectionInfo, messageElement, range) {
     if (!selectionInfo || !messageElement || !range) return;
     const rect = range.getBoundingClientRect();
@@ -1447,28 +1573,29 @@ export function createSelectionThreadManager(appContext) {
     const anchorNode = chatHistoryManager?.chatHistory?.messages?.find(m => m.id === messageId);
     if (!anchorNode) return;
 
-    const existingThread = findThreadBySelection(
+    const matchingThreads = findThreadsBySelection(
       anchorNode,
       selectionInfo.selectionText,
       selectionInfo.matchIndex,
       selectionInfo.selectionStartOffset
     );
+    const primaryThread = pickPrimaryThread(matchingThreads);
     state.pendingSelection = {
       messageId,
       selectionText: selectionInfo.selectionText,
       matchIndex: selectionInfo.matchIndex
     };
 
-    const previewLines = existingThread ? buildThreadPreviewLines(existingThread.id, 2) : [];
-    const previewText = previewLines.length
-      ? previewLines.join('\n')
-      : selectionInfo.selectionText;
-    const showQuoteIcon = !existingThread;
+    const hasMultipleThreads = matchingThreads.length > 1;
+    const previewItems = hasMultipleThreads
+      ? buildThreadSummaryItems(matchingThreads)
+      : (primaryThread ? buildThreadPreviewItems(primaryThread.id) : []);
+    const previewText = selectionInfo.selectionText;
 
     showBubbleAtRect(rect, {
-      title: existingThread ? '划词对话' : '',
+      title: matchingThreads.length ? '划词对话' : '',
       content: previewText,
-      iconClass: showQuoteIcon ? 'fa-solid fa-quote-right' : '',
+      contentItems: previewItems,
       iconButtons: [
         {
           iconClass: 'fa-solid fa-paper-plane',
@@ -1478,57 +1605,127 @@ export function createSelectionThreadManager(appContext) {
               anchorNode,
               selectionInfo,
               messageElement,
-              existingThread
+              primaryThread
             );
             if (didSend) {
               hideBubble(true);
               clearSelectionRanges();
             }
           }
+        },
+        {
+          iconClass: 'fa-solid fa-plus',
+          title: '新建划词对话',
+          onClick: () => {
+            const created = createThreadFromSelection(anchorNode, selectionInfo, messageElement);
+            if (created) {
+              hideBubble(true);
+              clearSelectionRanges();
+            }
+          }
         }
       ],
-      onClick: () => {
-        if (existingThread) {
-          enterThread(existingThread.id);
+      onClick: hasMultipleThreads ? null : () => {
+        if (primaryThread) {
+          enterThread(primaryThread.id);
         } else {
-          const created = createThreadAnnotation(anchorNode, selectionInfo);
-          if (created) {
-            decorateMessageElement(messageElement, anchorNode);
-            enterThread(created.id);
-          } else {
-            showNotification?.({ message: '创建划词对话失败', type: 'warning' });
-          }
+          const created = createThreadFromSelection(anchorNode, selectionInfo, messageElement);
+          if (!created) return;
         }
         hideBubble(true);
         clearSelectionRanges();
+      },
+      onItemClick: (item) => {
+        if (item?.threadId) {
+          enterThread(item.threadId);
+          hideBubble(true);
+          clearSelectionRanges();
+          return;
+        }
+        if (item?.messageId && primaryThread) {
+          enterThread(primaryThread.id, { focusMessageId: item.messageId });
+          hideBubble(true);
+          clearSelectionRanges();
+        }
       },
       pinned: true,
       type: 'selection'
     });
   }
 
-  function showPreviewBubbleForHighlight(target) {
+  function showPreviewBubbleForHighlight(target, options = {}) {
+    if (!target) return;
     const rect = target.getBoundingClientRect();
-    const threadId = target.dataset.threadId || '';
+    const threadIds = parseThreadIdsFromHighlight(target);
+    const threadInfos = threadIds
+      .map(id => findThreadById(id))
+      .filter(info => info?.annotation);
+    const threads = threadInfos.map(info => info.annotation);
+    const primaryThread = pickPrimaryThread(threads);
     const selectionText = target.dataset.selectionText || target.textContent || '';
-    const previewItems = buildThreadPreviewItems(threadId);
+    const hasMultipleThreads = threads.length > 1;
+    const previewItems = hasMultipleThreads
+      ? buildThreadSummaryItems(threads)
+      : (primaryThread ? buildThreadPreviewItems(primaryThread.id) : []);
     const fallbackText = selectionText ? `“${selectionText}”` : '';
     const fallbackHtml = fallbackText
       ? (messageProcessor?.processMathAndMarkdown?.(fallbackText) || fallbackText)
       : '';
+    const anchorMessageId = target.dataset.threadAnchorId || '';
+    const anchorNode = anchorMessageId
+      ? chatHistoryManager?.chatHistory?.messages?.find(m => m.id === anchorMessageId)
+      : null;
+    const anchorElement = anchorNode ? getMessageElementFromNode(anchorNode) : null;
+    const selectionInfo = buildSelectionInfoFromHighlight(target);
 
     showBubbleAtRect(rect, {
-      title: '划词对话预览',
+      title: threads.length ? '划词对话' : '划词对话预览',
       content: fallbackText,
       contentHtml: previewItems.length ? '' : fallbackHtml,
       contentItems: previewItems,
+      iconButtons: [
+        {
+          iconClass: 'fa-solid fa-paper-plane',
+          title: '使用划词方式1发送',
+          onClick: () => {
+            if (!anchorNode || !selectionInfo.selectionText) return;
+            const didSend = runSelectionPromptInThread(
+              anchorNode,
+              selectionInfo,
+              anchorElement,
+              primaryThread
+            );
+            if (didSend) {
+              hideBubble(true);
+              clearSelectionRanges();
+            }
+          }
+        },
+        {
+          iconClass: 'fa-solid fa-plus',
+          title: '新建划词对话',
+          onClick: () => {
+            if (!anchorNode || !selectionInfo.selectionText) return;
+            const created = createThreadFromSelection(anchorNode, selectionInfo, anchorElement);
+            if (created) {
+              hideBubble(true);
+              clearSelectionRanges();
+            }
+          }
+        }
+      ],
       onItemClick: (item) => {
-        if (item?.messageId) {
-          enterThread(threadId, { focusMessageId: item.messageId });
+        if (item?.threadId) {
+          enterThread(item.threadId);
+          hideBubble(true);
+          return;
+        }
+        if (item?.messageId && primaryThread) {
+          enterThread(primaryThread.id, { focusMessageId: item.messageId });
           hideBubble(true);
         }
       },
-      pinned: false,
+      pinned: !!options.pinned,
       type: 'preview'
     });
   }
@@ -1729,9 +1926,14 @@ export function createSelectionThreadManager(appContext) {
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
-    const threadId = target.dataset.threadId || '';
+    const threadIds = parseThreadIdsFromHighlight(target);
+    const threadId = threadIds[0] || '';
     if (!threadId) return;
     hideBubble(true);
+    if (threadIds.length > 1) {
+      showPreviewBubbleForHighlight(target, { pinned: true });
+      return;
+    }
     if (state.activeThreadId && state.activeThreadId === threadId) {
       exitThread();
       return;

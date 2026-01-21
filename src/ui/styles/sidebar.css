@@ -2480,6 +2480,14 @@ input:checked + .slider::before {
     font-size: 0.95em;
 }
 
+.selection-thread-bubble__preview-item--thread {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    align-self: stretch;
+    background: color-mix(in srgb, var(--cerebr-bg-color) 92%, transparent);
+}
+
 .selection-thread-bubble__content-icon {
     margin-left: auto;
     display: flex;
