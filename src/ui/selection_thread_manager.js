@@ -842,6 +842,86 @@ export function createSelectionThreadManager(appContext) {
     return payload;
   }
 
+  /**
+   * 修复/补齐线程注解的根节点与末尾节点，避免删除/重生成后链路断裂。
+   * 规则：
+   * - rootMessageId 缺失时优先使用 threadHiddenSelection 标记的节点；
+   * - lastMessageId 缺失或不可达时，选取“线程内无后继”的最新节点。
+   *
+   * @param {string} threadId
+   * @returns {Object|null} 返回修复后的 annotation（同一引用），失败则返回 null
+   */
+  function repairThreadAnnotation(threadId) {
+    if (!threadId) return null;
+    const info = findThreadById(threadId);
+    if (!info || !info.annotation) return null;
+
+    const annotation = info.annotation;
+    const nodes = chatHistoryManager?.chatHistory?.messages || [];
+    if (!nodes.length) return annotation;
+
+    const findNode = (id) => nodes.find(n => n.id === id) || null;
+    const hasNode = (id) => !!(id && findNode(id));
+
+    const rawRootId = annotation.rootMessageId;
+    let resolvedRootId = hasNode(rawRootId) ? rawRootId : null;
+    const threadNodes = nodes.filter((node) => {
+      if (!node) return false;
+      if (node.threadId === threadId) return true;
+      if (rawRootId && node.threadRootId === rawRootId) return true;
+      if (resolvedRootId && node.threadRootId === resolvedRootId) return true;
+      return false;
+    });
+
+    if (!resolvedRootId) {
+      const hiddenRoot = threadNodes.find(n => n.threadHiddenSelection);
+      if (hiddenRoot) {
+        resolvedRootId = hiddenRoot.id;
+      } else if (threadNodes.length) {
+        const oldest = threadNodes.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))[0];
+        resolvedRootId = oldest?.id || null;
+      }
+    }
+
+    if (resolvedRootId && resolvedRootId !== annotation.rootMessageId) {
+      annotation.rootMessageId = resolvedRootId;
+    }
+
+    const threadIdSet = new Set(threadNodes.map(n => n.id));
+    if (resolvedRootId) threadIdSet.add(resolvedRootId);
+
+    const isReachableFromRoot = (startId) => {
+      if (!resolvedRootId || !startId) return false;
+      const visited = new Set();
+      let currentId = startId;
+      while (currentId) {
+        if (currentId === resolvedRootId) return true;
+        if (visited.has(currentId)) break;
+        visited.add(currentId);
+        const currentNode = findNode(currentId);
+        currentId = currentNode?.parentId || null;
+      }
+      return false;
+    };
+
+    const lastNode = hasNode(annotation.lastMessageId) ? findNode(annotation.lastMessageId) : null;
+    const lastValid = !!(lastNode && threadIdSet.has(lastNode.id) && isReachableFromRoot(lastNode.id));
+    if (!lastValid) {
+      const leafCandidates = threadNodes.filter((node) => {
+        const children = Array.isArray(node.children) ? node.children : [];
+        return !children.some(childId => threadIdSet.has(childId));
+      });
+      if (leafCandidates.length) {
+        const latest = leafCandidates.slice().sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))[0];
+        annotation.lastMessageId = latest?.id || resolvedRootId || null;
+      } else {
+        annotation.lastMessageId = resolvedRootId || null;
+      }
+    }
+
+    return annotation;
+  }
+
   function getSelectionInfoFromRange(range, messageElement) {
     if (!range || !messageElement) return null;
     const textContainer = messageElement.querySelector('.text-content');
@@ -1487,6 +1567,7 @@ export function createSelectionThreadManager(appContext) {
     getActiveThreadId: () => state.activeThreadId,
     getActiveAnchorMessageId: () => state.activeAnchorMessageId,
     getActiveSelectionText: () => state.activeSelectionText,
-    findThreadById
+    findThreadById,
+    repairThreadAnnotation
   };
 }

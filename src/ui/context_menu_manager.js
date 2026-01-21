@@ -69,6 +69,81 @@ export function createContextMenuManager(appContext) {
   }
 
   /**
+   * 在线程容器内，优先使用历史链路解析“重新生成”的目标，避免 DOM 被隐藏/重排时误判。
+   * @param {HTMLElement} messageElement
+   * @param {HTMLElement|null} container
+   * @returns {Object|null}
+   */
+  function resolveRegenerateTargetFromHistory(messageElement, container) {
+    const messageId = messageElement?.getAttribute?.('data-message-id') || '';
+    if (!messageId) return null;
+    const nodes = chatHistoryManager?.chatHistory?.messages || [];
+    const findNode = (id) => nodes.find(n => n.id === id) || null;
+    const node = findNode(messageId);
+    if (!node) return null;
+
+    const isAi = node.role === 'assistant';
+    const isUser = node.role === 'user';
+    if (!isAi && !isUser) return null;
+
+    const findParentUser = (startNode) => {
+      let current = startNode;
+      const visited = new Set();
+      while (current) {
+        if (current.role === 'user') return current;
+        if (visited.has(current.id)) break;
+        visited.add(current.id);
+        current = current.parentId ? findNode(current.parentId) : null;
+      }
+      return null;
+    };
+
+    const findNextAi = (startNode, threadId) => {
+      let current = startNode;
+      const visited = new Set();
+      while (current) {
+        const children = Array.isArray(current.children) ? current.children : [];
+        const candidates = children
+          .map(id => findNode(id))
+          .filter(Boolean)
+          .filter(child => !threadId || child.threadId === threadId);
+        if (!candidates.length) return null;
+        // 线程内默认按时间最早的子节点作为“下一条”
+        const next = candidates.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))[0];
+        if (!next || visited.has(next.id)) return null;
+        if (next.role === 'assistant') return next;
+        visited.add(next.id);
+        current = next;
+      }
+      return null;
+    };
+
+    const userNode = isUser ? node : findParentUser(node);
+    if (!userNode) return null;
+    if (userNode.threadHiddenSelection) return null;
+
+    const targetAiNode = isAi ? node : findNextAi(userNode, userNode.threadId || null);
+    const userMessageId = userNode.id || '';
+    if (!userMessageId) return null;
+
+    let userMessageElement = null;
+    if (container) {
+      userMessageElement = container.querySelector(`[data-message-id="${userMessageId}"]`);
+    }
+
+    const originalMessageText = userMessageElement?.getAttribute?.('data-original-text')
+      || (typeof userNode.content === 'string' ? userNode.content : '');
+
+    return {
+      userMessageElement,
+      userMessageId,
+      originalMessageText,
+      targetAiMessageElement: isAi ? messageElement : null,
+      targetAiMessageId: targetAiNode ? targetAiNode.id : null
+    };
+  }
+
+  /**
    * 解析“重新生成”的目标：
    * - 若右键/触发点是 AI 消息：重生成该 AI 消息（目标=自身），其对应的用户消息为「向上最近的一条 user」；
    * - 若右键/触发点是用户消息：重生成该用户消息之后的第一条 AI 消息（目标=下一条 AI）。
@@ -88,6 +163,12 @@ export function createContextMenuManager(appContext) {
    */
   function resolveRegenerateTarget(messageElement) {
     if (!messageElement || !(messageElement instanceof HTMLElement)) return null;
+
+    const activeContainer = resolveMessageContainer(messageElement);
+    if (activeContainer === threadContainer) {
+      const threadTarget = resolveRegenerateTargetFromHistory(messageElement, activeContainer);
+      if (threadTarget) return threadTarget;
+    }
 
     // loading/error 占位消息不支持作为“目标消息”
     if (messageElement.classList.contains('loading-message')) return null;
@@ -207,13 +288,17 @@ export function createContextMenuManager(appContext) {
     if (insertUserMessageButton) insertUserMessageButton.style.display = canShowInsertOptions ? 'flex' : 'none';
     // 始终显示创建分支对话按钮，但只有在有足够消息时才可用
     if (forkConversationButton) {
-      const messageCount = activeContainer ? activeContainer.querySelectorAll('.message').length : 0;
-      if (messageCount > 1) {
-        forkConversationButton.style.display = 'flex';
-        forkConversationButton.classList.remove('disabled');
+      if (activeContainer === threadContainer) {
+        forkConversationButton.style.display = 'none';
       } else {
-        forkConversationButton.style.display = 'flex';
-        forkConversationButton.classList.add('disabled');
+        const messageCount = activeContainer ? activeContainer.querySelectorAll('.message').length : 0;
+        if (messageCount > 1) {
+          forkConversationButton.style.display = 'flex';
+          forkConversationButton.classList.remove('disabled');
+        } else {
+          forkConversationButton.style.display = 'flex';
+          forkConversationButton.classList.add('disabled');
+        }
       }
     }
   }

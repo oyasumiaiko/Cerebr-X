@@ -1168,6 +1168,11 @@ export function createMessageSender(appContext) {
       if (shouldUseThreadContext) {
         activeThreadContext = threadContextCandidate;
         activeThreadContext.container = threadContainer;
+        // 线程内删除/重生成可能导致 lastMessageId 失效，发送前先修复注解链路。
+        const repairedAnnotation = services.selectionThreadManager?.repairThreadAnnotation?.(activeThreadContext.threadId);
+        if (repairedAnnotation) {
+          activeThreadContext.annotation = repairedAnnotation;
+        }
         activeThreadContext.rootMessageId = activeThreadContext.annotation?.rootMessageId || null;
         activeThreadContext.lastMessageId = activeThreadContext.annotation?.lastMessageId || null;
       }
@@ -1466,7 +1471,8 @@ export function createMessageSender(appContext) {
       if (Array.isArray(conversationSnapshot) && conversationSnapshot.length > 0) {
         conversationChain = conversationSnapshot;
       } else if (activeThreadContext) {
-        conversationChain = buildThreadConversationChain(activeThreadContext);
+        const threadChainOverride = (regenerateMode && messageId) ? messageId : null;
+        conversationChain = buildThreadConversationChain(activeThreadContext, threadChainOverride);
       } else {
         conversationChain = getCurrentConversationChain();
       }
