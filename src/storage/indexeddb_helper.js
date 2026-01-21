@@ -590,80 +590,35 @@ export async function getAllConversations(loadFullContent = true) {
 }
 
 /**
- * 添加或更新一条对话记录，支持将大型消息内容分离存储
+ * 添加或更新一条对话记录。
+ *
+ * 说明：
+ * - 分离存储（messageContents/contentRef）已弃用，避免继续扩大结构复杂度；
+ * - separateContent 参数仅为历史兼容保留，不再生效；
+ * - 若消息已携带 content，则会移除 contentRef，确保后续仅保存内联内容。
+ *
  * @param {Object} conversation - 对话记录对象
- * @param {boolean} [separateContent=true] - 是否将大型消息内容分离存储
+ * @param {boolean} [separateContent=false] - 已弃用：不再分离存储
  * @returns {Promise<void>}
  */
-export async function putConversation(conversation, separateContent = true) {
+export async function putConversation(conversation, separateContent = false) {
+  void separateContent;
   const db = await openChatHistoryDB();
-  const transaction = db.transaction(['conversations', 'messageContents'], 'readwrite');
+  const transaction = db.transaction('conversations', 'readwrite');
   const conversationStore = transaction.objectStore('conversations');
-  const contentStore = transaction.objectStore('messageContents');
 
   // 复制会话对象，避免修改原始对象
   const conversationToStore = { ...conversation };
-  
-  if (separateContent && conversationToStore.messages && conversationToStore.messages.length > 0) {
-    // 保存消息中的大型内容到单独的存储中
-    const messagesWithRefs = [];
-    
-    // 处理每条消息
-    for (const msg of conversationToStore.messages) {
+
+  if (Array.isArray(conversationToStore.messages) && conversationToStore.messages.length > 0) {
+    // 仅做“去引用”处理：有 content 时移除 contentRef，避免继续使用分离存储
+    conversationToStore.messages = conversationToStore.messages.map((msg) => {
       const messageToStore = { ...msg };
-      
-      // 如果消息内容是数组且包含图片
-      const isLargeContent = (Array.isArray(msg.content) && msg.content.some(part => part.type === 'image_url'));
-      
-      if (isLargeContent) {
-        // 创建内容引用对象
-        const contentRef = {
-          id: `content_${msg.id}`,
-          conversationId: conversationToStore.id,
-          messageId: msg.id,
-          content: msg.content
-        };
-        
-        // 将大型内容保存到单独的存储中
-        await new Promise((resolve, reject) => {
-          const request = contentStore.put(contentRef);
-          request.onsuccess = () => resolve();
-          request.onerror = () => reject(request.error);
-        });
-        
-        // 将消息内容替换为引用
-        messageToStore.contentRef = contentRef.id;
-        // 删除原内容以减少内存使用
-        delete messageToStore.content;
-      } else {
-        // 不再是大型内容：如存在历史 contentRef，需要清理引用并删除旧的分离内容。
-        //
-        // 重要：当 msg.content 不存在（例如 UI/缓存为了省内存主动释放了 content，只保留 contentRef）时，
-        // 我们无法判定它是否“真的不再需要分离”，此时绝不能删除 messageContents 记录，否则会造成图片/大段内容丢失。
-        // 只有在“明确提供了 content 且判断为非大型内容”的情况下，才执行清理。
-        if (messageToStore.contentRef) {
-          const contentMissing = (msg.content === undefined || msg.content === null);
-          if (!contentMissing) {
-            const refId = messageToStore.contentRef;
-            try {
-              await new Promise((resolve, reject) => {
-                const delReq = contentStore.delete(refId);
-                delReq.onsuccess = () => resolve();
-                delReq.onerror = () => reject(delReq.error);
-              });
-            } catch (e) {
-              console.warn('删除过期内容引用失败:', refId, e);
-            }
-            delete messageToStore.contentRef;
-          }
-        }
+      if (messageToStore.contentRef && messageToStore.content !== undefined && messageToStore.content !== null) {
+        delete messageToStore.contentRef;
       }
-      
-      messagesWithRefs.push(messageToStore);
-    }
-    
-    // 更新要存储的会话对象，使用引用替换后的消息数组
-    conversationToStore.messages = messagesWithRefs;
+      return messageToStore;
+    });
   }
 
   return new Promise((resolve, reject) => {
@@ -909,32 +864,24 @@ export async function loadMessageContent(contentRefId) {
 }
 
 /**
- * 释放指定会话的内存
+ * 释放指定会话的内存（兼容接口）。
+ *
+ * 说明：
+ * - 分离存储已弃用，为避免重新生成 contentRef 导致数据不一致，这里不再做内容分离；
+ * - 仅返回浅拷贝，保持调用端“不会直接修改原对象”的预期。
+ *
  * @param {Object} conversation - 对话记录对象
- * @returns {Object} 释放内存后的对话记录对象
+ * @returns {Object} 处理后的会话对象
  */
 export function releaseConversationMemory(conversation) {
   if (!conversation || !conversation.messages) {
     return conversation;
   }
-  
-  // 创建一个新对象，避免修改原始对象
-  const lightConversation = { ...conversation };
-  
-  // 替换消息内容为引用
-  lightConversation.messages = conversation.messages.map(msg => {
-    const lightMsg = { ...msg };
-    
-    // 如果消息有内容且没有contentRef，创建引用
-    if (lightMsg.content && !lightMsg.contentRef) {
-      lightMsg.contentRef = `content_${lightMsg.id}`;
-      delete lightMsg.content;
-    }
-    
-    return lightMsg;
-  });
-  
-  return lightConversation;
+
+  return {
+    ...conversation,
+    messages: conversation.messages.map((msg) => ({ ...msg }))
+  };
 }
 
 /**
