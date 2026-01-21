@@ -2015,11 +2015,24 @@ input:checked + .slider::before {
     color: color-mix(in srgb, var(--cerebr-red) 70%, var(--cerebr-text-color));
 }
 
-.message.gallery-highlight,
-.message.search-highlight {
+.message.gallery-highlight {
     animation: galleryHighlightPulse 1.2s ease-in-out 2;
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--cerebr-highlight) 45%, transparent);
     border-radius: 12px;
+}
+
+.message.search-highlight {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--cerebr-highlight) 35%, transparent);
+    border-radius: 12px;
+    transition: box-shadow 0.16s ease, background-color 0.16s ease;
+}
+
+#chat-container .user-message.search-highlight {
+    background-color: color-mix(in srgb, var(--cerebr-highlight) 10%, var(--cerebr-message-user-bg));
+}
+
+#chat-container .ai-message.search-highlight {
+    background-color: color-mix(in srgb, var(--cerebr-highlight) 10%, var(--cerebr-message-ai-bg));
 }
 
 #thread-container .message.thread-jump-highlight {

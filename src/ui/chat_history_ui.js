@@ -1153,14 +1153,56 @@ export function createChatHistoryUI(appContext) {
     });
   }
 
+  function scrollMessageElementToTop(messageEl, options = {}) {
+    if (!chatContainer || !messageEl) return;
+    const highlightClass = options.highlightClass || '';
+    const highlightDuration = Number.isFinite(options.highlightDuration) ? options.highlightDuration : 500;
+    const applyScroll = () => {
+      const containerRect = chatContainer.getBoundingClientRect();
+      const targetRect = messageEl.getBoundingClientRect();
+      const style = window.getComputedStyle(chatContainer);
+      const paddingTop = parseFloat(style.paddingTop) || 0;
+      const delta = targetRect.top - containerRect.top;
+      const rawTop = chatContainer.scrollTop + delta - paddingTop;
+      const maxTop = Math.max(0, chatContainer.scrollHeight - chatContainer.clientHeight);
+      const nextTop = Math.max(0, Math.min(rawTop, maxTop));
+      chatContainer.scrollTo({ top: nextTop, behavior: 'auto' });
+    };
+
+    applyScroll();
+    requestAnimationFrame(applyScroll);
+
+    const images = messageEl.querySelectorAll('img');
+    if (images.length) {
+      let pending = 0;
+      images.forEach((img) => {
+        if (img.complete) return;
+        pending += 1;
+        const onDone = () => {
+          pending -= 1;
+          if (pending <= 0) {
+            applyScroll();
+          }
+        };
+        img.addEventListener('load', onDone, { once: true });
+        img.addEventListener('error', onDone, { once: true });
+      });
+    }
+
+    if (highlightClass) {
+      messageEl.classList.remove(highlightClass);
+      void messageEl.offsetWidth;
+      messageEl.classList.add(highlightClass);
+      setTimeout(() => messageEl.classList.remove(highlightClass), highlightDuration);
+    }
+  }
+
   function highlightMessageInChat(messageId) {
     if (!messageId) return;
     requestAnimationFrame(() => {
       const target = chatContainer.querySelector(`[data-message-id="${messageId}"]`);
       if (!target) return;
-      target.classList.add('search-highlight');
-      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setTimeout(() => target.classList.remove('search-highlight'), 1600);
+      scrollMessageElementToTop(target, { highlightClass: 'search-highlight', highlightDuration: 500 });
     });
   }
 
@@ -3692,9 +3734,7 @@ export function createChatHistoryUI(appContext) {
               requestAnimationFrame(() => {
                 const messageEl = chatContainer.querySelector(`[data-message-id="${record.messageId}"]`);
                 if (messageEl) {
-                  messageEl.classList.add('gallery-highlight');
-                  messageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  setTimeout(() => messageEl.classList.remove('gallery-highlight'), 1600);
+                  scrollMessageElementToTop(messageEl, { highlightClass: 'gallery-highlight', highlightDuration: 1600 });
                 }
               });
             }
