@@ -1564,6 +1564,199 @@ export function createSelectionThreadManager(appContext) {
     return created;
   }
 
+  function cloneMessageValue(value) {
+    if (value == null) return value;
+    try {
+      return structuredClone(value);
+    } catch (_) {}
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (_) {}
+    return value;
+  }
+
+  function copyThreadMessageFields(source, target) {
+    if (!source || !target) return;
+    const skipKeys = new Set([
+      'id',
+      'parentId',
+      'children',
+      'role',
+      'content',
+      'timestamp'
+    ]);
+    Object.keys(source).forEach((key) => {
+      if (skipKeys.has(key)) return;
+      if (key.startsWith('thread')) return;
+      target[key] = cloneMessageValue(source[key]);
+    });
+  }
+
+  // 复制线程消息用于“分支线程”，避免直接复用旧节点导致线程串线。
+  function cloneThreadMessageNode(sourceNode, parentId, threadMeta) {
+    if (!sourceNode || !chatHistoryManager?.addMessageToTreeWithOptions) return null;
+    const content = cloneMessageValue(normalizeStoredMessageContent(sourceNode.content));
+    const node = chatHistoryManager.addMessageToTreeWithOptions(
+      sourceNode.role,
+      content,
+      parentId || null,
+      { preserveCurrentNode: true }
+    );
+    if (!node) return null;
+    copyThreadMessageFields(sourceNode, node);
+    if (sourceNode.contentRef) {
+      node.contentRef = sourceNode.contentRef;
+    }
+    node.threadId = threadMeta.threadId;
+    node.threadAnchorId = threadMeta.anchorMessageId;
+    node.threadSelectionText = threadMeta.selectionText || '';
+    node.threadRootId = threadMeta.rootMessageId || null;
+    node.threadHiddenSelection = false;
+    return node;
+  }
+
+  // 从指定节点向上回溯到线程根节点，构建“根 -> 目标节点”的链路。
+  function buildThreadChainToNode(targetNode, annotation) {
+    if (!targetNode) return [];
+    const nodes = chatHistoryManager?.chatHistory?.messages || [];
+    const findNode = (id) => nodes.find(m => m.id === id) || null;
+    const rootId = annotation?.rootMessageId || '';
+    const threadId = annotation?.id || '';
+    const chain = [];
+    let current = targetNode;
+    const visited = new Set();
+
+    while (current) {
+      chain.unshift(current);
+      if (rootId && current.id === rootId) break;
+      if (current.threadHiddenSelection) break;
+      if (visited.has(current.id)) break;
+      visited.add(current.id);
+      const parent = current.parentId ? findNode(current.parentId) : null;
+      if (!parent) break;
+      if (threadId && parent.threadId && parent.threadId !== threadId) break;
+      if (threadId && !parent.threadId) break;
+      current = parent;
+    }
+
+    if (rootId && chain.length && chain[0].id !== rootId) {
+      const rootNode = findNode(rootId);
+      if (rootNode) chain.unshift(rootNode);
+    }
+    return chain;
+  }
+
+  async function forkThreadFromMessage(messageId) {
+    if (!messageId) return null;
+    const nodes = chatHistoryManager?.chatHistory?.messages || [];
+    const targetNode = nodes.find(node => node.id === messageId);
+    if (!targetNode) {
+      showNotification?.({ message: '未找到要分支的线程消息', type: 'warning' });
+      return null;
+    }
+
+    const sourceThreadId = targetNode.threadId || state.activeThreadId;
+    if (!sourceThreadId) {
+      showNotification?.({ message: '当前消息不属于划词线程', type: 'warning' });
+      return null;
+    }
+
+    const sourceInfo = findThreadById(sourceThreadId);
+    const sourceAnnotation = repairThreadAnnotation(sourceThreadId) || sourceInfo?.annotation || null;
+    if (!sourceInfo || !sourceAnnotation) {
+      showNotification?.({ message: '未找到原线程信息，无法分支', type: 'warning' });
+      return null;
+    }
+
+    const anchorNode = nodes.find(node => node.id === sourceInfo.anchorMessageId) || null;
+    if (!anchorNode) {
+      showNotification?.({ message: '未找到线程锚点消息，无法分支', type: 'warning' });
+      return null;
+    }
+
+    const selectionText = normalizeSelectionText(sourceAnnotation.selectionText || state.activeSelectionText || '');
+    if (!selectionText) {
+      showNotification?.({ message: '线程选中内容缺失，无法分支', type: 'warning' });
+      return null;
+    }
+
+    const selectionInfo = {
+      selectionText,
+      matchIndex: Number.isFinite(sourceAnnotation.matchIndex) ? sourceAnnotation.matchIndex : 0,
+      selectionStartOffset: Number.isFinite(sourceAnnotation.selectionStartOffset)
+        ? sourceAnnotation.selectionStartOffset
+        : null,
+      selectionEndOffset: Number.isFinite(sourceAnnotation.selectionEndOffset)
+        ? sourceAnnotation.selectionEndOffset
+        : null
+    };
+
+    const created = createThreadAnnotation(anchorNode, selectionInfo);
+    if (!created) {
+      showNotification?.({ message: '创建分支线程失败', type: 'warning' });
+      return null;
+    }
+
+    // 创建新的隐藏引用节点作为线程根，避免影响主对话 currentNode。
+    const rootContent = selectionText ? `> ${selectionText}` : '>';
+    const rootNode = chatHistoryManager.addMessageToTreeWithOptions(
+      'user',
+      rootContent,
+      anchorNode.id,
+      { preserveCurrentNode: true }
+    );
+
+    if (!rootNode) {
+      removeThreadAnnotationFromAnchor(anchorNode, created.id);
+      showNotification?.({ message: '创建分支线程根节点失败', type: 'warning' });
+      return null;
+    }
+
+    rootNode.threadId = created.id;
+    rootNode.threadAnchorId = anchorNode.id;
+    rootNode.threadSelectionText = created.selectionText || selectionText;
+    rootNode.threadHiddenSelection = true;
+    rootNode.threadMatchIndex = Number.isFinite(created.matchIndex) ? created.matchIndex : 0;
+    created.rootMessageId = rootNode.id;
+    created.lastMessageId = rootNode.id;
+
+    const sourceChain = buildThreadChainToNode(targetNode, sourceAnnotation);
+    if (!sourceChain.length) {
+      chatHistoryManager?.deleteMessage?.(rootNode.id);
+      removeThreadAnnotationFromAnchor(anchorNode, created.id);
+      showNotification?.({ message: '分支线程失败：未找到原线程链路', type: 'warning' });
+      return null;
+    }
+
+    const visibleChain = sourceChain.filter(node => !node?.threadHiddenSelection);
+    let parentId = rootNode.id;
+    for (const node of visibleChain) {
+      const cloned = cloneThreadMessageNode(node, parentId, {
+        threadId: created.id,
+        anchorMessageId: anchorNode.id,
+        selectionText: created.selectionText || selectionText,
+        rootMessageId: rootNode.id
+      });
+      if (!cloned) break;
+      parentId = cloned.id;
+      created.lastMessageId = cloned.id;
+    }
+
+    const anchorElement = getMessageElementFromNode(anchorNode);
+    if (anchorElement) {
+      decorateMessageElement(anchorElement, anchorNode);
+    }
+
+    if (chatHistoryUI?.saveCurrentConversation) {
+      const savePromise = chatHistoryUI.saveCurrentConversation(true);
+      if (savePromise?.catch) savePromise.catch(() => {});
+    }
+
+    await enterThread(created.id, { focusMessageId: created.lastMessageId });
+    showNotification?.({ message: '已创建分支线程', type: 'info' });
+    return created;
+  }
+
   function showSelectionBubble(selectionInfo, messageElement, range) {
     if (!selectionInfo || !messageElement || !range) return;
     const rect = range.getBoundingClientRect();
@@ -1980,6 +2173,7 @@ export function createSelectionThreadManager(appContext) {
   return {
     init,
     decorateMessageElement,
+    forkThreadFromMessage,
     enterThread,
     exitThread,
     resetForClearChat,

@@ -289,7 +289,19 @@ export function createContextMenuManager(appContext) {
     // 始终显示创建分支对话按钮，但只有在有足够消息时才可用
     if (forkConversationButton) {
       if (activeContainer === threadContainer) {
-        forkConversationButton.style.display = 'none';
+        const selectionThreadManager = services.selectionThreadManager;
+        const messageId = messageElement?.getAttribute?.('data-message-id') || '';
+        const canForkThread = !!(
+          messageId
+          && !messageElement?.classList?.contains?.('loading-message')
+          && selectionThreadManager?.isThreadModeActive?.()
+        );
+        forkConversationButton.style.display = 'flex';
+        if (canForkThread) {
+          forkConversationButton.classList.remove('disabled');
+        } else {
+          forkConversationButton.classList.add('disabled');
+        }
       } else {
         const messageCount = activeContainer ? activeContainer.querySelectorAll('.message').length : 0;
         if (messageCount > 1) {
@@ -486,7 +498,31 @@ export function createContextMenuManager(appContext) {
   function forkConversation() {
     if (currentMessageElement) {
       const messageId = currentMessageElement.getAttribute('data-message-id');
-      if (!messageId || !chatHistory || !chatHistory.messages) {
+      if (!messageId) {
+        console.error('无法创建分支对话: 缺少必要信息');
+        hideContextMenu();
+        return;
+      }
+
+      const activeContainer = resolveMessageContainer(currentMessageElement);
+      if (activeContainer === threadContainer) {
+        const selectionThreadManager = services.selectionThreadManager;
+        if (!selectionThreadManager?.forkThreadFromMessage) {
+          console.error('无法创建分支线程: selectionThreadManager 未就绪');
+          hideContextMenu();
+          return;
+        }
+        const task = selectionThreadManager.forkThreadFromMessage(messageId);
+        if (task?.catch) {
+          task.catch((error) => {
+            console.error('创建分支线程失败:', error);
+          });
+        }
+        hideContextMenu();
+        return;
+      }
+
+      if (!chatHistory || !chatHistory.messages) {
         console.error('无法创建分支对话: 缺少必要信息');
         hideContextMenu();
         return;
