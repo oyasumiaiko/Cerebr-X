@@ -849,10 +849,10 @@ export function createSettingsManager(appContext) {
       scaleValueDisplay.textContent = `${value.toFixed(1)}x`;
     }
 
-    // 在独立聊天页面中直接按用户缩放值应用，避免 DPR 反向补偿导致界面整体偏到左上角
+    // 在独立聊天页面中，本地直接应用缩放，保持与网页侧栏相同的视觉大小语义
     if (isStandalone) {
-      const numericValue = Number(value);
-      const zoom = (Number.isFinite(numericValue) && numericValue > 0) ? numericValue : 1;
+      const baseScale = 1 / (window.devicePixelRatio || 1);
+      const zoom = baseScale * value;
       // 这里使用 zoom 而不是 transform，避免影响已有基于 transform 的动效
       document.documentElement.style.zoom = String(zoom);
     }
