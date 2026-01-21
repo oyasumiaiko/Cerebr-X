@@ -805,6 +805,32 @@ export function createSettingsManager(appContext) {
     notifySidebarWidthChange(width);
   }
 
+  function getSafeScaleFactor(value) {
+    const numericValue = Number(value);
+    return (Number.isFinite(numericValue) && numericValue > 0) ? numericValue : 1;
+  }
+
+  function getStandaloneBaseScale() {
+    const dpr = Number(window.devicePixelRatio);
+    return (Number.isFinite(dpr) && dpr > 0) ? 1 / dpr : 1;
+  }
+
+  function updateStandaloneScaleStyles(scaleFactor) {
+    if (!isStandalone) return;
+    const safeScaleFactor = getSafeScaleFactor(scaleFactor);
+    const baseScale = getStandaloneBaseScale();
+    const zoom = safeScaleFactor * baseScale;
+    // 这里使用 zoom 而不是 transform，避免影响已有基于 transform 的动效
+    document.documentElement.style.zoom = String(zoom);
+
+    // 独立页面缩放会影响布局尺寸，用“虚拟视口”变量保持视觉填充与居中逻辑一致
+    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+    const inverseZoom = zoom > 0 ? 1 / zoom : 1;
+    document.documentElement.style.setProperty('--cerebr-viewport-width', `${viewportW * inverseZoom}px`);
+    document.documentElement.style.setProperty('--cerebr-viewport-height', `${viewportH * inverseZoom}px`);
+  }
+
   // 应用全屏模式内容宽度
   // 说明：全屏布局通过 CSS 变量 --cerebr-fullscreen-width 控制“居中内容列”的最大宽度，
   // 与侧栏实际宽度（--cerebr-sidebar-width）拆分后可分别调整。
@@ -814,13 +840,12 @@ export function createSettingsManager(appContext) {
     // - 全屏布局的内容列宽度如果直接使用 width，会随着 scaleFactor 一起被放大/缩小
     // 因此这里需要用 scaleFactor 进行反向校正，让用户看到/设置的「全屏宽度」保持“绝对像素”语义。
     const rawWidth = Number(width);
-    const configuredScaleFactor = Number(currentSettings.scaleFactor);
-    const effectiveScaleFactor = (Number.isFinite(configuredScaleFactor) && configuredScaleFactor > 0)
-      ? configuredScaleFactor
-      : 1;
+    const effectiveScaleFactor = getSafeScaleFactor(currentSettings.scaleFactor);
 
     const safeWidth = Number.isFinite(rawWidth) ? rawWidth : DEFAULT_SETTINGS.fullscreenWidth;
-    const correctedWidth = safeWidth / effectiveScaleFactor;
+    const baseScale = isStandalone ? getStandaloneBaseScale() : 1;
+    const correctionScale = effectiveScaleFactor * baseScale;
+    const correctedWidth = safeWidth / (correctionScale || 1);
     document.documentElement.style.setProperty('--cerebr-fullscreen-width', `${correctedWidth}px`);
   }
   
@@ -851,10 +876,7 @@ export function createSettingsManager(appContext) {
 
     // 在独立聊天页面中，本地直接应用缩放，保持与网页侧栏相同的视觉大小语义
     if (isStandalone) {
-      const baseScale = 1 / (window.devicePixelRatio || 1);
-      const zoom = baseScale * value;
-      // 这里使用 zoom 而不是 transform，避免影响已有基于 transform 的动效
-      document.documentElement.style.zoom = String(zoom);
+      updateStandaloneScaleStyles(value);
     }
 
     // 通知父窗口缩放比例变化（嵌入模式由 content.js 接管处理）
@@ -1459,6 +1481,12 @@ export function createSettingsManager(appContext) {
 
     setupEventListeners();
     setupSystemThemeListener();
+    if (isStandalone) {
+      window.addEventListener('resize', () => {
+        updateStandaloneScaleStyles(currentSettings.scaleFactor);
+        applyFullscreenWidth(currentSettings.fullscreenWidth);
+      });
+    }
     return initSettings();
   }
   

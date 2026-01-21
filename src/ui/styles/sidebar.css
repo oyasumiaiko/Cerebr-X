@@ -365,8 +365,8 @@ button:disabled {
 }
 
 body.standalone-mode {
-    width: 100vw;
-    height: 100vh;
+    width: var(--cerebr-viewport-width, 100vw);
+    height: var(--cerebr-viewport-height, 100vh);
     --cerebr-opacity: 1;
 }
 
@@ -757,7 +757,7 @@ body.thread-mode-active #thread-panel {
 }
 
 .fullscreen-mode #input-api-switcher {
-    right: calc(max(15px, calc((100vw - var(--cerebr-fullscreen-width)) / 2)) + 44px);
+    right: calc(max(15px, calc((var(--cerebr-viewport-width, 100vw) - var(--cerebr-fullscreen-width)) / 2)) + 44px);
 }
 
 .input-api-option {
@@ -5646,14 +5646,14 @@ html.fullscreen-mode::before {
 .fullscreen-mode #chat-container,
 .fullscreen-mode #input-container,
 .fullscreen-mode .empty-state-content {
-  padding-left: max(15px, calc((100vw - var(--cerebr-fullscreen-width)) / 2));
-  padding-right: max(15px, calc((100vw - var(--cerebr-fullscreen-width)) / 2));
+  padding-left: max(15px, calc((var(--cerebr-viewport-width, 100vw) - var(--cerebr-fullscreen-width)) / 2));
+  padding-right: max(15px, calc((var(--cerebr-viewport-width, 100vw) - var(--cerebr-fullscreen-width)) / 2));
 }
 
 /* 全屏下同样需要扣掉滚动条（或 scrollbar-gutter 占位）的宽度，避免右侧出现“额外空白”。 */
 .fullscreen-mode #chat-container.has-scrollbar {
   padding-right: calc(
-    max(15px, calc((100vw - var(--cerebr-fullscreen-width)) / 2)) - var(--scrollbar-width, 0px)
+    max(15px, calc((var(--cerebr-viewport-width, 100vw) - var(--cerebr-fullscreen-width)) / 2)) - var(--scrollbar-width, 0px)
   );
 }
 
@@ -5759,13 +5759,13 @@ html.fullscreen-mode::before {
      - #api-settings / #prompt-settings 在嵌入侧栏里本来就不会太宽，但在全屏/独立页面里会铺满整屏；
      - 这里沿用 #chat-container / #input-container 的做法：面板仍占满宽度（便于滚动与遮罩），
        但通过左右 padding 把“内容列”限制到与消息区一致的宽度。 */
-  padding-left: max(15px, calc((100vw - var(--cerebr-fullscreen-width)) / 2));
-  padding-right: max(15px, calc((100vw - var(--cerebr-fullscreen-width)) / 2));
+  padding-left: max(15px, calc((var(--cerebr-viewport-width, 100vw) - var(--cerebr-fullscreen-width)) / 2));
+  padding-right: max(15px, calc((var(--cerebr-viewport-width, 100vw) - var(--cerebr-fullscreen-width)) / 2));
 }
 
 /* 全屏模式下的聊天记录面板：宽度为主消息列的 70%，避免与消息区完全同步 */
 .fullscreen-mode #chat-history-panel {
-  width: calc(min(var(--cerebr-fullscreen-width), calc(100vw - 30px)) * 0.7);
+  width: calc(min(var(--cerebr-fullscreen-width), calc(var(--cerebr-viewport-width, 100vw) - 30px)) * 0.7);
   max-width: none;
 }
 

@@ -641,7 +641,11 @@ export function applyStandaloneAdjustments(appContext) {
         ? configuredScaleFactor
         : 1;
 
-      root.style.setProperty('--cerebr-fullscreen-width', `${fullscreenWidth / scaleFactor}px`);
+      const dpr = Number(window.devicePixelRatio);
+      const baseScale = (Number.isFinite(dpr) && dpr > 0) ? 1 / dpr : 1;
+      // 独立页面会应用 DPR 缩放，这里同步校正全屏宽度，避免布局缩放后偏移
+      const correctionScale = scaleFactor * baseScale;
+      root.style.setProperty('--cerebr-fullscreen-width', `${fullscreenWidth / (correctionScale || 1)}px`);
     }
   } catch (e) {
     // 回退：在极端情况下保持可用布局，而不是让页面崩溃
