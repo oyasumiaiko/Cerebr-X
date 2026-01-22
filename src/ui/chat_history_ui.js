@@ -4128,7 +4128,6 @@ export function createChatHistoryUI(appContext) {
             for (const part of orderedParts) {
               const resolvedUrl = resolveImageUrlForGallery(part.imageUrl, downloadRoot);
               if (!resolvedUrl) continue;
-              if (isGifImageReference(part.imageUrl, resolvedUrl)) continue;
               const dedupeKey = buildGalleryImageKey(part.imageUrl, resolvedUrl);
               if (!dedupeKey || deletedKeys.has(dedupeKey)) continue;
               const convIds = convIdsByKey.get(dedupeKey) || new Set();

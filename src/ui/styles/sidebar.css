@@ -2007,6 +2007,12 @@ input:checked + .slider::before {
     align-content: start;
 }
 
+.history-tab-content[data-tab="gallery"] {
+    overflow-y: scroll;
+    overflow-x: hidden;
+    scrollbar-gutter: stable;
+}
+
 .gallery-item {
     position: relative;
     aspect-ratio: 1 / 1;
