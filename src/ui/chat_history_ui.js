@@ -109,6 +109,16 @@ export function createChatHistoryUI(appContext) {
   const GALLERY_THUMB_CONCURRENCY = 3;
   const GALLERY_THUMB_ROOT_MARGIN = '640px 0px';
   const galleryThumbQueue = { active: 0, pending: [], scheduled: false };
+  // 使用 Worker + OffscreenCanvas 生成缩略图，降低主线程解码/绘制的阻塞。
+  const galleryThumbWorkerPool = {
+    available: typeof Worker === 'function' && typeof OffscreenCanvas === 'function' && typeof createImageBitmap === 'function',
+    workers: null,
+    pending: new Map(),
+    seq: 0,
+    nextIndex: 0,
+    fileUrlSupported: null,
+    fileUrlFailures: 0
+  };
 
   function createEmptySearchCache() {
     return {
@@ -386,6 +396,126 @@ export function createChatHistoryUI(appContext) {
     } catch (_) {}
   }
 
+  function getGalleryThumbWorkerCount() {
+    const cores = Number((typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4);
+    const half = Math.max(1, Math.floor(cores / 2));
+    return Math.max(1, Math.min(4, Math.min(GALLERY_THUMB_CONCURRENCY, half)));
+  }
+
+  function shouldUseGalleryThumbWorker(sourceUrl) {
+    if (!galleryThumbWorkerPool.available) return false;
+    if (!sourceUrl) return false;
+    if (galleryThumbWorkerPool.fileUrlSupported === false && sourceUrl.startsWith('file://')) return false;
+    return true;
+  }
+
+  function trackGalleryThumbWorkerFileResult(url, ok, error) {
+    if (!url || !url.startsWith('file://')) return;
+    if (ok) {
+      galleryThumbWorkerPool.fileUrlSupported = true;
+      galleryThumbWorkerPool.fileUrlFailures = 0;
+      return;
+    }
+    if (error === 'fetch') {
+      galleryThumbWorkerPool.fileUrlFailures += 1;
+      if (galleryThumbWorkerPool.fileUrlFailures >= 3 && galleryThumbWorkerPool.fileUrlSupported !== true) {
+        galleryThumbWorkerPool.fileUrlSupported = false;
+      }
+    }
+  }
+
+  function markGalleryThumbWorkerUnavailable() {
+    if (!galleryThumbWorkerPool.available) return;
+    galleryThumbWorkerPool.available = false;
+    if (Array.isArray(galleryThumbWorkerPool.workers)) {
+      galleryThumbWorkerPool.workers.forEach((worker) => {
+        try {
+          worker.terminate();
+        } catch (_) {}
+      });
+    }
+    galleryThumbWorkerPool.workers = null;
+    if (galleryThumbWorkerPool.pending.size) {
+      galleryThumbWorkerPool.pending.forEach((pending) => {
+        pending.resolve({ blob: null, error: 'worker_failed' });
+      });
+      galleryThumbWorkerPool.pending.clear();
+    }
+  }
+
+  function handleGalleryThumbWorkerMessage(event) {
+    const data = event?.data || {};
+    const id = data.id;
+    if (!id) return;
+    const pending = galleryThumbWorkerPool.pending.get(id);
+    if (!pending) return;
+    galleryThumbWorkerPool.pending.delete(id);
+    if (!data.ok) {
+      trackGalleryThumbWorkerFileResult(pending.url, false, data.error);
+      if (data.error === 'unsupported') {
+        markGalleryThumbWorkerUnavailable();
+      }
+      pending.resolve({ blob: null, error: data.error || 'unknown', status: data.status || 0 });
+      return;
+    }
+    trackGalleryThumbWorkerFileResult(pending.url, true);
+    const buffer = data.buffer;
+    const mime = data.mime || 'image/jpeg';
+    const blob = buffer ? new Blob([buffer], { type: mime }) : null;
+    pending.resolve({ blob, error: null });
+  }
+
+  function handleGalleryThumbWorkerError() {
+    markGalleryThumbWorkerUnavailable();
+  }
+
+  function ensureGalleryThumbWorkers() {
+    if (!galleryThumbWorkerPool.available) return null;
+    if (Array.isArray(galleryThumbWorkerPool.workers) && galleryThumbWorkerPool.workers.length) {
+      return galleryThumbWorkerPool.workers;
+    }
+    const count = getGalleryThumbWorkerCount();
+    if (count <= 0) {
+      galleryThumbWorkerPool.available = false;
+      return null;
+    }
+    try {
+      const workerUrl = new URL('./workers/gallery_thumb_worker.js', import.meta.url);
+      const workers = [];
+      for (let i = 0; i < count; i++) {
+        const worker = new Worker(workerUrl);
+        worker.onmessage = handleGalleryThumbWorkerMessage;
+        worker.onerror = handleGalleryThumbWorkerError;
+        workers.push(worker);
+      }
+      galleryThumbWorkerPool.workers = workers;
+      return workers;
+    } catch (_) {
+      galleryThumbWorkerPool.available = false;
+      return null;
+    }
+  }
+
+  function requestGalleryThumbFromWorker(sourceUrl, targetSize) {
+    if (!sourceUrl) return Promise.resolve({ blob: null, error: 'invalid' });
+    const size = Number(targetSize || 0);
+    if (!size) return Promise.resolve({ blob: null, error: 'invalid' });
+    const workers = ensureGalleryThumbWorkers();
+    if (!workers || !workers.length) return Promise.resolve({ blob: null, error: 'unavailable' });
+    return new Promise((resolve) => {
+      const id = ++galleryThumbWorkerPool.seq;
+      const worker = workers[galleryThumbWorkerPool.nextIndex % workers.length];
+      galleryThumbWorkerPool.nextIndex = (galleryThumbWorkerPool.nextIndex + 1) % workers.length;
+      galleryThumbWorkerPool.pending.set(id, { resolve, url: sourceUrl });
+      try {
+        worker.postMessage({ id, url: sourceUrl, size, quality: GALLERY_THUMB_QUALITY });
+      } catch (_) {
+        galleryThumbWorkerPool.pending.delete(id);
+        resolve({ blob: null, error: 'post' });
+      }
+    });
+  }
+
   function canvasToBlobSafe(canvas, type, quality) {
     return new Promise((resolve) => {
       try {
@@ -405,6 +535,17 @@ export function createChatHistoryUI(appContext) {
   }
 
   async function generateGalleryThumbUrl(sourceUrl, targetSize) {
+    if (!sourceUrl) return null;
+    if (shouldUseGalleryThumbWorker(sourceUrl)) {
+      const result = await requestGalleryThumbFromWorker(sourceUrl, targetSize);
+      if (result?.blob) {
+        return URL.createObjectURL(result.blob);
+      }
+    }
+    return generateGalleryThumbUrlOnMain(sourceUrl, targetSize);
+  }
+
+  async function generateGalleryThumbUrlOnMain(sourceUrl, targetSize) {
     if (!sourceUrl) return null;
     try {
       const img = await new Promise((resolve) => {
