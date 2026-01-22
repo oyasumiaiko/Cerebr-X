@@ -6039,7 +6039,7 @@ html.fullscreen-mode::before {
   padding-top: 15px;
   padding-bottom: 15px;
   padding-left: 0;
-  padding-right: 15px;
+  padding-right: 0px;
 }
 
 /* 全屏下：AI 消息不再强制充满整行，避免超宽 */
