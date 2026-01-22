@@ -5228,6 +5228,180 @@ export function createChatHistoryUI(appContext) {
     return statsPanel;
   }
 
+  function renderStatsEntry(targetContent, trendSection) {
+    const entry = document.createElement('div');
+    entry.className = 'db-stats-entry';
+
+    const title = document.createElement('div');
+    title.className = 'db-stats-entry-title';
+    title.textContent = '数据统计';
+
+    const desc = document.createElement('div');
+    desc.className = 'db-stats-entry-desc';
+    desc.textContent = '点击“开始统计”后将扫描全部会话，可能需要一些时间。';
+
+    const actions = document.createElement('div');
+    actions.className = 'db-stats-entry-actions';
+
+    const startBtn = document.createElement('button');
+    startBtn.className = 'db-stats-entry-button';
+    startBtn.textContent = '开始统计';
+    actions.appendChild(startBtn);
+
+    const status = document.createElement('div');
+    status.className = 'db-stats-entry-status';
+
+    entry.appendChild(title);
+    entry.appendChild(desc);
+    entry.appendChild(actions);
+    entry.appendChild(status);
+
+    const runStats = async () => {
+      if (entry.dataset.loading === 'true') return;
+      entry.dataset.loading = 'true';
+      startBtn.disabled = true;
+      startBtn.textContent = '统计中...';
+      status.textContent = '';
+      status.classList.remove('is-error');
+
+      try {
+        const statsData = await getDbStatsWithCache();
+        const statsPanel = renderStatsPanel(statsData);
+        entry.remove();
+        if (trendSection && trendSection.parentNode === targetContent) {
+          targetContent.insertBefore(statsPanel, trendSection);
+        } else {
+          targetContent.appendChild(statsPanel);
+        }
+      } catch (error) {
+        console.error('加载统计数据失败:', error);
+        delete entry.dataset.loading;
+        startBtn.disabled = false;
+        startBtn.textContent = '开始统计';
+        status.textContent = '统计失败，请稍后重试';
+        status.classList.add('is-error');
+      }
+    };
+
+    startBtn.addEventListener('click', runStats);
+
+    return entry;
+  }
+
+  function renderStatsTrendSection() {
+    const trendSection = document.createElement('div');
+    trendSection.className = 'backup-section stats-trend-section';
+
+    const trendTitle = document.createElement('div');
+    trendTitle.className = 'backup-panel-subtitle';
+    trendTitle.textContent = '数据趋势';
+    trendSection.appendChild(trendTitle);
+
+    const trendControls = document.createElement('div');
+    trendControls.className = 'backup-trend-controls';
+
+    const trendMetricControl = document.createElement('div');
+    trendMetricControl.className = 'backup-trend-control';
+    const trendMetricLabel = document.createElement('label');
+    trendMetricLabel.textContent = '指标';
+    const trendMetricSelect = document.createElement('select');
+    TREND_METRIC_OPTIONS.forEach((item) => {
+      const opt = document.createElement('option');
+      opt.value = item.value;
+      opt.textContent = item.label;
+      trendMetricSelect.appendChild(opt);
+    });
+    trendMetricSelect.value = 'totalBytes';
+    trendMetricControl.appendChild(trendMetricLabel);
+    trendMetricControl.appendChild(trendMetricSelect);
+
+    const trendGranularityControl = document.createElement('div');
+    trendGranularityControl.className = 'backup-trend-control';
+    const trendGranularityLabel = document.createElement('label');
+    trendGranularityLabel.textContent = '维度';
+    const trendGranularitySelect = document.createElement('select');
+    TREND_GRANULARITY_OPTIONS.forEach((item) => {
+      const opt = document.createElement('option');
+      opt.value = item.value;
+      opt.textContent = item.label;
+      trendGranularitySelect.appendChild(opt);
+    });
+    trendGranularitySelect.value = 'month';
+    trendGranularityControl.appendChild(trendGranularityLabel);
+    trendGranularityControl.appendChild(trendGranularitySelect);
+
+    const trendRefreshBtn = document.createElement('button');
+    trendRefreshBtn.className = 'backup-button backup-trend-action-button';
+    trendRefreshBtn.textContent = '生成图表';
+
+    trendControls.appendChild(trendMetricControl);
+    trendControls.appendChild(trendGranularityControl);
+    trendControls.appendChild(trendRefreshBtn);
+    trendSection.appendChild(trendControls);
+
+    const trendChart = document.createElement('div');
+    trendChart.className = 'backup-trend';
+    trendChart.innerHTML = '<div class="backup-trend-empty">点击“生成图表”以查看趋势</div>';
+    trendSection.appendChild(trendChart);
+
+    const trendHint = document.createElement('div');
+    trendHint.className = 'backup-panel-hint';
+    trendHint.textContent = '按对话最后更新时间汇总；总数据量=文本+图片+元数据。首次生成会扫描全部会话，切换维度无需重新扫描。';
+    trendSection.appendChild(trendHint);
+
+    const renderTrendIfReady = () => {
+      if (!trendStatsCache.data) return;
+      renderTrendChart(trendChart, trendStatsCache.data, {
+        metric: trendMetricSelect.value,
+        granularity: trendGranularitySelect.value
+      });
+    };
+
+    trendMetricSelect.addEventListener('change', () => {
+      renderTrendIfReady();
+    });
+
+    trendGranularitySelect.addEventListener('change', () => {
+      renderTrendIfReady();
+    });
+
+    trendRefreshBtn.addEventListener('click', async () => {
+      const originalText = trendRefreshBtn.textContent;
+      trendRefreshBtn.disabled = true;
+      trendRefreshBtn.textContent = '生成中...';
+      try {
+        const data = await getTrendStatsCached(true);
+        renderTrendChart(trendChart, data, {
+          metric: trendMetricSelect.value,
+          granularity: trendGranularitySelect.value
+        });
+        showNotification?.({
+          message: '趋势图已更新',
+          type: 'success',
+          duration: 2200
+        });
+      } catch (error) {
+        console.error('生成趋势图失败:', error);
+        showNotification?.({
+          message: '生成趋势图失败',
+          description: String(error?.message || error),
+          type: 'error',
+          duration: 3200
+        });
+      } finally {
+        trendRefreshBtn.disabled = false;
+        trendRefreshBtn.textContent = originalText;
+      }
+    });
+
+    const trendCacheFresh = trendStatsCache.data && (Date.now() - trendStatsCache.time <= TREND_STATS_TTL);
+    if (trendCacheFresh) {
+      renderTrendIfReady();
+    }
+
+    return trendSection;
+  }
+
   /**
    * 显示聊天记录面板
    */
@@ -5273,30 +5447,6 @@ export function createChatHistoryUI(appContext) {
     }
 
     if (resolvedTabName === 'stats') {
-      if (!targetContent) return;
-      const existingStatsPanel = targetContent.querySelector('.db-stats-panel');
-      if (!existingStatsPanel) {
-        const loadingIndicator = document.createElement('div');
-        loadingIndicator.textContent = '正在加载统计数据...';
-        targetContent.appendChild(loadingIndicator);
-
-        getDbStatsWithCache().then(statsData => {
-          loadingIndicator.remove();
-          const statsPanel = renderStatsPanel(statsData);
-          targetContent.appendChild(statsPanel);
-        }).catch(error => {
-          loadingIndicator.remove();
-          console.error('加载统计数据失败:', error);
-          targetContent.textContent = '加载统计数据失败';
-        });
-      } else {
-        getDbStatsWithCache(true).then(updatedStats => {
-          const newStatsPanel = renderStatsPanel(updatedStats);
-          existingStatsPanel.replaceWith(newStatsPanel);
-        }).catch(error => {
-          console.error('更新统计数据失败:', error);
-        });
-      }
       return;
     }
 
@@ -5359,32 +5509,18 @@ export function createChatHistoryUI(appContext) {
       headerActions.className = 'header-actions';
 
       const refreshButton = document.createElement('button');
-      refreshButton.textContent = '刷新';
+      refreshButton.title = '刷新';
+      refreshButton.setAttribute('aria-label', '刷新');
+      refreshButton.innerHTML = '<i class="far fa-redo"></i>';
       refreshButton.addEventListener('click', refreshChatHistory);
 
-      const backupButton = document.createElement('button');
-      backupButton.textContent = '备份';
-      backupButton.addEventListener('click', backupConversations);
-
-      const importButton = document.createElement('button');
-      importButton.textContent = '导入';
-      importButton.title = '从剪贴板导入一条新的聊天记录';
-      importButton.addEventListener('click', () => {
-        importConversationFromClipboard();
-      });
-
-      const restoreButton = document.createElement('button');
-      restoreButton.textContent = '还原';
-      restoreButton.addEventListener('click', restoreConversations);
-
       const closeBtn = document.createElement('button');
-      closeBtn.textContent = '关闭';
+      closeBtn.title = '关闭';
+      closeBtn.setAttribute('aria-label', '关闭');
+      closeBtn.innerHTML = '<i class="far fa-times"></i>';
       closeBtn.addEventListener('click', () => { closeChatHistoryPanel(); });
 
       headerActions.appendChild(refreshButton);
-      headerActions.appendChild(backupButton);
-      headerActions.appendChild(importButton);
-      headerActions.appendChild(restoreButton);
       headerActions.appendChild(closeBtn);
 
       header.appendChild(title);
@@ -5422,7 +5558,7 @@ export function createChatHistoryUI(appContext) {
 
       const backupTab = document.createElement('div');
       backupTab.className = 'history-tab';
-      backupTab.textContent = '备份设置';
+      backupTab.textContent = '备份与恢复';
       backupTab.dataset.tab = 'backup-settings';
       
       tabBar.appendChild(historyTab);
@@ -5588,10 +5724,14 @@ export function createChatHistoryUI(appContext) {
       
       // 统计数据标签内容
       const statsContent = document.createElement('div');
-      statsContent.className = 'history-tab-content';
+      statsContent.className = 'history-tab-content stats-tab-content';
       statsContent.dataset.tab = 'stats';
+      const statsTrendSection = renderStatsTrendSection();
+      const statsEntry = renderStatsEntry(statsContent, statsTrendSection);
+      statsContent.appendChild(statsEntry);
+      statsContent.appendChild(statsTrendSection);
       
-      // 备份设置标签内容
+      // 备份与恢复标签内容
       const backupSettingsContent = document.createElement('div');
       backupSettingsContent.className = 'history-tab-content';
       backupSettingsContent.dataset.tab = 'backup-settings';
@@ -5883,7 +6023,7 @@ export function createChatHistoryUI(appContext) {
   }
 
   /**
-   * 从备份文件还原对话记录（支持多选与合并去重）
+   * 从备份文件恢复对话记录（支持多选与合并去重）
    */
   function restoreConversations() {
     // 创建一个 file input 元素用于选择文件
@@ -5942,7 +6082,7 @@ export function createChatHistoryUI(appContext) {
         // 逐条写入：存在且不覆盖则跳过，存在且覆盖则替换
         for (const conv of mergedConversations) {
           try {
-            // 还原时移除推理签名，避免无意义占用空间
+            // 恢复时移除推理签名，避免无意义占用空间
             try { removeThoughtSignatureFromMessages(conv?.messages); } catch (_) {}
             const existing = await getConversationById(conv.id, false);
             if (!existing) {
@@ -5955,14 +6095,14 @@ export function createChatHistoryUI(appContext) {
               countSkipped++;
             }
           } catch (error) {
-            console.error(`还原对话 ${conv?.id || '-'} 时出错:`, error);
+            console.error(`恢复对话 ${conv?.id || '-'} 时出错:`, error);
           }
           const done = countAdded + countOverwritten + countSkipped;
           sp.updateSub(done, total, `写入会话 (${done}/${total})`);
         }
         sp.next('刷新界面');
         showNotification({
-          message: '还原完成',
+          message: '恢复完成',
           description: `合并：${originalTotal} → ${mergedCount}；新增 ${countAdded}，覆盖 ${countOverwritten}，跳过 ${countSkipped}`,
           type: 'success',
           duration: 3000
@@ -5971,7 +6111,7 @@ export function createChatHistoryUI(appContext) {
         invalidateMetadataCache();
         refreshChatHistory();
         sp.next('完成');
-        sp.complete('还原完成', true);
+        sp.complete('恢复完成', true);
       } catch (error) {
         console.error('读取备份文件失败:', error);
         showNotification({ message: '读取备份文件失败', type: 'error', description: '请检查文件格式' });
@@ -6063,7 +6203,7 @@ export function createChatHistoryUI(appContext) {
                 const cleaned = stripDataUrlsFromString(part.text);
                 if (cleaned.text) textChunks.push(cleaned.text);
               } else if (part.type === 'image_url' && keepImageRefs) {
-                // 保留轻量级图片引用，避免还原后丢失路径；始终丢弃 data: 链接
+                // 保留轻量级图片引用，避免恢复后丢失路径；始终丢弃 data: 链接
                 const img = part.image_url || {};
                 const minimal = { type: 'image_url', image_url: {} };
                 const nonDataPath = (img.path && !String(img.path).startsWith('data:')) ? img.path : null;
@@ -8286,7 +8426,7 @@ export function createChatHistoryUI(appContext) {
 
   // 已移除目录授权/直写方案，统一使用下载 API
 
-  // ==== UI：在聊天记录面板添加“备份设置”标签页 ====
+  // ==== UI：在聊天记录面板添加“备份与恢复”标签页 ====
   // 在渲染面板的逻辑中（创建 tabs 处）插入一个设置页
   function renderBackupSettingsPanelDownloadsOnly() {
     const container = document.createElement('div');
@@ -8298,12 +8438,42 @@ export function createChatHistoryUI(appContext) {
       return row;
     };
 
+    const quickSection = document.createElement('div');
+    quickSection.className = 'backup-section';
+
+    const quickTitle = document.createElement('div');
+    quickTitle.className = 'backup-panel-title';
+    quickTitle.textContent = '快捷操作';
+    quickSection.appendChild(quickTitle);
+
+    const quickButtons = document.createElement('div');
+    quickButtons.className = 'backup-button-group';
+
+    const quickBackupBtn = document.createElement('button');
+    quickBackupBtn.className = 'backup-button';
+    quickBackupBtn.textContent = '立即备份';
+    quickButtons.appendChild(quickBackupBtn);
+
+    const importButton = document.createElement('button');
+    importButton.className = 'backup-button';
+    importButton.textContent = '从剪贴板导入';
+    importButton.title = '从剪贴板导入一条新的聊天记录';
+    quickButtons.appendChild(importButton);
+
+    const restoreButton = document.createElement('button');
+    restoreButton.className = 'backup-button';
+    restoreButton.textContent = '从备份恢复';
+    quickButtons.appendChild(restoreButton);
+
+    quickSection.appendChild(quickButtons);
+    container.appendChild(quickSection);
+
     const manualSection = document.createElement('div');
     manualSection.className = 'backup-section';
 
     const manualTitle = document.createElement('div');
-    manualTitle.className = 'backup-panel-title';
-    manualTitle.textContent = '手动备份';
+    manualTitle.className = 'backup-panel-subtitle';
+    manualTitle.textContent = '备份方式';
     manualSection.appendChild(manualTitle);
 
     const manualButtons = document.createElement('div');
@@ -8325,7 +8495,6 @@ export function createChatHistoryUI(appContext) {
     manualButtons.appendChild(fullResetBtn);
 
     manualSection.appendChild(manualButtons);
-    container.appendChild(manualSection);
 
     const rowZip = document.createElement('div');
     rowZip.className = 'switch-row backup-form-row';
@@ -8342,17 +8511,19 @@ export function createChatHistoryUI(appContext) {
     zipText.textContent = '默认压缩为 .json.gz（不支持则回退 .json）';
     rowZip.appendChild(zipText);
     rowZip.appendChild(switchZip);
-    container.appendChild(rowZip);
+    manualSection.appendChild(rowZip);
 
     const manualHint = document.createElement('div');
     manualHint.className = 'backup-panel-hint';
     manualHint.textContent = '备份将保存到 “下载/Cerebr/” 子目录。';
-    container.appendChild(manualHint);
+    manualSection.appendChild(manualHint);
 
     const manualHintMeta = document.createElement('div');
     manualHintMeta.className = 'backup-panel-hint';
     manualHintMeta.textContent = '精简备份仅移除图片，思考/引用等元数据会保留。';
-    container.appendChild(manualHintMeta);
+    manualSection.appendChild(manualHintMeta);
+
+    container.appendChild(manualSection);
 
     const cleanupSection = document.createElement('div');
     cleanupSection.className = 'backup-section';
@@ -8397,8 +8568,6 @@ export function createChatHistoryUI(appContext) {
     compactMetaHint.textContent = '仅保留引用展示所需字段，剔除检索结果全文，适合元数据膨胀时使用。';
     cleanupSection.appendChild(compactMetaHint);
 
-    container.appendChild(cleanupSection);
-
     const signatureSection = document.createElement('div');
     signatureSection.className = 'backup-section';
 
@@ -8437,70 +8606,6 @@ export function createChatHistoryUI(appContext) {
     signatureHint.className = 'backup-panel-hint';
     signatureHint.textContent = '仅移除 thoughtSignature/thoughtSignatureSource；排除置顶会话。';
     signatureSection.appendChild(signatureHint);
-
-    container.appendChild(signatureSection);
-
-    const trendSection = document.createElement('div');
-    trendSection.className = 'backup-section';
-
-    const trendTitle = document.createElement('div');
-    trendTitle.className = 'backup-panel-subtitle';
-    trendTitle.textContent = '数据趋势';
-    trendSection.appendChild(trendTitle);
-
-    const trendControls = document.createElement('div');
-    trendControls.className = 'backup-trend-controls';
-
-    const trendMetricControl = document.createElement('div');
-    trendMetricControl.className = 'backup-trend-control';
-    const trendMetricLabel = document.createElement('label');
-    trendMetricLabel.textContent = '指标';
-    const trendMetricSelect = document.createElement('select');
-    TREND_METRIC_OPTIONS.forEach((item) => {
-      const opt = document.createElement('option');
-      opt.value = item.value;
-      opt.textContent = item.label;
-      trendMetricSelect.appendChild(opt);
-    });
-    trendMetricSelect.value = 'totalBytes';
-    trendMetricControl.appendChild(trendMetricLabel);
-    trendMetricControl.appendChild(trendMetricSelect);
-
-    const trendGranularityControl = document.createElement('div');
-    trendGranularityControl.className = 'backup-trend-control';
-    const trendGranularityLabel = document.createElement('label');
-    trendGranularityLabel.textContent = '维度';
-    const trendGranularitySelect = document.createElement('select');
-    TREND_GRANULARITY_OPTIONS.forEach((item) => {
-      const opt = document.createElement('option');
-      opt.value = item.value;
-      opt.textContent = item.label;
-      trendGranularitySelect.appendChild(opt);
-    });
-    trendGranularitySelect.value = 'month';
-    trendGranularityControl.appendChild(trendGranularityLabel);
-    trendGranularityControl.appendChild(trendGranularitySelect);
-
-    const trendRefreshBtn = document.createElement('button');
-    trendRefreshBtn.className = 'backup-button backup-trend-action-button';
-    trendRefreshBtn.textContent = '生成图表';
-
-    trendControls.appendChild(trendMetricControl);
-    trendControls.appendChild(trendGranularityControl);
-    trendControls.appendChild(trendRefreshBtn);
-    trendSection.appendChild(trendControls);
-
-    const trendChart = document.createElement('div');
-    trendChart.className = 'backup-trend';
-    trendChart.innerHTML = '<div class="backup-trend-empty">点击“生成图表”以查看趋势</div>';
-    trendSection.appendChild(trendChart);
-
-    const trendHint = document.createElement('div');
-    trendHint.className = 'backup-panel-hint';
-    trendHint.textContent = '按对话最后更新时间汇总；总数据量=文本+图片+元数据。首次生成会扫描全部会话，切换维度无需重新扫描。';
-    trendSection.appendChild(trendHint);
-
-    container.appendChild(trendSection);
 
     const incrementalSection = document.createElement('div');
     incrementalSection.className = 'backup-section';
@@ -8590,6 +8695,8 @@ export function createChatHistoryUI(appContext) {
     const nextIncrementalInfoValue = createInfoItem('下次预计增量：');
 
     container.appendChild(incrementalSection);
+    container.appendChild(cleanupSection);
+    container.appendChild(signatureSection);
 
     const fmt = (t) => t ? new Date(t).toLocaleString() : '从未';
     const computeNextTs = (prefs) => {
@@ -8682,6 +8789,18 @@ export function createChatHistoryUI(appContext) {
       await refreshPreferences();
       restartAutoBackupScheduler?.();
     };
+
+    quickBackupBtn.addEventListener('click', async () => {
+      await runManualBackup();
+    });
+
+    importButton.addEventListener('click', () => {
+      importConversationFromClipboard();
+    });
+
+    restoreButton.addEventListener('click', () => {
+      restoreConversations();
+    });
 
     fullIncludeBtn.addEventListener('click', async () => {
       await runManualBackup({ excludeImages: false });
@@ -8838,51 +8957,6 @@ export function createChatHistoryUI(appContext) {
       }
     });
 
-    const renderTrendIfReady = () => {
-      if (!trendStatsCache.data) return;
-      renderTrendChart(trendChart, trendStatsCache.data, {
-        metric: trendMetricSelect.value,
-        granularity: trendGranularitySelect.value
-      });
-    };
-
-    trendMetricSelect.addEventListener('change', () => {
-      renderTrendIfReady();
-    });
-
-    trendGranularitySelect.addEventListener('change', () => {
-      renderTrendIfReady();
-    });
-
-    trendRefreshBtn.addEventListener('click', async () => {
-      const originalText = trendRefreshBtn.textContent;
-      trendRefreshBtn.disabled = true;
-      trendRefreshBtn.textContent = '生成中...';
-      try {
-        const data = await getTrendStatsCached(true);
-        renderTrendChart(trendChart, data, {
-          metric: trendMetricSelect.value,
-          granularity: trendGranularitySelect.value
-        });
-        showNotification?.({
-          message: '趋势图已更新',
-          type: 'success',
-          duration: 2200
-        });
-      } catch (error) {
-        console.error('生成趋势图失败:', error);
-        showNotification?.({
-          message: '生成趋势图失败',
-          description: String(error?.message || error),
-          type: 'error',
-          duration: 3200
-        });
-      } finally {
-        trendRefreshBtn.disabled = false;
-        trendRefreshBtn.textContent = originalText;
-      }
-    });
-
     signatureCleanupBtn.addEventListener('click', async () => {
       const days = Math.max(1, Number(signatureSelect.value) || 30);
       const confirmFn = appContext?.utils?.showConfirm;
@@ -8933,11 +9007,6 @@ export function createChatHistoryUI(appContext) {
         signatureCleanupBtn.textContent = originalText;
       }
     });
-
-    const trendCacheFresh = trendStatsCache.data && (Date.now() - trendStatsCache.time <= TREND_STATS_TTL);
-    if (trendCacheFresh) {
-      renderTrendIfReady();
-    }
 
     refreshPreferences();
 

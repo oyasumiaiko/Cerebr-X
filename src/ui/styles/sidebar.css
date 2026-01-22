@@ -4516,6 +4516,7 @@ body.hide-references .reference-number.superscript {
 #chat-history-panel .header-actions {
     display: flex;
     align-items: center;
+    gap: 8px;
 }
 
 #chat-history-panel .switch-container {
@@ -4568,6 +4569,10 @@ body.hide-references .reference-number.superscript {
 .history-tab-content.active {
     display: flex;
     flex-direction: column;
+}
+
+.history-tab-content.stats-tab-content {
+    gap: 16px;
 }
 
 /* 滚动条样式统一至全局 */
@@ -4633,6 +4638,50 @@ body.hide-references .reference-number.superscript {
     gap: 16px;
     padding: 4px;
     animation: fadeIn 0.3s ease;
+}
+
+.db-stats-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--cerebr-message-ai-bg) 80%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--cerebr-border-color) 80%, transparent);
+}
+
+.db-stats-entry-title {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.db-stats-entry-desc {
+    font-size: 12px;
+    line-height: 1.5;
+    color: color-mix(in srgb, var(--cerebr-text-color) 78%, transparent);
+}
+
+.db-stats-entry-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.db-stats-entry-button {
+    min-width: 120px;
+}
+
+.db-stats-entry-status {
+    font-size: 12px;
+    color: color-mix(in srgb, var(--cerebr-text-color) 72%, transparent);
+}
+
+.db-stats-entry-status.is-error {
+    color: #ff4d4f;
+}
+
+.stats-trend-section {
+    padding: 4px;
 }
 
 @keyframes fadeIn {
