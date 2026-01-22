@@ -70,7 +70,16 @@ export function createSelectionThreadManager(appContext) {
   const THREAD_RESIZE_MIN_COLUMN_WIDTH = 240;
   const THREAD_RESIZE_EDGE_PADDING = 30;
   const THREAD_LAYOUT_STORAGE_KEY = 'thread_layout_prefs';
+  const THREAD_LAYOUT_SYNC_MIN_INTERVAL_MS = 15000;
+  const THREAD_LAYOUT_SYNC_DEBOUNCE_MS = 800;
   let threadLayoutPrefsPromise = null;
+  const threadLayoutSyncState = {
+    timer: null,
+    lastSyncAt: 0,
+    lastSignature: '',
+    pendingPayload: null,
+    pendingSignature: ''
+  };
   const threadResizeState = {
     active: false,
     mode: '',
@@ -2249,7 +2258,55 @@ export function createSelectionThreadManager(appContext) {
     const left = Number(rawPrefs.left);
     const right = Number(rawPrefs.right);
     if (!Number.isFinite(left) || !Number.isFinite(right)) return null;
-    return { left, right };
+    const ratio = Number(rawPrefs.ratio);
+    const updatedAt = Number(rawPrefs.updatedAt);
+    return {
+      left,
+      right,
+      ratio: Number.isFinite(ratio) ? ratio : null,
+      updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0
+    };
+  }
+
+  function getThreadLayoutSignature(payload) {
+    if (!payload) return '';
+    return `${payload.left}:${payload.right}`;
+  }
+
+  function buildThreadLayoutPayload() {
+    const left = Number(state.threadLayoutLeft);
+    const right = Number(state.threadLayoutRight);
+    if (!Number.isFinite(left) || !Number.isFinite(right)) return null;
+    return {
+      left,
+      right,
+      ratio: state.threadLayoutRatio,
+      updatedAt: Date.now()
+    };
+  }
+
+  function writeThreadLayoutLocal(payload) {
+    if (!payload || !chrome?.storage?.local?.set) return;
+    chrome.storage.local.set({ [THREAD_LAYOUT_STORAGE_KEY]: payload }).catch(() => {});
+  }
+
+  async function readThreadLayoutPrefsFromStorage(storageArea) {
+    if (!storageArea?.get) return null;
+    try {
+      const res = await storageArea.get([THREAD_LAYOUT_STORAGE_KEY]);
+      return normalizeThreadLayoutPrefs(res?.[THREAD_LAYOUT_STORAGE_KEY]);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function pickLatestThreadLayoutPrefs(localPrefs, syncPrefs) {
+    if (localPrefs && syncPrefs) {
+      const localUpdatedAt = localPrefs.updatedAt || 0;
+      const syncUpdatedAt = syncPrefs.updatedAt || 0;
+      return syncUpdatedAt > localUpdatedAt ? syncPrefs : localPrefs;
+    }
+    return localPrefs || syncPrefs || null;
   }
 
   function applyThreadLayoutPrefs(prefs) {
@@ -2266,27 +2323,69 @@ export function createSelectionThreadManager(appContext) {
 
   async function loadThreadLayoutPrefs() {
     if (threadLayoutPrefsPromise) return threadLayoutPrefsPromise;
-    if (!chrome?.storage?.sync?.get) return null;
-    threadLayoutPrefsPromise = chrome.storage.sync
-      .get([THREAD_LAYOUT_STORAGE_KEY])
-      .then((res) => normalizeThreadLayoutPrefs(res?.[THREAD_LAYOUT_STORAGE_KEY]))
+    const localPromise = readThreadLayoutPrefsFromStorage(chrome?.storage?.local);
+    const syncPromise = readThreadLayoutPrefsFromStorage(chrome?.storage?.sync);
+    threadLayoutPrefsPromise = Promise.all([localPromise, syncPromise])
+      .then(([localPrefs, syncPrefs]) => {
+        const picked = pickLatestThreadLayoutPrefs(localPrefs, syncPrefs);
+        // sync 更新更晚时，顺便回写 local，保持单机启动更快。
+        if (picked && picked === syncPrefs) {
+          writeThreadLayoutLocal(picked);
+        }
+        return picked;
+      })
       .catch(() => null);
     return threadLayoutPrefsPromise;
+  }
+
+  function scheduleThreadLayoutSync(payload) {
+    if (!payload || !chrome?.storage?.sync?.set) return;
+    const signature = getThreadLayoutSignature(payload);
+    if (signature && signature === threadLayoutSyncState.lastSignature && !threadLayoutSyncState.pendingPayload) {
+      return;
+    }
+    threadLayoutSyncState.pendingPayload = payload;
+    threadLayoutSyncState.pendingSignature = signature;
+    if (threadLayoutSyncState.timer) {
+      clearTimeout(threadLayoutSyncState.timer);
+    }
+    const now = Date.now();
+    const earliest = threadLayoutSyncState.lastSyncAt + THREAD_LAYOUT_SYNC_MIN_INTERVAL_MS;
+    const delay = Math.max(THREAD_LAYOUT_SYNC_DEBOUNCE_MS, earliest - now);
+    threadLayoutSyncState.timer = window.setTimeout(flushThreadLayoutSync, delay);
+  }
+
+  async function flushThreadLayoutSync() {
+    threadLayoutSyncState.timer = null;
+    const pending = threadLayoutSyncState.pendingPayload;
+    if (!pending || !chrome?.storage?.sync?.set) return;
+    const now = Date.now();
+    const earliest = threadLayoutSyncState.lastSyncAt + THREAD_LAYOUT_SYNC_MIN_INTERVAL_MS;
+    if (now < earliest) {
+      scheduleThreadLayoutSync(pending);
+      return;
+    }
+    try {
+      await chrome.storage.sync.set({ [THREAD_LAYOUT_STORAGE_KEY]: pending });
+      threadLayoutSyncState.lastSyncAt = Date.now();
+      threadLayoutSyncState.lastSignature = threadLayoutSyncState.pendingSignature || getThreadLayoutSignature(pending);
+      threadLayoutSyncState.pendingPayload = null;
+      threadLayoutSyncState.pendingSignature = '';
+    } catch (error) {
+      console.warn('保存线程分栏宽度失败（将稍后重试）:', error);
+      scheduleThreadLayoutSync(pending);
+    }
   }
 
   async function persistThreadLayoutPrefs() {
     // 仅保存用户实际拖动后的布局，避免覆盖默认值。
     if (!state.threadLayoutCustomized) return;
-    if (!chrome?.storage?.sync?.set) return;
-    const left = Number(state.threadLayoutLeft);
-    const right = Number(state.threadLayoutRight);
-    if (!Number.isFinite(left) || !Number.isFinite(right)) return;
-    const payload = { left, right, ratio: state.threadLayoutRatio };
-    try {
-      await chrome.storage.sync.set({ [THREAD_LAYOUT_STORAGE_KEY]: payload });
-    } catch (error) {
-      console.warn('保存线程双栏宽度失败（忽略）:', error);
-    }
+    const payload = buildThreadLayoutPayload();
+    if (!payload) return;
+    // 本地先落盘，确保不会因为 sync 配额导致保存失败。
+    writeThreadLayoutLocal(payload);
+    // sync 写入采用节流+去抖，避免高频触发配额错误。
+    scheduleThreadLayoutSync(payload);
   }
 
   function syncThreadLayoutWidths() {
