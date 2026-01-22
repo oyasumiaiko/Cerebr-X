@@ -498,7 +498,11 @@ function setupGlobalEscapeHandler(appContext) {
     if (anyPanelOpen) {
       appContext.services.uiManager.closeExclusivePanels();
     } else {
-      appContext.services.chatHistoryUI.showChatHistoryPanel();
+      const lastClosedTab = appContext.services.chatHistoryUI.getLastClosedTabName?.();
+      const targetTab = (typeof lastClosedTab === 'string' && lastClosedTab.trim())
+        ? lastClosedTab
+        : 'history';
+      appContext.services.chatHistoryUI.showChatHistoryPanel(targetTab);
     }
     e.preventDefault();
   });

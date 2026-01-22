@@ -63,6 +63,8 @@ export function createChatHistoryUI(appContext) {
   const conversationPresence = services.conversationPresence;
 
   let currentConversationId = null;
+  // 记录上次关闭面板时的标签名，Esc 重新打开时优先恢复；首次加载为空则回退到“history”。
+  let lastClosedTabName = null;
   // let currentPageInfo = null; // Replaced by appContext.state.pageInfo or parameter to updatePageInfo
   
   // 内存管理设置 - 始终启用
@@ -1676,6 +1678,8 @@ export function createChatHistoryUI(appContext) {
   function closeChatHistoryPanel() {
     const panel = document.getElementById('chat-history-panel');
     if (panel && panel.classList.contains('visible')) {
+      const activeTabName = panel.querySelector('.history-tab.active')?.dataset?.tab;
+      lastClosedTabName = activeTabName || lastClosedTabName || 'history';
       // 关闭面板时一并关闭 hover 预览 tooltip，避免遗留浮层
       hideChatHistoryPreviewTooltip();
       markGalleryInactive(panel);
@@ -5182,6 +5186,10 @@ export function createChatHistoryUI(appContext) {
   function getActiveChatHistoryTabName() {
     const panel = document.getElementById('chat-history-panel');
     return panel?.querySelector('.history-tab.active')?.dataset?.tab || null;
+  }
+
+  function getLastClosedChatHistoryTabName() {
+    return lastClosedTabName;
   }
 
   async function showChatHistoryPanel(initialTab = 'history') {
@@ -9172,6 +9180,7 @@ export function createChatHistoryUI(appContext) {
       await activateChatHistoryTab(panel, tabName);
     },
     getActiveTabName: getActiveChatHistoryTabName,
+    getLastClosedTabName: getLastClosedChatHistoryTabName,
     closeChatHistoryPanel,
     toggleChatHistoryPanel,
     isChatHistoryPanelOpen,
