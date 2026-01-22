@@ -69,6 +69,8 @@ export function createSelectionThreadManager(appContext) {
   let threadScrollListenerBound = false;
   const THREAD_RESIZE_MIN_COLUMN_WIDTH = 240;
   const THREAD_RESIZE_EDGE_PADDING = 30;
+  const THREAD_LAYOUT_STORAGE_KEY = 'thread_layout_prefs';
+  let threadLayoutPrefsPromise = null;
   const threadResizeState = {
     active: false,
     mode: '',
@@ -2242,6 +2244,51 @@ export function createSelectionThreadManager(appContext) {
     document.documentElement.style.setProperty('--cerebr-thread-total-width', `${total}px`);
   }
 
+  function normalizeThreadLayoutPrefs(rawPrefs) {
+    if (!rawPrefs || typeof rawPrefs !== 'object') return null;
+    const left = Number(rawPrefs.left);
+    const right = Number(rawPrefs.right);
+    if (!Number.isFinite(left) || !Number.isFinite(right)) return null;
+    return { left, right };
+  }
+
+  function applyThreadLayoutPrefs(prefs) {
+    if (!prefs) return;
+    const normalized = normalizeThreadLayoutWidths(prefs.left, prefs.right);
+    state.threadLayoutCustomized = true;
+    state.threadLayoutLeft = normalized.left;
+    state.threadLayoutRight = normalized.right;
+    state.threadLayoutRatio = normalized.ratio;
+    if (isThreadResizeEnabled()) {
+      applyThreadLayoutWidths(normalized.left, normalized.right);
+    }
+  }
+
+  async function loadThreadLayoutPrefs() {
+    if (threadLayoutPrefsPromise) return threadLayoutPrefsPromise;
+    if (!chrome?.storage?.sync?.get) return null;
+    threadLayoutPrefsPromise = chrome.storage.sync
+      .get([THREAD_LAYOUT_STORAGE_KEY])
+      .then((res) => normalizeThreadLayoutPrefs(res?.[THREAD_LAYOUT_STORAGE_KEY]))
+      .catch(() => null);
+    return threadLayoutPrefsPromise;
+  }
+
+  async function persistThreadLayoutPrefs() {
+    // 仅保存用户实际拖动后的布局，避免覆盖默认值。
+    if (!state.threadLayoutCustomized) return;
+    if (!chrome?.storage?.sync?.set) return;
+    const left = Number(state.threadLayoutLeft);
+    const right = Number(state.threadLayoutRight);
+    if (!Number.isFinite(left) || !Number.isFinite(right)) return;
+    const payload = { left, right, ratio: state.threadLayoutRatio };
+    try {
+      await chrome.storage.sync.set({ [THREAD_LAYOUT_STORAGE_KEY]: payload });
+    } catch (error) {
+      console.warn('保存线程双栏宽度失败（忽略）:', error);
+    }
+  }
+
   function syncThreadLayoutWidths() {
     if (!isFullscreenLayout() || !state.activeThreadId) return;
     const { left, right } = getThreadLayoutWidths();
@@ -2286,6 +2333,7 @@ export function createSelectionThreadManager(appContext) {
     document.removeEventListener('mousemove', handleThreadResizeMove);
     document.removeEventListener('mouseup', stopThreadResize);
     window.removeEventListener('blur', stopThreadResize);
+    persistThreadLayoutPrefs();
   }
 
   function startThreadResize(event, mode) {
@@ -2436,6 +2484,13 @@ export function createSelectionThreadManager(appContext) {
     bindHighlightEvents(chatContainer);
     bindThreadResizeHandles();
     window.addEventListener('resize', handleThreadResizeViewportChange);
+    loadThreadLayoutPrefs().then((prefs) => {
+      if (!prefs) return;
+      applyThreadLayoutPrefs(prefs);
+      if (state.activeThreadId) {
+        syncThreadLayoutWidths();
+      }
+    });
     if (threadPanel) {
       threadPanel.setAttribute('aria-hidden', 'true');
     }
