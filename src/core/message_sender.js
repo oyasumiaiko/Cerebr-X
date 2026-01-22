@@ -502,6 +502,50 @@ export function createMessageSender(appContext) {
     return isNested ? chatContainer : container;
   }
 
+  // 判断“当前 UI 是否正在展示该线程”，用于避免跨线程渲染互相污染。
+  function isThreadUiActive(threadContext) {
+    if (!threadContext) return false;
+    const threadManager = services.selectionThreadManager;
+    if (!threadManager?.isThreadModeActive?.()) return false;
+    const activeThreadId = threadManager.getActiveThreadId?.();
+    return !!(activeThreadId && activeThreadId === threadContext.threadId);
+  }
+
+  // 仅当线程 UI 可见且匹配时，返回可滚动容器；否则返回 null。
+  function resolveThreadUiContainer(threadContext) {
+    if (!threadContext) return null;
+    if (!isThreadUiActive(threadContext)) return null;
+    return resolveThreadScrollContainer(threadContext);
+  }
+
+  // 线程后台生成时仅写入历史（不渲染 DOM），避免与当前线程视图串线。
+  function createThreadAiMessageHistoryOnly(payload) {
+    const {
+      content,
+      thoughts,
+      historyParentId,
+      historyPatch
+    } = payload || {};
+    if (!historyParentId) return null;
+    const processedContent = imageHandler.processImageTags(content || '', null);
+    const addWithOptions = typeof chatHistoryManager.addMessageToTreeWithOptions === 'function';
+    const node = addWithOptions
+      ? chatHistoryManager.addMessageToTreeWithOptions(
+          'assistant',
+          processedContent,
+          historyParentId,
+          { preserveCurrentNode: true }
+        )
+      : chatHistoryManager.addMessageToTree('assistant', processedContent, historyParentId);
+    if (!node) return null;
+    if (thoughts !== undefined) node.thoughtsRaw = thoughts;
+    if (historyPatch && typeof historyPatch === 'object') {
+      Object.assign(node, historyPatch);
+    }
+    node.hasInlineImages = Array.isArray(processedContent) && processedContent.some(p => p?.type === 'image_url');
+    return node;
+  }
+
   /**
    * 安全更新“加载占位消息”的状态文案。
    *
@@ -1368,7 +1412,8 @@ export function createMessageSender(appContext) {
             || (threadContainer ? threadContainer.querySelector(selector) : null);
           const isAssistantNode = !!(node && node.role === 'assistant');
           const isAiElement = !!(el && el.classList && el.classList.contains('ai-message'));
-          canUpdateExistingAiMessage = !!(isAssistantNode && isAiElement);
+          // 允许“仅历史节点存在但 DOM 缺失”的场景继续原地替换，避免线程切换时误追加新消息。
+          canUpdateExistingAiMessage = !!isAssistantNode;
 
           if (canUpdateExistingAiMessage) {
             // 绑定 attempt 到目标 AI 消息，便于“停止更新”按消息粒度工作
@@ -1378,21 +1423,23 @@ export function createMessageSender(appContext) {
             // - preserveReadingPosition 用于总开关，避免普通发送/普通更新带来额外开销。
             attempt.preserveReadingPosition = true;
             attempt.preserveTargetMessageId = normalizedTargetAiMessageId;
-            resetThoughtsToggleStateForRegenerate(el);
-            try {
-              el.classList.add('updating');
-              el.classList.add('regenerating');
-            } catch (_) {}
+            if (el) {
+              resetThoughtsToggleStateForRegenerate(el);
+              try {
+                el.classList.add('updating');
+                el.classList.add('regenerating');
+              } catch (_) {}
 
-            // 若目标并非最后一条 AI 消息，关闭自动滚动，避免视角被强行拉到底部
-            try {
-              const aiScope = (threadContainer && el && threadContainer.contains(el)) ? threadContainer : chatContainer;
-              const aiMessages = aiScope.querySelectorAll('.message.ai-message');
-              const lastAi = aiMessages.length > 0 ? aiMessages[aiMessages.length - 1] : null;
-              if (lastAi && lastAi !== el) {
-                shouldAutoScroll = false;
-              }
-            } catch (_) {}
+              // 若目标并非最后一条 AI 消息，关闭自动滚动，避免视角被强行拉到底部
+              try {
+                const aiScope = (threadContainer && threadContainer.contains(el)) ? threadContainer : chatContainer;
+                const aiMessages = aiScope.querySelectorAll('.message.ai-message');
+                const lastAi = aiMessages.length > 0 ? aiMessages[aiMessages.length - 1] : null;
+                if (lastAi && lastAi !== el) {
+                  shouldAutoScroll = false;
+                }
+              } catch (_) {}
+            }
           }
         } catch (e) {
           console.warn('校验 targetAiMessageId 失败，将回退为追加消息:', e);
@@ -1402,12 +1449,17 @@ export function createMessageSender(appContext) {
 
       // 添加加载状态消息（仅在“追加新消息”模式下需要占位）
       if (!canUpdateExistingAiMessage) {
-        const loadingOptions = activeThreadContext ? { container: activeThreadContext.container } : null;
+        const threadUiActive = isThreadUiActive(activeThreadContext);
+        const loadingOptions = activeThreadContext
+          ? { container: activeThreadContext.container, skipDom: !threadUiActive }
+          : null;
         loadingMessage = messageProcessor.appendMessage('正在处理...', 'ai', true, null, null, null, null, null, loadingOptions);
         attempt.loadingMessage = loadingMessage;
-        loadingMessage.classList.add('loading-message');
-        // 让“等待回复”占位消息也带有 updating 状态，便于右键菜单显示“停止更新”
-        loadingMessage.classList.add('updating');
+        if (loadingMessage) {
+          loadingMessage.classList.add('loading-message');
+          // 让“等待回复”占位消息也带有 updating 状态，便于右键菜单显示“停止更新”
+          loadingMessage.classList.add('updating');
+        }
       } else {
         loadingMessage = null;
         attempt.loadingMessage = null;
@@ -1714,7 +1766,10 @@ export function createMessageSender(appContext) {
         messageElement = loadingMessage;
         messageElement.textContent = errorMessageText;
       } else {
-        const errorOptions = activeThreadContext ? { container: activeThreadContext.container } : null;
+        const errorUiActive = isThreadUiActive(activeThreadContext);
+        const errorOptions = activeThreadContext
+          ? { container: activeThreadContext.container, skipDom: !errorUiActive }
+          : null;
         messageElement = messageProcessor.appendMessage(errorMessageText, 'ai', true, null, null, null, null, null, errorOptions);
       }
 
@@ -1722,7 +1777,12 @@ export function createMessageSender(appContext) {
         messageElement.classList.add('error-message');
         messageElement.classList.remove('loading-message');
         messageElement.classList.remove('updating');
-        scrollToBottom(resolveThreadScrollContainer(activeThreadContext));
+        const errorScrollContainer = activeThreadContext
+          ? resolveThreadUiContainer(activeThreadContext)
+          : chatContainer;
+        if (errorScrollContainer) {
+          scrollToBottom(errorScrollContainer);
+        }
       }
 
       if (autoRetryEnabled && typeof showNotification === 'function') {
@@ -2039,7 +2099,10 @@ export function createMessageSender(appContext) {
     );
 
     const threadContext = attemptState?.threadContext || null;
-    const threadScrollContainer = resolveThreadScrollContainer(threadContext);
+    const getUiContainer = () => {
+      if (threadContext) return resolveThreadUiContainer(threadContext);
+      return chatContainer;
+    };
 
     function applyApiMetaToMessage(messageId, apiConfig, messageDiv) {
       try {
@@ -2144,8 +2207,10 @@ export function createMessageSender(appContext) {
 	    const uiUpdateThrottler = createAdaptiveUpdateThrottler({
 	      run: (payload) => {
 	        if (!payload || !payload.messageId) return;
-	        const regenContainer = threadScrollContainer || chatContainer;
-	        const anchor = captureReadingAnchorForRegenerate(regenContainer, payload.messageId, attemptState);
+	        const regenContainer = getUiContainer();
+	        const anchor = regenContainer
+	          ? captureReadingAnchorForRegenerate(regenContainer, payload.messageId, attemptState)
+	          : null;
 	        try {
 	          withAutoScrollSuppressed(!!payload.suppressAutoScroll, () => {
 	            messageProcessor.updateAIMessage(
@@ -2156,7 +2221,9 @@ export function createMessageSender(appContext) {
 	            );
 	          });
 	        } finally {
-	          restoreReadingAnchor(regenContainer, anchor);
+	          if (regenContainer) {
+	            restoreReadingAnchor(regenContainer, anchor);
+	          }
 	        }
 	      },
 	      shouldCancel: () => {
@@ -2432,8 +2499,10 @@ export function createMessageSender(appContext) {
 
 	        if (currentAiMessageId) {
 	          // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
-	          const regenContainer = threadScrollContainer || chatContainer;
-	          const anchor = captureReadingAnchorForRegenerate(regenContainer, currentAiMessageId, attemptState);
+	          const regenContainer = getUiContainer();
+	          const anchor = regenContainer
+	            ? captureReadingAnchorForRegenerate(regenContainer, currentAiMessageId, attemptState)
+	            : null;
 	          try {
 	            withAutoScrollSuppressed(!nowHasAnswerContent, () => {
 	              messageProcessor.updateAIMessage(
@@ -2451,47 +2520,73 @@ export function createMessageSender(appContext) {
 	            console.warn('原地替换 AI 消息失败，将回退为追加新消息:', e);
 	            currentAiMessageId = null;
 	          } finally {
-            restoreReadingAnchor(regenContainer, anchor);
-          }
-        }
+	            if (regenContainer) {
+	              restoreReadingAnchor(regenContainer, anchor);
+	            }
+	          }
+	        }
 
         if (!currentAiMessageId) {
           const threadHistoryPatch = buildThreadHistoryPatch(threadContext);
-          const threadOptions = threadContext
-            ? {
-                container: threadContext.container,
-                historyParentId: threadContext.parentMessageIdForAi
-                  || threadContext.lastMessageId
-                  || threadContext.rootMessageId
-                  || threadContext.anchorMessageId,
-                preserveCurrentNode: true,
-                historyPatch: threadHistoryPatch
-              }
+          const historyParentId = threadContext
+            ? (threadContext.parentMessageIdForAi
+              || threadContext.lastMessageId
+              || threadContext.rootMessageId
+              || threadContext.anchorMessageId)
             : null;
-          const newAiMessageDiv = messageProcessor.appendMessage(
-            aiResponse,      // 初始完整回答文本
-            'ai',
-            false,           // skipHistory = false, 创建历史节点
-            null,            // fragment = null
-            null,            // inline 模式下不再单独传入图片HTML
-            aiThoughtsRaw,   // 初始思考过程
-            null,            // messageIdToUpdate = null
-            null,
-            threadOptions
-          );
-
-	          if (newAiMessageDiv) {
-	            currentAiMessageId = newAiMessageDiv.getAttribute('data-message-id');
-	            // 将本次 AI 消息与 attempt 绑定，便于按消息粒度中止/清理
-            if (attemptState) {
-              attemptState.aiMessageId = currentAiMessageId;
+          const shouldRenderDom = !threadContext || isThreadUiActive(threadContext);
+          if (threadContext && !shouldRenderDom) {
+            const createdNode = createThreadAiMessageHistoryOnly({
+              content: aiResponse,
+              thoughts: aiThoughtsRaw,
+              historyParentId,
+              historyPatch: threadHistoryPatch
+            });
+            if (createdNode) {
+              currentAiMessageId = createdNode.id;
+              if (attemptState) {
+                attemptState.aiMessageId = currentAiMessageId;
+              }
+              applyApiMetaToMessage(currentAiMessageId, usedApiConfig);
+              updateThreadLastMessage(threadContext, currentAiMessageId);
             }
-            // 记录 API 元信息并渲染 footer
-            applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
-            updateThreadLastMessage(threadContext, currentAiMessageId);
+          } else {
+            const threadOptions = threadContext
+              ? {
+                  container: threadContext.container,
+                  historyParentId,
+                  preserveCurrentNode: true,
+                  historyPatch: threadHistoryPatch
+                }
+              : null;
+            const newAiMessageDiv = messageProcessor.appendMessage(
+              aiResponse,      // 初始完整回答文本
+              'ai',
+              false,           // skipHistory = false, 创建历史节点
+              null,            // fragment = null
+              null,            // inline 模式下不再单独传入图片HTML
+              aiThoughtsRaw,   // 初始思考过程
+              null,            // messageIdToUpdate = null
+              null,
+              threadOptions
+            );
+
+            if (newAiMessageDiv) {
+              currentAiMessageId = newAiMessageDiv.getAttribute('data-message-id');
+              // 将本次 AI 消息与 attempt 绑定，便于按消息粒度中止/清理
+              if (attemptState) {
+                attemptState.aiMessageId = currentAiMessageId;
+              }
+              // 记录 API 元信息并渲染 footer
+              applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
+              updateThreadLastMessage(threadContext, currentAiMessageId);
+            }
           }
           if (nowHasAnswerContent) {
-            scrollToBottom(threadScrollContainer);
+            const scrollContainer = getUiContainer();
+            if (scrollContainer) {
+              scrollToBottom(scrollContainer);
+            }
           }
         }
 
@@ -2667,8 +2762,10 @@ export function createMessageSender(appContext) {
               
 	              if (currentAiMessageId) {
 	                  // 原地替换：首帧直接更新到既有 AI 消息上（不创建新节点）
-	                  const regenContainer = threadScrollContainer || chatContainer;
-	                  const anchor = captureReadingAnchorForRegenerate(regenContainer, currentAiMessageId, attemptState);
+	                  const regenContainer = getUiContainer();
+	                  const anchor = regenContainer
+	                    ? captureReadingAnchorForRegenerate(regenContainer, currentAiMessageId, attemptState)
+	                    : null;
 	                  try {
 	                    withAutoScrollSuppressed(!nowHasAnswerContent, () => {
 	                      messageProcessor.updateAIMessage(
@@ -2686,52 +2783,78 @@ export function createMessageSender(appContext) {
 	                    console.warn('原地替换 AI 消息失败，将回退为追加新消息:', e);
 	                    currentAiMessageId = null;
 	                  } finally {
-                    restoreReadingAnchor(regenContainer, anchor);
-                  }
-              }
+	                    if (regenContainer) {
+	                      restoreReadingAnchor(regenContainer, anchor);
+	                    }
+	                  }
+	              }
 
               if (!currentAiMessageId) {
                 // 【创建消息】调用 appendMessage 来创建新的AI消息DOM元素
                 // 这是获取唯一 messageId 的关键步骤
                 const threadHistoryPatch = buildThreadHistoryPatch(threadContext);
-                const threadOptions = threadContext
-                  ? {
-                      container: threadContext.container,
-                      historyParentId: threadContext.parentMessageIdForAi
-                        || threadContext.lastMessageId
-                        || threadContext.rootMessageId
-                        || threadContext.anchorMessageId,
-                      preserveCurrentNode: true,
-                      historyPatch: threadHistoryPatch
-                    }
+                const historyParentId = threadContext
+                  ? (threadContext.parentMessageIdForAi
+                    || threadContext.lastMessageId
+                    || threadContext.rootMessageId
+                    || threadContext.anchorMessageId)
                   : null;
-                const newAiMessageDiv = messageProcessor.appendMessage(
-                    aiResponse,     // 传入初始的文本内容
-                    'ai',           // 指定发送者为 'ai'
-                    false,          // false: 需要在聊天历史中创建节点
-                    null,           // fragment: null, 直接添加到DOM
-                    null,           // imagesHTML: null
-                    aiThoughtsRaw,  // initialThoughtsRaw: 传入初始的思考内容
-                    null,           // messageIdToUpdate: null, 因为是创建新消息
-                    null,
-                    threadOptions
-                );
-                
-                // 从新创建的DOM元素中获取并保存 messageId
-                if (newAiMessageDiv) {
-                    currentAiMessageId = newAiMessageDiv.getAttribute('data-message-id');
-                    // 将本次 AI 消息与 attempt 绑定，便于按消息粒度中止/清理
+                const shouldRenderDom = !threadContext || isThreadUiActive(threadContext);
+                if (threadContext && !shouldRenderDom) {
+                  const createdNode = createThreadAiMessageHistoryOnly({
+                    content: aiResponse,
+                    thoughts: aiThoughtsRaw,
+                    historyParentId,
+                    historyPatch: threadHistoryPatch
+                  });
+                  if (createdNode) {
+                    currentAiMessageId = createdNode.id;
                     if (attemptState) {
                       attemptState.aiMessageId = currentAiMessageId;
                     }
-                    // 记录 API 元信息并渲染 footer
-                    applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
+                    applyApiMetaToMessage(currentAiMessageId, usedApiConfig);
                     updateThreadLastMessage(threadContext, currentAiMessageId);
+                  }
+                } else {
+                  const threadOptions = threadContext
+                    ? {
+                        container: threadContext.container,
+                        historyParentId,
+                        preserveCurrentNode: true,
+                        historyPatch: threadHistoryPatch
+                      }
+                    : null;
+                  const newAiMessageDiv = messageProcessor.appendMessage(
+                      aiResponse,     // 传入初始的文本内容
+                      'ai',           // 指定发送者为 'ai'
+                      false,          // false: 需要在聊天历史中创建节点
+                      null,           // fragment: null, 直接添加到DOM
+                      null,           // imagesHTML: null
+                      aiThoughtsRaw,  // initialThoughtsRaw: 传入初始的思考内容
+                      null,           // messageIdToUpdate: null, 因为是创建新消息
+                      null,
+                      threadOptions
+                  );
+                  
+                  // 从新创建的DOM元素中获取并保存 messageId
+                  if (newAiMessageDiv) {
+                      currentAiMessageId = newAiMessageDiv.getAttribute('data-message-id');
+                      // 将本次 AI 消息与 attempt 绑定，便于按消息粒度中止/清理
+                      if (attemptState) {
+                        attemptState.aiMessageId = currentAiMessageId;
+                      }
+                      // 记录 API 元信息并渲染 footer
+                      applyApiMetaToMessage(currentAiMessageId, usedApiConfig, newAiMessageDiv);
+                      updateThreadLastMessage(threadContext, currentAiMessageId);
+                  }
                 }
                 
 	                // 自动滚动到聊天底部（仅在正文开始出现时触发）
 	                if (nowHasAnswerContent) {
-	                  scrollToBottom(threadScrollContainer);
+	                  const scrollContainer = getUiContainer();
+	                  if (scrollContainer) {
+	                    scrollToBottom(scrollContainer);
+	                  }
 	                }
               }
 
@@ -2781,7 +2904,10 @@ export function createMessageSender(appContext) {
     );
 
     const threadContext = attemptState?.threadContext || null;
-    const threadScrollContainer = resolveThreadScrollContainer(threadContext);
+    const getUiContainer = () => {
+      if (threadContext) return resolveThreadUiContainer(threadContext);
+      return chatContainer;
+    };
 
     function applyApiMetaToMessage(messageId, apiConfig, messageDiv) {
       try {
@@ -3012,8 +3138,10 @@ export function createMessageSender(appContext) {
         const existingEl = chatContainer.querySelector(selector)
           || (threadContext?.container ? threadContext.container.querySelector(selector) : null);
         if (existingNode && existingNode.role === 'assistant' && existingEl && existingEl.classList.contains('ai-message')) {
-          const regenContainer = threadScrollContainer || chatContainer;
-          const anchor = captureReadingAnchorForRegenerate(regenContainer, existingMessageId, attemptState);
+          const regenContainer = getUiContainer();
+          const anchor = regenContainer
+            ? captureReadingAnchorForRegenerate(regenContainer, existingMessageId, attemptState)
+            : null;
           try {
             messageProcessor.updateAIMessage(existingMessageId, answer || '', thoughts || '', null);
             // 重新生成（原地替换）：一旦开始写回新内容，旧签名就不再匹配，必须先清空
@@ -3045,10 +3173,17 @@ export function createMessageSender(appContext) {
 	                console.warn('记录 OpenAI 兼容推理元信息失败（非流式，原地替换）:', e);
 	              }
 	            }
-            if (!anchor) scrollToBottom(threadScrollContainer);
+            if (!anchor) {
+              const scrollContainer = getUiContainer();
+              if (scrollContainer) {
+                scrollToBottom(scrollContainer);
+              }
+            }
             return;
           } finally {
-            restoreReadingAnchor(regenContainer, anchor);
+            if (regenContainer) {
+              restoreReadingAnchor(regenContainer, anchor);
+            }
           }
         }
       } catch (e) {
@@ -3058,13 +3193,59 @@ export function createMessageSender(appContext) {
 
     // 回退：创建新消息（旧行为）
     const threadHistoryPatch = buildThreadHistoryPatch(threadContext);
+    const historyParentId = threadContext
+      ? (threadContext.parentMessageIdForAi
+        || threadContext.lastMessageId
+        || threadContext.rootMessageId
+        || threadContext.anchorMessageId)
+      : null;
+    const shouldRenderDom = !threadContext || isThreadUiActive(threadContext);
+    if (threadContext && !shouldRenderDom) {
+      const createdNode = createThreadAiMessageHistoryOnly({
+        content: answer || '',
+        thoughts: thoughts || '',
+        historyParentId,
+        historyPatch: threadHistoryPatch
+      });
+      if (createdNode) {
+        const messageId = createdNode.id;
+        // 绑定本次 AI 消息到 attempt，便于按消息粒度中止/清理
+        if (attemptState) {
+          attemptState.aiMessageId = messageId;
+        }
+        applyApiMetaToMessage(messageId, usedApiConfig);
+        updateThreadLastMessage(threadContext, messageId);
+        if (thoughtSignature) {
+          try {
+            createdNode.thoughtSignature = thoughtSignature;
+            if (thoughtSignatureSource) createdNode.thoughtSignatureSource = thoughtSignatureSource;
+          } catch (e) {
+            console.warn('记录推理签名失败（非流式，后台线程）:', e);
+          }
+        }
+
+        // OpenAI 兼容：保存 reasoning_content / tool_calls（仅在非 Gemini 场景）
+        if (!isGeminiApi) {
+          try {
+            if (typeof reasoningContentRaw === 'string' && reasoningContentRaw) {
+              createdNode.reasoning_content = reasoningContentRaw;
+            }
+            if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+              createdNode.tool_calls = toolCalls;
+              createdNode.thoughtSignatureSource = 'openai';
+            }
+          } catch (e) {
+            console.warn('记录 OpenAI 兼容推理元信息失败（非流式，后台线程）:', e);
+          }
+        }
+      }
+      return;
+    }
+
     const threadOptions = threadContext
       ? {
           container: threadContext.container,
-          historyParentId: threadContext.parentMessageIdForAi
-            || threadContext.lastMessageId
-            || threadContext.rootMessageId
-            || threadContext.anchorMessageId,
+          historyParentId,
           preserveCurrentNode: true,
           historyPatch: threadHistoryPatch
         }
@@ -3120,7 +3301,10 @@ export function createMessageSender(appContext) {
 	        }
 	      }
     }
-    scrollToBottom(threadScrollContainer);
+    const scrollContainer = getUiContainer();
+    if (scrollContainer) {
+      scrollToBottom(scrollContainer);
+    }
   }
 
   /**

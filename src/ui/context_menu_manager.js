@@ -122,13 +122,35 @@ export function createContextMenuManager(appContext) {
     if (!userNode) return null;
     if (userNode.threadHiddenSelection) return null;
 
-    const targetAiNode = isAi ? node : findNextAi(userNode, userNode.threadId || null);
+    let targetAiNode = isAi ? node : findNextAi(userNode, userNode.threadId || null);
     const userMessageId = userNode.id || '';
     if (!userMessageId) return null;
 
     let userMessageElement = null;
     if (container) {
       userMessageElement = container.querySelector(`[data-message-id="${userMessageId}"]`);
+    }
+
+    // 线程内链路可能因编辑/删除造成 children 不完整，这里用 DOM 兜底匹配下一条 AI。
+    const findNextAiElement = (startElement) => {
+      let cursor = startElement ? startElement.nextElementSibling : null;
+      while (cursor) {
+        if (cursor.classList?.contains('ai-message')) return cursor;
+        cursor = cursor.nextElementSibling;
+      }
+      return null;
+    };
+
+    let targetAiMessageElement = isAi ? messageElement : null;
+    if (!targetAiNode && !isAi && userMessageElement && container) {
+      const nextAiElement = findNextAiElement(userMessageElement);
+      if (nextAiElement) {
+        targetAiMessageElement = nextAiElement;
+        const fallbackId = nextAiElement.getAttribute('data-message-id') || '';
+        if (fallbackId) {
+          targetAiNode = findNode(fallbackId);
+        }
+      }
     }
 
     const originalMessageText = userMessageElement?.getAttribute?.('data-original-text')
@@ -138,8 +160,8 @@ export function createContextMenuManager(appContext) {
       userMessageElement,
       userMessageId,
       originalMessageText,
-      targetAiMessageElement: isAi ? messageElement : null,
-      targetAiMessageId: targetAiNode ? targetAiNode.id : null
+      targetAiMessageElement,
+      targetAiMessageId: targetAiNode ? targetAiNode.id : (targetAiMessageElement?.getAttribute?.('data-message-id') || null)
     };
   }
 

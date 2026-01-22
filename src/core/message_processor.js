@@ -474,20 +474,15 @@ export function createMessageProcessor(appContext) {
       }
     }
 
-    if (!messageDiv || !node) {
+    if (!node) {
       console.error('updateAIMessage: 消息或历史节点未找到', messageId);
-      // Fallback: if messageDiv doesn't exist, create it. This implies the initial appendMessage in stream handler failed or was skipped.
-      // appendMessage(newAnswerContent, 'ai', false, null, null, newThoughtsRaw, messageId /* if we want to try to use this id */);
       return;
     }
-
-    messageDiv.setAttribute('data-original-text', safeAnswerContent);
-    // 思考过程文本由 setupThoughtsDisplay 统一处理
 
     // --- 同步历史记录中的内容结构（支持图片 + 文本的混合内容） ---
     try {
       // 提取当前消息中已有的图片 HTML（如果存在）
-      const imageContentDiv = messageDiv.querySelector('.image-content');
+      const imageContentDiv = messageDiv ? messageDiv.querySelector('.image-content') : null;
       const imagesHTML = imageContentDiv ? imageContentDiv.innerHTML : null;
       // 使用与 appendMessage 相同的逻辑，将文本和图片转换为统一的消息内容格式
       const processedContent = imageHandler.processImageTags(safeAnswerContent, imagesHTML || '');
@@ -498,7 +493,8 @@ export function createMessageProcessor(appContext) {
     }
     try {
       const hasImageParts = Array.isArray(node.content) && node.content.some(p => p?.type === 'image_url');
-      node.hasInlineImages = (!imagesHTML && hasImageParts);
+      const hasImageContainer = !!(messageDiv && messageDiv.querySelector('.image-content'));
+      node.hasInlineImages = (!hasImageContainer && hasImageParts);
     } catch (_) {
       node.hasInlineImages = false;
     }
@@ -509,6 +505,14 @@ export function createMessageProcessor(appContext) {
     if (groundingMetadata !== undefined) {
       node.groundingMetadata = groundingMetadata || null;
     }
+
+    // 线程切换/面板关闭时可能找不到 DOM，仍需保证历史数据完整。
+    if (!messageDiv) {
+      return;
+    }
+
+    messageDiv.setAttribute('data-original-text', safeAnswerContent);
+    // 思考过程文本由 setupThoughtsDisplay 统一处理
 
     // Setup/Update thoughts display
     // Pass `processMathAndMarkdown` from the outer scope
