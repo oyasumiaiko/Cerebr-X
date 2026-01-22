@@ -108,7 +108,8 @@ export function createChatHistoryUI(appContext) {
   const GALLERY_THUMB_MAX_EDGE = 280;
   const GALLERY_THUMB_QUALITY = 0.82;
   const GALLERY_THUMB_CONCURRENCY = 3;
-  const GALLERY_THUMB_ROOT_MARGIN = '640px 0px';
+  const GALLERY_THUMB_PREFETCH_VIEWPORTS = 2;
+  const GALLERY_RENDER_PREFETCH_VIEWPORTS = 2;
   const GALLERY_THUMB_SIZE_DEFAULT = 92;
   const GALLERY_THUMB_SIZE_MIN = 72;
   const GALLERY_THUMB_SIZE_MAX = 160;
@@ -378,6 +379,20 @@ export function createChatHistoryUI(appContext) {
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     const base = Math.round((img?.clientWidth || GALLERY_THUMB_MIN_EDGE) * dpr);
     return Math.max(GALLERY_THUMB_MIN_EDGE, Math.min(GALLERY_THUMB_MAX_EDGE, base || GALLERY_THUMB_MIN_EDGE));
+  }
+
+  function getGalleryThumbRootMargin(container) {
+    // 按“可视高度 * 预加载倍数”计算像素值，确保提前加载进入视口前的缩略图。
+    const height = Math.max(1, Number(container?.clientHeight) || Number(window?.innerHeight) || 800);
+    const margin = Math.max(200, Math.round(height * GALLERY_THUMB_PREFETCH_VIEWPORTS));
+    return `${margin}px 0px`;
+  }
+
+  function getGalleryRenderRootMargin(container) {
+    // 提前渲染更多 DOM，避免滚动到底部时才生成占位图。
+    const height = Math.max(1, Number(container?.clientHeight) || Number(window?.innerHeight) || 800);
+    const margin = Math.max(240, Math.round(height * GALLERY_RENDER_PREFETCH_VIEWPORTS));
+    return `${margin}px 0px`;
   }
 
   function isGifImageReference(imageUrlObj, resolvedUrl) {
@@ -4901,21 +4916,8 @@ export function createChatHistoryUI(appContext) {
       };
 
       // 仅在接近可视区域时生成缩略图，生成后在本次会话内保留，避免反复读取原图
-      const lazyObserver = (typeof IntersectionObserver === 'function')
-        ? new IntersectionObserver((entries) => {
-          entries.forEach((entry) => {
-            const img = entry.target;
-            if (!img) return;
-            if (entry.isIntersecting) {
-              ensureThumbLoaded(img);
-            }
-          });
-        }, {
-          root: container,
-          rootMargin: GALLERY_THUMB_ROOT_MARGIN
-        })
-        : null;
-      container._galleryLazyObserver = lazyObserver;
+      const lazyObserver = null;
+      container._galleryLazyObserver = null;
 
       const appendBatch = () => {
         const nextCount = Math.min(renderedCount + GALLERY_RENDER_BATCH_SIZE, images.length);
@@ -4940,11 +4942,7 @@ export function createChatHistoryUI(appContext) {
           img.dataset.src = record.url;
           img.dataset.thumbState = 'idle';
           img.src = placeholderSrc;
-          if (lazyObserver) {
-            lazyObserver.observe(img);
-          } else {
-            ensureThumbLoaded(img);
-          }
+          ensureThumbLoaded(img);
           img.alt = record.summary || record.title || record.domain || '聊天图片';
           item.appendChild(img);
 
@@ -5032,7 +5030,7 @@ export function createChatHistoryUI(appContext) {
         }
       }, {
         root: container,
-        rootMargin: '240px 0px'
+        rootMargin: getGalleryRenderRootMargin(container)
       });
       observer.observe(sentinel);
       container._galleryObserver = observer;
