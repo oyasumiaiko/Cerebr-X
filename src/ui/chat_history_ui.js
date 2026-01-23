@@ -3762,8 +3762,17 @@ export function createChatHistoryUI(appContext) {
         await renderMoreItems(listContainer, displayPinnedIds, effectiveHighlightPlan, panel.dataset.currentFilter, runId);
         await new Promise(r => setTimeout(r, 0));
         if (beforeCount === currentlyRenderedCount) {
-          restoreScrollPending = false;
-          break;
+          const dataSource = panelNow._historyDataSource;
+          const canLoadMorePaged = dataSource?.mode === 'paged' && dataSource?.hasMore;
+          const canRenderMoreItems = currentlyRenderedCount < currentDisplayItems.length || canLoadMorePaged;
+          if (!canRenderMoreItems) {
+            restoreScrollPending = false;
+            break;
+          }
+          // 说明：可能有并发渲染正在进行，稍作等待后继续检查。
+          await new Promise(r => setTimeout(r, 30));
+          applyScrollRestore();
+          continue;
         }
         applyScrollRestore();
       }
