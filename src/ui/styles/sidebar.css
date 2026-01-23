@@ -2533,6 +2533,93 @@ input:checked + .slider::before {
     flex-shrink: 0;
 }
 
+.context-menu-item--has-submenu {
+    position: relative;
+    justify-content: space-between;
+}
+
+.context-menu-item__label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+}
+
+.context-menu-item__arrow {
+    margin-left: auto;
+    opacity: 0.7;
+    font-size: 12px;
+}
+
+.context-menu-submenu {
+    position: absolute;
+    top: 0;
+    left: calc(100% + 6px);
+    min-width: 180px;
+    padding: 6px;
+    border-radius: 8px;
+    background: var(--cerebr-bg-color);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(var(--cerebr-blur-radius));
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(4px);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    pointer-events: none;
+    z-index: 2001;
+}
+
+.context-menu-item--has-submenu:hover .context-menu-submenu,
+.context-menu-item--has-submenu:focus-within .context-menu-submenu {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(0);
+    pointer-events: auto;
+}
+
+.context-menu-item--submenu-left .context-menu-submenu {
+    left: auto;
+    right: calc(100% + 6px);
+    transform: translateX(-4px);
+}
+
+.context-menu-item--submenu-left:hover .context-menu-submenu,
+.context-menu-item--submenu-left:focus-within .context-menu-submenu {
+    transform: translateX(0);
+}
+
+.context-menu-item--submenu-left .context-menu-item__arrow {
+    transform: rotate(180deg);
+}
+
+.context-menu-submenu-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.context-menu-submenu-item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    color: var(--cerebr-text-color);
+    user-select: none;
+    transition: background-color 0.2s ease;
+}
+
+.context-menu-submenu-item:hover {
+    background-color: var(--cerebr-message-user-bg);
+}
+
+.context-menu-submenu-item.is-disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
 /* 创建分支对话按钮样式 */
 .context-menu-item#fork-conversation {
   display: flex;

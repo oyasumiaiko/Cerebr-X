@@ -96,9 +96,15 @@
             <i class="far fa-code-branch"></i>
             创建分支
         </div>
-        <div class="context-menu-item" id="regenerate-message" style="display: none;">
-            <i class="far fa-redo"></i>
-            重新生成
+        <div class="context-menu-item context-menu-item--has-submenu" id="regenerate-message" style="display: none;">
+            <div class="context-menu-item__label">
+                <i class="far fa-redo"></i>
+                <span>重新生成</span>
+            </div>
+            <i class="far fa-chevron-right context-menu-item__arrow"></i>
+            <div class="context-menu-submenu">
+                <div class="context-menu-submenu-list"></div>
+            </div>
         </div>
         <!-- Shift+右键显示的隐藏选项（高级功能） -->
         <div class="context-menu-item" id="insert-ai-message" style="display: none;">

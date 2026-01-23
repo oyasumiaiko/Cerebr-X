@@ -47,6 +47,8 @@ export function createContextMenuManager(appContext) {
   // Shift+右键才显示的隐藏菜单项
   const insertAiMessageButton = document.getElementById('insert-ai-message');
   const insertUserMessageButton = document.getElementById('insert-user-message');
+  const regenerateSubmenu = regenerateButton?.querySelector('.context-menu-submenu');
+  const regenerateSubmenuList = regenerateSubmenu?.querySelector('.context-menu-submenu-list');
 
   // Services from appContext.services
   const messageSender = services.messageSender;
@@ -54,6 +56,7 @@ export function createContextMenuManager(appContext) {
   const chatHistoryUI = services.chatHistoryUI;
   const chatHistoryManager = services.chatHistoryManager;
   const chatHistory = chatHistoryManager.chatHistory; // The actual history data object
+  const apiManager = services.apiManager;
 
   // Private state
   let currentMessageElement = null;
@@ -240,6 +243,66 @@ export function createContextMenuManager(appContext) {
     };
   }
 
+  function getFavoriteApiConfigs() {
+    if (!apiManager || typeof apiManager.getAllConfigs !== 'function') return [];
+    const configs = apiManager.getAllConfigs();
+    if (!Array.isArray(configs)) return [];
+    return configs.filter(config => config && config.isFavorite);
+  }
+
+  function getFavoriteApiLabel(config, index) {
+    const displayName = (typeof config?.displayName === 'string') ? config.displayName.trim() : '';
+    if (displayName) return displayName;
+    const modelName = (typeof config?.modelName === 'string') ? config.modelName.trim() : '';
+    if (modelName) return modelName;
+    const baseUrl = (typeof config?.baseUrl === 'string') ? config.baseUrl.trim() : '';
+    if (baseUrl) return baseUrl;
+    return `收藏 API ${index + 1}`;
+  }
+
+  function buildApiParamFromSubmenuItem(item) {
+    if (!item) return null;
+    const apiId = item.dataset.apiId;
+    if (apiId) return { id: apiId };
+    const favoriteIndex = Number(item.dataset.favoriteIndex);
+    if (!Number.isNaN(favoriteIndex)) return { favoriteIndex };
+    return null;
+  }
+
+  function renderRegenerateSubmenu() {
+    if (!regenerateSubmenuList) return;
+    regenerateSubmenuList.innerHTML = '';
+    const favorites = getFavoriteApiConfigs();
+    if (!favorites.length) {
+      const emptyItem = document.createElement('div');
+      emptyItem.className = 'context-menu-submenu-item is-disabled';
+      emptyItem.textContent = '暂无收藏 API';
+      emptyItem.dataset.disabled = 'true';
+      regenerateSubmenuList.appendChild(emptyItem);
+      return;
+    }
+    favorites.forEach((config, index) => {
+      const item = document.createElement('div');
+      item.className = 'context-menu-submenu-item';
+      item.textContent = getFavoriteApiLabel(config, index);
+      if (config?.id) item.dataset.apiId = config.id;
+      item.dataset.favoriteIndex = String(index);
+      regenerateSubmenuList.appendChild(item);
+    });
+  }
+
+  function updateRegenerateSubmenuDirection() {
+    if (!regenerateButton || !regenerateSubmenu) return;
+    regenerateButton.classList.remove('context-menu-item--submenu-left');
+    const buttonRect = regenerateButton.getBoundingClientRect();
+    const submenuWidth = regenerateSubmenu.offsetWidth || 180;
+    const spaceRight = window.innerWidth - buttonRect.right;
+    const spaceLeft = buttonRect.left;
+    if (spaceRight < submenuWidth && spaceLeft >= submenuWidth) {
+      regenerateButton.classList.add('context-menu-item--submenu-left');
+    }
+  }
+
   /**
    * 显示上下文菜单
    * @param {MouseEvent} e - 鼠标事件
@@ -298,6 +361,12 @@ export function createContextMenuManager(appContext) {
     // “重新生成”支持任意消息：根据当前消息解析目标是否可重生成
     const regenTarget = resolveRegenerateTarget(messageElement);
     regenerateButton.style.display = regenTarget ? 'flex' : 'none';
+    if (regenTarget) {
+      renderRegenerateSubmenu();
+      updateRegenerateSubmenuDirection();
+    } else {
+      regenerateButton.classList.remove('context-menu-item--submenu-left');
+    }
 
     // Shift+右键：显示“插入消息”隐藏选项（仅对有 messageId 的正式消息生效）
     const canShowInsertOptions = !!(
@@ -378,7 +447,7 @@ export function createContextMenuManager(appContext) {
   /**
    * 重新生成消息
    */
-  async function regenerateMessage(targetMessageElement = null) {
+  async function regenerateMessage(targetMessageElement = null, apiOverride = null) {
     // 注意：该函数既会被按钮 click 事件直接调用（参数是 MouseEvent），
     // 也会被 Ctrl+Enter 场景传入“被编辑的消息元素”。这里统一做一次参数归一化。
     const elementArg = (targetMessageElement && targetMessageElement.nodeType === 1)
@@ -398,14 +467,16 @@ export function createContextMenuManager(appContext) {
     } = regenTarget;
 
     try {
-      // 优先使用该提示词类型的偏好模型（若设置）
-      const prompts = appContext.services.promptSettingsManager.getPrompts();
-      let apiParam = 'follow_current';
-      try {
-        const promptType = appContext.services.messageProcessor.getPromptTypeFromContent(originalMessageText, prompts) || 'none';
-        const modelPref = (prompts[promptType]?.model || '').trim();
-        apiParam = modelPref || 'follow_current';
-      } catch (_) { apiParam = 'follow_current'; }
+      let apiParam = apiOverride;
+      if (apiParam == null) {
+        const prompts = appContext.services.promptSettingsManager.getPrompts();
+        apiParam = 'follow_current';
+        try {
+          const promptType = appContext.services.messageProcessor.getPromptTypeFromContent(originalMessageText, prompts) || 'none';
+          const modelPref = (prompts[promptType]?.model || '').trim();
+          apiParam = modelPref || 'follow_current';
+        } catch (_) { apiParam = 'follow_current'; }
+      }
 
       // 关键：指定 targetAiMessageId，让发送层“原地替换”目标 AI 消息内容（不删除/不新增其他消息）
       messageSender.sendMessage({
@@ -727,7 +798,24 @@ export function createContextMenuManager(appContext) {
         console.error('消息元素未找到。');
       }
     });
-    regenerateButton.addEventListener('click', regenerateMessage);
+    regenerateButton.addEventListener('click', (event) => {
+      const target = event?.target instanceof Element ? event.target : null;
+      if (target && target.closest('.context-menu-submenu')) return;
+      regenerateMessage(event);
+    });
+    if (regenerateSubmenuList) {
+      regenerateSubmenuList.addEventListener('click', (event) => {
+        const target = event?.target instanceof Element ? event.target : null;
+        const item = target ? target.closest('.context-menu-submenu-item') : null;
+        if (!item) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (item.dataset.disabled === 'true') return;
+        const apiParam = buildApiParamFromSubmenuItem(item);
+        if (!apiParam) return;
+        regenerateMessage(null, apiParam);
+      });
+    }
 
     // Shift+右键显示的隐藏菜单项：在此处插入消息（AI / 用户）
     if (insertAiMessageButton) {
