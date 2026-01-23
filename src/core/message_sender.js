@@ -197,7 +197,6 @@ export function createMessageSender(appContext) {
   const MAX_AUTO_RETRY_ATTEMPTS = 5;
   const AUTO_RETRY_BASE_DELAY_MS = 500;
   const AUTO_RETRY_MAX_DELAY_MS = 8000;
-  const REGENERATE_AUTO_SCROLL_THRESHOLD_PX = 100;
 
   // 使用 sessionStorage 在“当前标签页会话”内记住纯对话模式，专门解决 iframe 手动重载导致的开关丢失
   function readTempModeSessionState() {
@@ -806,32 +805,6 @@ export function createMessageSender(appContext) {
     shouldAutoScroll = value;
   }
 
-  // 思考流阶段临时关闭自动滚动，避免视角被频繁拉到底部；更新结束后恢复原状态。
-  function withAutoScrollSuppressed(shouldSuppress, action) {
-    if (typeof action !== 'function') return;
-    if (!shouldSuppress) {
-      action();
-      return;
-    }
-    const wasAutoScrollEnabled = shouldAutoScroll === true;
-    if (wasAutoScrollEnabled) setShouldAutoScroll(false);
-    try {
-      action();
-    } finally {
-      if (wasAutoScrollEnabled) setShouldAutoScroll(true);
-    }
-  }
-
-  // 重新生成时需要判断用户是否接近底部，避免在阅读中途被自动滚动打断。
-  function isChatContainerNearBottom(container, thresholdPx = REGENERATE_AUTO_SCROLL_THRESHOLD_PX) {
-    if (!container) return false;
-    const scrollHeight = container.scrollHeight || 0;
-    const scrollTop = container.scrollTop || 0;
-    const clientHeight = container.clientHeight || 0;
-    const distance = scrollHeight - scrollTop - clientHeight;
-    return distance <= thresholdPx;
-  }
-
   /**
    * 清空消息输入框和图片容器
    * @private
@@ -928,6 +901,14 @@ export function createMessageSender(appContext) {
     const targetEl = container.querySelector(`[data-message-id="${safeTargetId}"]`);
     if (!targetEl) return null;
 
+    const viewportTop = container.scrollTop || 0;
+    const viewportBottom = viewportTop + (container.clientHeight || 0);
+    const targetTop = targetEl.offsetTop || 0;
+    const targetBottom = targetTop + (targetEl.offsetHeight || 0);
+    const isTargetVisible = targetBottom > viewportTop && targetTop < viewportBottom;
+    // 仅在目标消息“出现在当前视口内”时锁定阅读位置，避免视口外消息被反复“吸住”在顶部。
+    if (!isTargetVisible) return null;
+
     const anchorEl = findFirstVisibleMessageElement(container);
     if (!anchorEl) return null;
 
@@ -971,6 +952,7 @@ export function createMessageSender(appContext) {
     // 关键：补偿 scrollTop，使锚点消息回到原来的像素位置
     container.scrollTop = (container.scrollTop || 0) + delta;
   }
+
 
   // 重新生成时清理用户手动折叠标记，确保新的思考过程按默认规则自动展开/折叠。
   function resetThoughtsToggleStateForRegenerate(targetElement) {
@@ -1230,8 +1212,6 @@ export function createMessageSender(appContext) {
     const normalizedTargetAiMessageId = (typeof targetAiMessageId === 'string' && targetAiMessageId.trim())
       ? targetAiMessageId.trim()
       : null;
-    const shouldPreserveReadingPositionOnRegenerate =
-      regenerateMode && !isChatContainerNearBottom(chatContainer);
     // 提前创建 loadingMessage 配合finally使用
     let loadingMessage;
     let canUpdateExistingAiMessage = false;
@@ -1305,11 +1285,6 @@ export function createMessageSender(appContext) {
       // 开始处理消息：为本次请求注册 attempt，并在必要时开启全局“正在处理”状态
       attempt = beginAttempt();
       const signal = attempt.controller.signal;
-
-      if (regenerateMode) {
-        // 重新生成时尊重当前阅读位置：不在底部就关闭自动滚动，避免视角被拉走。
-        shouldAutoScroll = !shouldPreserveReadingPositionOnRegenerate;
-      }
 
       // 如果已有注入的系统消息，则使用它；否则从消息文本中提取
       const injectedSystemMessages = existingInjectedSystemMessages.length > 0 ? 
@@ -2212,14 +2187,12 @@ export function createMessageSender(appContext) {
 	          ? captureReadingAnchorForRegenerate(regenContainer, payload.messageId, attemptState)
 	          : null;
 	        try {
-	          withAutoScrollSuppressed(!!payload.suppressAutoScroll, () => {
-	            messageProcessor.updateAIMessage(
-	              payload.messageId,
-	              payload.answer || '',
-	              payload.thoughts || '',
-	              payload.groundingMetadata
-	            );
-	          });
+	          messageProcessor.updateAIMessage(
+	            payload.messageId,
+	            payload.answer || '',
+	            payload.thoughts || '',
+	            payload.groundingMetadata
+	          );
 	        } finally {
 	          if (regenContainer) {
 	            restoreReadingAnchor(regenContainer, anchor);
@@ -2504,14 +2477,12 @@ export function createMessageSender(appContext) {
 	            ? captureReadingAnchorForRegenerate(regenContainer, currentAiMessageId, attemptState)
 	            : null;
 	          try {
-	            withAutoScrollSuppressed(!nowHasAnswerContent, () => {
-	              messageProcessor.updateAIMessage(
-	                currentAiMessageId,
-	                aiResponse,
-	                aiThoughtsRaw,
-	                groundingMetadata
-	              );
-	            });
+	            messageProcessor.updateAIMessage(
+	              currentAiMessageId,
+	              aiResponse,
+	              aiThoughtsRaw,
+	              groundingMetadata
+	            );
 	            if (!hasClearedBoundSignatureForRegenerate) {
 	              hasClearedBoundSignatureForRegenerate = clearBoundSignatureForRegenerate(currentAiMessageId, attemptState);
 	            }
@@ -2582,11 +2553,9 @@ export function createMessageSender(appContext) {
               updateThreadLastMessage(threadContext, currentAiMessageId);
             }
           }
-          if (nowHasAnswerContent) {
-            const scrollContainer = getUiContainer();
-            if (scrollContainer) {
-              scrollToBottom(scrollContainer);
-            }
+          const scrollContainer = getUiContainer();
+          if (scrollContainer) {
+            scrollToBottom(scrollContainer);
           }
         }
 
@@ -2605,8 +2574,7 @@ export function createMessageSender(appContext) {
 	            messageId: currentAiMessageId,
 	            answer: aiResponse,
 	            thoughts: aiThoughtsRaw,
-	            groundingMetadata,
-	            suppressAutoScroll: !hasEverShownAnswerContent && !nowHasAnswerContent
+	            groundingMetadata
 	          },
 	          { force: forceUiUpdate }
 	        );
@@ -2767,14 +2735,12 @@ export function createMessageSender(appContext) {
 	                    ? captureReadingAnchorForRegenerate(regenContainer, currentAiMessageId, attemptState)
 	                    : null;
 	                  try {
-	                    withAutoScrollSuppressed(!nowHasAnswerContent, () => {
-	                      messageProcessor.updateAIMessage(
-	                        currentAiMessageId,
-	                        aiResponse,
-	                        aiThoughtsRaw,
-	                        null
-	                      );
-	                    });
+	                    messageProcessor.updateAIMessage(
+	                      currentAiMessageId,
+	                      aiResponse,
+	                      aiThoughtsRaw,
+	                      null
+	                    );
 	                    if (!hasClearedBoundSignatureForRegenerate) {
 	                      hasClearedBoundSignatureForRegenerate = clearBoundSignatureForRegenerate(currentAiMessageId, attemptState);
 	                    }
@@ -2849,12 +2815,10 @@ export function createMessageSender(appContext) {
                   }
                 }
                 
-	                // 自动滚动到聊天底部（仅在正文开始出现时触发）
-	                if (nowHasAnswerContent) {
-	                  const scrollContainer = getUiContainer();
-	                  if (scrollContainer) {
-	                    scrollToBottom(scrollContainer);
-	                  }
+	                // 自动滚动到聊天底部
+	                const scrollContainer = getUiContainer();
+	                if (scrollContainer) {
+	                  scrollToBottom(scrollContainer);
 	                }
               }
 
@@ -2875,8 +2839,7 @@ export function createMessageSender(appContext) {
 	                  messageId: currentAiMessageId,
 	                  answer: aiResponse,
 	                  thoughts: aiThoughtsRaw,
-	                  groundingMetadata: null,
-	                  suppressAutoScroll: !hasEverShownAnswerContent && !nowHasAnswerContent
+	                  groundingMetadata: null
 	                },
 	                { force: forceUiUpdate }
 	              );
@@ -3158,26 +3121,23 @@ export function createMessageSender(appContext) {
               }
             }
 
-	            // OpenAI 兼容：保存 reasoning_content / tool_calls，供下次请求回传（避免签名校验失败）
-	            if (!isGeminiApi) {
-	              try {
-	                if (typeof reasoningContentRaw === 'string' && reasoningContentRaw) {
-	                  existingNode.reasoning_content = reasoningContentRaw;
-	                }
-	                if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-	                  existingNode.tool_calls = toolCalls;
-	                  // 即使没有 message-level thoughtSignature，只要有 tool_calls（含 tool thoughtSignature），也必须标记来源为 openai，确保后续能回传 tool_calls
-	                  existingNode.thoughtSignatureSource = 'openai';
-	                }
-	              } catch (e) {
-	                console.warn('记录 OpenAI 兼容推理元信息失败（非流式，原地替换）:', e);
-	              }
-	            }
-            if (!anchor) {
-              const scrollContainer = getUiContainer();
-              if (scrollContainer) {
-                scrollToBottom(scrollContainer);
+            // OpenAI 兼容：保存 reasoning_content / tool_calls，供下次请求回传（避免签名校验失败）
+            if (!isGeminiApi) {
+              try {
+                if (typeof reasoningContentRaw === 'string' && reasoningContentRaw) {
+                  existingNode.reasoning_content = reasoningContentRaw;
+                }
+                if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+                  existingNode.tool_calls = toolCalls;
+                  // 即使没有 message-level thoughtSignature，只要有 tool_calls（含 tool thoughtSignature），也必须标记来源为 openai，确保后续能回传 tool_calls
+                  existingNode.thoughtSignatureSource = 'openai';
+                }
+              } catch (e) {
+                console.warn('记录 OpenAI 兼容推理元信息失败（非流式，原地替换）:', e);
               }
+            }
+            if (!anchor && regenContainer) {
+              scrollToBottom(regenContainer);
             }
             return;
           } finally {
