@@ -646,7 +646,7 @@ export function createApiManager(appContext) {
    * @param {number} [config.temperature] - temperature 值（可为 0）
    * @param {boolean} [config.isFavorite] - 是否收藏
    * @param {string} [config.customParams] - 自定义参数
-   * @param {string} [config.userMessagePreprocessorTemplate] - 用户消息预处理模板
+   * @param {string} [config.userMessagePreprocessorTemplate] - 用户消息预处理模板（支持 {{#inject}}...{{/inject}} 追加对话）
    * @param {boolean} [config.userMessagePreprocessorIncludeInHistory] - 预处理结果是否写入历史
    * @param {number} index - 该配置在 apiConfigs 数组中的索引
    * @param {HTMLElement} templateCard - 用于克隆的卡片模板 DOM
@@ -1947,7 +1947,7 @@ export function createApiManager(appContext) {
    * @param {string} partialConfig.modelName - 模型名称
    * @param {number} [partialConfig.temperature] - 温度值
    * @param {string} [partialConfig.customParams] - 自定义参数字符串
-   * @param {string} [partialConfig.userMessagePreprocessorTemplate] - 用户消息预处理模板
+   * @param {string} [partialConfig.userMessagePreprocessorTemplate] - 用户消息预处理模板（支持 {{#inject}}...{{/inject}} 追加对话）
    * @param {boolean} [partialConfig.userMessagePreprocessorIncludeInHistory] - 预处理结果是否写入历史
    * @returns {Object|null} 完整的 API 配置对象或 null
    */

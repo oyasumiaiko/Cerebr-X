@@ -293,7 +293,7 @@
                              </div>
                              <div class="form-group user-message-template-group">
                                  <label>用户消息预处理模板</label>
-                                 <textarea class="user-message-template" placeholder="使用 {{input}} 代表用户输入；支持 {{datetime}}/{{date}}/{{time}}"></textarea>
+                                 <textarea class="user-message-template" placeholder="使用 {{input}} 代表用户输入；支持 {{datetime}}/{{date}}/{{time}}；支持 {{#inject}}...{{/inject}} 注入对话（含注入时不写入历史）"></textarea>
                                  <div class="switch-row user-message-template-options">
                                      <label class="switch">
                                          <input type="checkbox" class="user-message-template-include-history">

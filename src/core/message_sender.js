@@ -5,7 +5,7 @@
  * 这个模块是应用程序的核心部分，处理从用户输入到AI响应显示的完整流程。
  */
 import { composeMessages } from './message_composer.js';
-import { renderUserMessageTemplate, applyRenderedTextToMessageContent } from './message_preprocessor.js';
+import { renderUserMessageTemplateWithInjection, applyRenderedTextToMessageContent } from './message_preprocessor.js';
 import { extractThinkingFromText, mergeStreamingThoughts, mergeThoughts } from '../utils/thoughts_parser.js';
 import { createAdaptiveUpdateThrottler } from '../utils/adaptive_update_throttler.js';
 
@@ -338,6 +338,63 @@ export function createMessageSender(appContext) {
       return cloned;
     }
     return messages;
+  }
+
+  function normalizeInjectedRole(role) {
+    const normalized = String(role || '').trim().toLowerCase();
+    if (normalized === 'assistant' || normalized === 'ai' || normalized === 'model') return 'assistant';
+    if (normalized === 'user' || normalized === 'system') return normalized;
+    return null;
+  }
+
+  /**
+   * 规范化模板注入消息（仅用于请求载荷，不写入历史）。
+   * @param {Array<{role: string, content: string}>} injectedMessages
+   * @returns {Array<{role: 'user'|'assistant'|'system', content: string}>}
+   */
+  function normalizeInjectedMessages(injectedMessages) {
+    if (!Array.isArray(injectedMessages)) return [];
+    const results = [];
+    for (const item of injectedMessages) {
+      if (!item) continue;
+      const role = normalizeInjectedRole(item.role);
+      if (!role) continue;
+      let content = (typeof item.content === 'string') ? item.content : '';
+      if (!content.trim()) continue;
+      if (role === 'user') {
+        const { baseText } = extractTrailingControlMarkers(content);
+        content = baseText;
+      }
+      results.push({ role, content });
+    }
+    return results;
+  }
+
+  /**
+   * 将注入消息插入到“最后一条 user 消息”之后，保证模型续写逻辑正确。
+   * @param {Array} messages
+   * @param {Array<{role: string, content: string}>} injectedMessages
+   * @returns {Array}
+   */
+  function insertInjectedMessagesAfterLastUser(messages, injectedMessages) {
+    if (!Array.isArray(messages) || messages.length === 0) return messages;
+    const normalized = normalizeInjectedMessages(injectedMessages);
+    if (normalized.length === 0) return messages;
+    let lastUserIndex = -1;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i]?.role === 'user') {
+        lastUserIndex = i;
+        break;
+      }
+    }
+    if (lastUserIndex === -1) {
+      return messages.concat(normalized);
+    }
+    return [
+      ...messages.slice(0, lastUserIndex + 1),
+      ...normalized,
+      ...messages.slice(lastUserIndex + 1)
+    ];
   }
 
   /**
@@ -1154,10 +1211,14 @@ export function createMessageSender(appContext) {
     let preprocessedMessageText = null;
     let shouldApplyPreprocessor = false;
     let preprocessHistoryPatch = null;
+    let injectedMessages = [];
+    let hasInjectedBlocks = false;
 
     if (skipUserMessagePreprocess) {
       shouldApplyPreprocessor = regenerateMode || !isEmptyMessage;
       preprocessedMessageText = messageText;
+      injectedMessages = [];
+      hasInjectedBlocks = false;
     } else {
       const template = (typeof preprocessorConfig?.userMessagePreprocessorTemplate === 'string')
         ? preprocessorConfig.userMessagePreprocessorTemplate
@@ -1166,8 +1227,14 @@ export function createMessageSender(appContext) {
       shouldApplyPreprocessor = hasTemplate && (regenerateMode || !isEmptyMessage);
       if (shouldApplyPreprocessor) {
         const baseText = resolvePreprocessBaseText({ messageText, regenerateMode, messageId });
-        preprocessedMessageText = renderUserMessageTemplate({ template, inputText: baseText });
-        if (!regenerateMode && preprocessorConfig?.userMessagePreprocessorIncludeInHistory) {
+        const templateResult = renderUserMessageTemplateWithInjection({ template, inputText: baseText });
+        preprocessedMessageText = templateResult.renderedText;
+        injectedMessages = templateResult.injectedMessages;
+        hasInjectedBlocks = templateResult.hasInjectedBlocks;
+        const allowPreprocessHistory = !regenerateMode
+          && preprocessorConfig?.userMessagePreprocessorIncludeInHistory
+          && !hasInjectedBlocks;
+        if (allowPreprocessHistory) {
           messageTextForHistory = preprocessedMessageText;
           preprocessHistoryPatch = {
             preprocessOriginalText: baseText,
@@ -1538,9 +1605,12 @@ export function createMessageSender(appContext) {
         }
         return msg;
       });
-      const finalMessages = (shouldApplyPreprocessor && typeof preprocessedMessageText === 'string')
+      const preprocessedMessages = (shouldApplyPreprocessor && typeof preprocessedMessageText === 'string')
         ? applyPreprocessedTextToMessages(sanitizedMessages, preprocessedMessageText)
         : sanitizedMessages;
+      const finalMessages = (shouldApplyPreprocessor && Array.isArray(injectedMessages) && injectedMessages.length > 0)
+        ? insertInjectedMessagesAfterLastUser(preprocessedMessages, injectedMessages)
+        : preprocessedMessages;
 
       // 获取API配置：仅使用外部提供（resolvedApiConfig / api 解析）或当前选中。不再做任何内部推断
       let config;
@@ -1664,11 +1734,14 @@ export function createMessageSender(appContext) {
       console.error('发送消息失败:', error);
 
       // 返回一个可供外部使用的“无状态重试提示”对象
-      const retryOriginalMessageText = (shouldApplyPreprocessor && typeof preprocessedMessageText === 'string')
+      const canReusePreprocessedText = !skipUserMessagePreprocess
+        && shouldApplyPreprocessor
+        && !hasInjectedBlocks
+        && typeof preprocessedMessageText === 'string';
+      const retryOriginalMessageText = canReusePreprocessedText
         ? preprocessedMessageText
         : messageText;
-      const skipNextPreprocess = skipUserMessagePreprocess
-        || (shouldApplyPreprocessor && typeof preprocessedMessageText === 'string');
+      const skipNextPreprocess = skipUserMessagePreprocess || canReusePreprocessedText;
 
       const retryHint = {
         injectedSystemMessages: existingInjectedSystemMessages,
