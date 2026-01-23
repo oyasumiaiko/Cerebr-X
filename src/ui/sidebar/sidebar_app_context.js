@@ -306,18 +306,28 @@ export function registerSidebarUtilities(appContext) {
   appContext.utils.deleteMessageContent = async (messageElement) => {
     if (!messageElement) return;
     const messageId = messageElement.getAttribute('data-message-id');
-    messageElement.remove();
 
     const chatHistoryManager = appContext.services.chatHistoryManager;
     const contextMenuManager = appContext.services.contextMenuManager;
     const chatHistoryUI = appContext.services.chatHistoryUI;
     const selectionThreadManager = appContext.services.selectionThreadManager;
 
+    if (chatHistoryUI?.ensureConversationWriteAccess) {
+      const canWrite = await chatHistoryUI.ensureConversationWriteAccess({ source: 'delete-message' });
+      if (!canWrite) {
+        contextMenuManager?.hideContextMenu();
+        return;
+      }
+    }
+
     if (!messageId) {
+      messageElement.remove();
       console.warn('删除消息：占位或临时消息缺少ID，已直接移除');
       contextMenuManager?.hideContextMenu();
       return;
     }
+
+    messageElement.remove();
 
     const threadId = chatHistoryManager?.chatHistory?.messages?.find(m => m.id === messageId)?.threadId || null;
     const success = chatHistoryManager.deleteMessage(messageId);

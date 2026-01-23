@@ -949,6 +949,20 @@ body.thread-resize-active * {
     overflow-y: auto;
 }
 
+#input-container.input-container--readonly #message-input {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+#input-container.input-container--readonly #message-input:empty::before {
+    cursor: not-allowed;
+}
+
+#input-container.input-container--readonly #send-button,
+#input-container.input-container--readonly #screenshot-button {
+    opacity: 0.5;
+}
+
 #message-input:empty::before {
     content: attr(placeholder);
     color: var(--cerebr-text-color);

@@ -1917,6 +1917,11 @@ export function createMessageSender(appContext) {
    */
   async function sendMessage(options = {}) {
     const opts = options || {};
+    // 写入锁：同一会话仅允许一个标签页发送/重生成
+    if (chatHistoryUI?.ensureConversationWriteAccess) {
+      const canWrite = await chatHistoryUI.ensureConversationWriteAccess({ source: 'send' });
+      if (!canWrite) return null;
+    }
 
     // 应用层有时会显式跳过并行解析（例如自动重试），此时直接走核心逻辑
     if (opts.__skipParallelExpansion) {

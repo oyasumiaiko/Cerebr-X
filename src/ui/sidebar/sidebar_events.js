@@ -809,6 +809,7 @@ function setupTempModeIndicator(appContext) {
 function setupMessageInputHandlers(appContext) {
   const input = appContext.dom.messageInput;
   if (!input) return;
+  const chatHistoryUI = appContext.services.chatHistoryUI;
 
   input.addEventListener('compositionstart', () => { appContext.state.isComposing = true; });
   input.addEventListener('compositionend', () => { appContext.state.isComposing = false; });
@@ -822,6 +823,12 @@ function setupMessageInputHandlers(appContext) {
     // 阻止事件传播，避免其他监听器（如全局或父级）误判为普通 Enter 而触发发送
     // 特别是 Alt+Enter 仅用于“添加到历史（未发送）”，不应触发其他逻辑
     e.stopPropagation();
+
+    // 写入锁：只读状态下阻止发送/追加
+    if (chatHistoryUI?.ensureConversationWriteAccess) {
+      const canWrite = await chatHistoryUI.ensureConversationWriteAccess({ source: 'input' });
+      if (!canWrite) return;
+    }
 
     // 兼容右 Alt（AltGr）：
     // - 在部分键盘布局/浏览器实现中，右 Alt 会表现为 AltGraph；

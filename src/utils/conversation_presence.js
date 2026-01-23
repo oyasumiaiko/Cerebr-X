@@ -40,6 +40,9 @@ export function createConversationPresence(appContext) {
   let selfTabIdConfirmed = false;
   let activeConversationId = null;
   let openConversations = {};
+  const instanceId = `presence_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  let lockSnapshot = {};
+  const pendingLockRequests = new Map();
 
   const listeners = new Set();
   let reconnectTimer = null;
@@ -67,6 +70,28 @@ export function createConversationPresence(appContext) {
   function applySnapshot(snapshot) {
     openConversations = safeObject(snapshot?.openConversations || snapshot);
     emitChange();
+  }
+
+  function applyLockSnapshot(snapshot) {
+    lockSnapshot = safeObject(snapshot?.locks || snapshot);
+    emitChange();
+  }
+
+  function resolveLockInfo(conversationId) {
+    const convId = normalizeConversationId(conversationId);
+    if (!convId) return null;
+    const info = lockSnapshot?.[convId] || null;
+    if (!info || typeof info !== 'object') return null;
+    return {
+      tabId: Number.isFinite(Number(info?.tabId)) ? Number(info.tabId) : null,
+      windowId: Number.isFinite(Number(info?.windowId)) ? Number(info.windowId) : null,
+      instanceId: typeof info?.instanceId === 'string' ? info.instanceId : null,
+      lastUpdated: Number.isFinite(Number(info?.lastUpdated)) ? Number(info.lastUpdated) : 0
+    };
+  }
+
+  function getSelfInstanceId() {
+    return instanceId;
   }
 
   async function ensureSelfTabResolved() {
@@ -171,6 +196,7 @@ export function createConversationPresence(appContext) {
         if (Number.isFinite(Number(message.tabId))) selfTabId = Number(message.tabId);
         if (Number.isFinite(Number(message.windowId))) selfWindowId = Number(message.windowId);
         if (message.openConversations) applySnapshot(message.openConversations);
+        if (message.lockSnapshot) applyLockSnapshot(message.lockSnapshot);
         // ACK 到达后补发一次当前会话，确保 background 端快速收敛到正确状态
         setTimeout(sendActiveConversation, 0);
         return;
@@ -178,6 +204,20 @@ export function createConversationPresence(appContext) {
 
       if (message.type === 'OPEN_CONVERSATIONS_SNAPSHOT') {
         applySnapshot(message.openConversations);
+      }
+
+      if (message.type === 'CONVERSATION_LOCK_SNAPSHOT') {
+        applyLockSnapshot(message.locks);
+        return;
+      }
+
+      if (message.type === 'CONVERSATION_LOCK_RESULT') {
+        const requestId = message.requestId;
+        const resolver = pendingLockRequests.get(requestId);
+        if (resolver) {
+          pendingLockRequests.delete(requestId);
+          resolver(message);
+        }
       }
     });
 
@@ -226,8 +266,77 @@ export function createConversationPresence(appContext) {
     sendActiveConversation();
   }
 
+  async function requestConversationLock(conversationId, options = {}) {
+    if (!port) return { status: 'error', reason: 'port_unavailable' };
+    const convId = normalizeConversationId(conversationId);
+    if (!convId) return { status: 'error', reason: 'invalid_conversation_id' };
+    await ensureSelfTabResolved();
+    const requestId = `lock_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const payload = {
+      type: 'REQUEST_CONVERSATION_LOCK',
+      conversationId: convId,
+      requestId,
+      instanceId,
+      tabId: selfTabId,
+      windowId: selfWindowId,
+      force: options?.force === true
+    };
+    const responsePromise = new Promise((resolve) => {
+      pendingLockRequests.set(requestId, resolve);
+      setTimeout(() => {
+        if (pendingLockRequests.has(requestId)) {
+          pendingLockRequests.delete(requestId);
+          resolve({ status: 'timeout', conversationId: convId, requestId });
+        }
+      }, 1800);
+    });
+    try {
+      port.postMessage(payload);
+    } catch (_) {
+      pendingLockRequests.delete(requestId);
+      return { status: 'error', reason: 'post_failed', conversationId: convId };
+    }
+    return responsePromise;
+  }
+
+  async function releaseConversationLock(conversationId) {
+    if (!port) return { status: 'error', reason: 'port_unavailable' };
+    const convId = normalizeConversationId(conversationId);
+    if (!convId) return { status: 'error', reason: 'invalid_conversation_id' };
+    await ensureSelfTabResolved();
+    const requestId = `unlock_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const payload = {
+      type: 'RELEASE_CONVERSATION_LOCK',
+      conversationId: convId,
+      requestId,
+      instanceId,
+      tabId: selfTabId,
+      windowId: selfWindowId
+    };
+    const responsePromise = new Promise((resolve) => {
+      pendingLockRequests.set(requestId, resolve);
+      setTimeout(() => {
+        if (pendingLockRequests.has(requestId)) {
+          pendingLockRequests.delete(requestId);
+          resolve({ status: 'timeout', conversationId: convId, requestId });
+        }
+      }, 1800);
+    });
+    try {
+      port.postMessage(payload);
+    } catch (_) {
+      pendingLockRequests.delete(requestId);
+      return { status: 'error', reason: 'post_failed', conversationId: convId };
+    }
+    return responsePromise;
+  }
+
   function getSelfTabId() {
     return Number.isFinite(Number(selfTabId)) ? Number(selfTabId) : null;
+  }
+
+  function getConversationLock(conversationId) {
+    return resolveLockInfo(conversationId);
   }
 
   function getConversationTabs(conversationId) {
@@ -255,7 +364,11 @@ export function createConversationPresence(appContext) {
     refreshOpenConversations,
     focusConversation,
     getSelfTabId,
+    getSelfInstanceId,
     getConversationTabs,
+    getConversationLock,
+    requestConversationLock,
+    releaseConversationLock,
     getOpenConversationsSnapshot,
     subscribe
   };

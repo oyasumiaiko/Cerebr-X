@@ -27,6 +27,11 @@ export function createSelectionThreadManager(appContext) {
   const apiManager = services.apiManager;
   const showNotification = utils?.showNotification;
 
+  async function ensureThreadWritable(actionLabel = '') {
+    if (!chatHistoryUI?.ensureConversationWriteAccess) return true;
+    return await chatHistoryUI.ensureConversationWriteAccess({ source: 'thread', action: actionLabel });
+  }
+
   const state = {
     activeThreadId: null,
     activeAnchorMessageId: null,
@@ -1617,7 +1622,8 @@ export function createSelectionThreadManager(appContext) {
     } catch (_) {}
   }
 
-  function runSelectionPromptInThread(anchorNode, selectionInfo, messageElement, existingThread) {
+  async function runSelectionPromptInThread(anchorNode, selectionInfo, messageElement, existingThread) {
+    if (!(await ensureThreadWritable('prompt'))) return false;
     const selectionText = (selectionInfo?.selectionText || '').trim();
     if (!selectionText) {
       showNotification?.({ message: '选中内容为空，无法发送划词方式1', type: 'warning' });
@@ -1653,7 +1659,7 @@ export function createSelectionThreadManager(appContext) {
     }
 
     // 进入线程后，用划词方式1自动发送一条消息（效果等同于手动使用划词方式1）。
-    enterThread(targetThread.id);
+    await enterThread(targetThread.id);
     const userMessageText = selectionPromptText.replace('<SELECTION>', selectionText);
     const apiPref = (prompts.query?.model || '').trim();
     const apiParam = apiPref || 'follow_current';
@@ -1666,8 +1672,9 @@ export function createSelectionThreadManager(appContext) {
     return true;
   }
 
-  function createThreadFromSelection(anchorNode, selectionInfo, messageElement) {
+  async function createThreadFromSelection(anchorNode, selectionInfo, messageElement) {
     if (!anchorNode || !selectionInfo) return null;
+    if (!(await ensureThreadWritable('create'))) return null;
     const created = createThreadAnnotation(anchorNode, selectionInfo);
     if (!created) {
       showNotification?.({ message: '创建划词对话失败', type: 'warning' });
@@ -1676,7 +1683,7 @@ export function createSelectionThreadManager(appContext) {
     if (messageElement) {
       decorateMessageElement(messageElement, anchorNode);
     }
-    enterThread(created.id);
+    await enterThread(created.id);
     return created;
   }
 
@@ -1764,6 +1771,7 @@ export function createSelectionThreadManager(appContext) {
 
   async function forkThreadFromMessage(messageId) {
     if (!messageId) return null;
+    if (!(await ensureThreadWritable('fork'))) return null;
     const nodes = chatHistoryManager?.chatHistory?.messages || [];
     const targetNode = nodes.find(node => node.id === messageId);
     if (!targetNode) {
@@ -1909,8 +1917,8 @@ export function createSelectionThreadManager(appContext) {
         {
           iconClass: 'fa-solid fa-paper-plane',
           title: '使用划词方式1发送',
-          onClick: () => {
-            const didSend = runSelectionPromptInThread(
+          onClick: async () => {
+            const didSend = await runSelectionPromptInThread(
               anchorNode,
               selectionInfo,
               messageElement,
@@ -1925,8 +1933,8 @@ export function createSelectionThreadManager(appContext) {
         {
           iconClass: 'fa-solid fa-plus',
           title: '新建划词对话',
-          onClick: () => {
-            const created = createThreadFromSelection(anchorNode, selectionInfo, messageElement);
+          onClick: async () => {
+            const created = await createThreadFromSelection(anchorNode, selectionInfo, messageElement);
             if (created) {
               hideBubble(true);
               clearSelectionRanges();
@@ -1934,11 +1942,11 @@ export function createSelectionThreadManager(appContext) {
           }
         }
       ],
-      onClick: hasMultipleThreads ? null : () => {
+      onClick: hasMultipleThreads ? null : async () => {
         if (primaryThread) {
           enterThread(primaryThread.id);
         } else {
-          const created = createThreadFromSelection(anchorNode, selectionInfo, messageElement);
+          const created = await createThreadFromSelection(anchorNode, selectionInfo, messageElement);
           if (!created) return;
         }
         hideBubble(true);
@@ -1996,9 +2004,9 @@ export function createSelectionThreadManager(appContext) {
         {
           iconClass: 'fa-solid fa-paper-plane',
           title: '使用划词方式1发送',
-          onClick: () => {
+          onClick: async () => {
             if (!anchorNode || !selectionInfo.selectionText) return;
-            const didSend = runSelectionPromptInThread(
+            const didSend = await runSelectionPromptInThread(
               anchorNode,
               selectionInfo,
               anchorElement,
@@ -2013,9 +2021,9 @@ export function createSelectionThreadManager(appContext) {
         {
           iconClass: 'fa-solid fa-plus',
           title: '新建划词对话',
-          onClick: () => {
+          onClick: async () => {
             if (!anchorNode || !selectionInfo.selectionText) return;
-            const created = createThreadFromSelection(anchorNode, selectionInfo, anchorElement);
+            const created = await createThreadFromSelection(anchorNode, selectionInfo, anchorElement);
             if (created) {
               hideBubble(true);
               clearSelectionRanges();
@@ -2063,6 +2071,7 @@ export function createSelectionThreadManager(appContext) {
 
   async function deleteThreadById(threadId) {
     if (!threadId) return;
+    if (!(await ensureThreadWritable('delete'))) return;
     const info = findThreadById(threadId);
     if (!info || !info.annotation) {
       showNotification?.({ message: '未找到要删除的划词对话', type: 'warning' });

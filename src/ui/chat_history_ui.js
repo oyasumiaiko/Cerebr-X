@@ -276,6 +276,176 @@ export function createChatHistoryUI(appContext) {
     });
   }
 
+  // --- 单写入锁：避免多标签页并发写入同一会话 ---
+  const conversationWriteLockState = {
+    conversationId: null,
+    status: 'none', // none | granted | denied | pending
+    owner: null,
+    lastDeniedAt: 0
+  };
+  const WRITE_LOCK_NOTICE_COOLDOWN = 6000;
+
+  function isSelfLockOwner(lockInfo) {
+    const selfInstanceId = conversationPresence?.getSelfInstanceId?.();
+    return !!(lockInfo && selfInstanceId && lockInfo.instanceId === selfInstanceId);
+  }
+
+  function setChatInputReadOnly(isReadOnly, reasonText = '') {
+    if (chatInputElement) {
+      if (isReadOnly) {
+        if (!chatInputElement.dataset.readonlyBackupPlaceholder) {
+          chatInputElement.dataset.readonlyBackupPlaceholder = chatInputElement.getAttribute('placeholder') || '';
+        }
+        chatInputElement.setAttribute('contenteditable', 'false');
+        chatInputElement.setAttribute('aria-readonly', 'true');
+        chatInputElement.classList.add('message-input--readonly');
+        if (reasonText) {
+          chatInputElement.setAttribute('placeholder', reasonText);
+        }
+      } else {
+        chatInputElement.setAttribute('contenteditable', 'plaintext-only');
+        chatInputElement.removeAttribute('aria-readonly');
+        chatInputElement.classList.remove('message-input--readonly');
+        if (chatInputElement.dataset.readonlyBackupPlaceholder !== undefined) {
+          chatInputElement.setAttribute('placeholder', chatInputElement.dataset.readonlyBackupPlaceholder || '');
+          delete chatInputElement.dataset.readonlyBackupPlaceholder;
+        }
+      }
+    }
+    if (dom.inputContainer) {
+      dom.inputContainer.classList.toggle('input-container--readonly', isReadOnly);
+    }
+    if (dom.sendButton) dom.sendButton.disabled = isReadOnly;
+    if (dom.screenshotButton) dom.screenshotButton.disabled = isReadOnly;
+  }
+
+  function getWriteLockNoticeText(owner) {
+    if (!owner) return '该对话已在其他标签页以只读打开';
+    return '该对话已在其他标签页以只读打开';
+  }
+
+  async function requestConversationWriteLock(conversationId, options = {}) {
+    if (!conversationId) {
+      conversationWriteLockState.conversationId = null;
+      conversationWriteLockState.status = 'none';
+      conversationWriteLockState.owner = null;
+      setChatInputReadOnly(false);
+      return { status: 'none' };
+    }
+    if (!conversationPresence?.requestConversationLock) {
+      conversationWriteLockState.conversationId = conversationId;
+      conversationWriteLockState.status = 'granted';
+      conversationWriteLockState.owner = null;
+      setChatInputReadOnly(false);
+      return { status: 'granted', reason: 'lock_unavailable' };
+    }
+
+    conversationWriteLockState.conversationId = conversationId;
+    conversationWriteLockState.status = 'pending';
+    const result = await conversationPresence.requestConversationLock(conversationId, { force: options.force === true });
+    const ownerInfo = result?.owner || conversationPresence.getConversationLock?.(conversationId) || null;
+
+    if (result?.status === 'granted') {
+      conversationWriteLockState.status = 'granted';
+      conversationWriteLockState.owner = ownerInfo;
+      setChatInputReadOnly(false);
+      return result;
+    }
+
+    if (result?.status === 'denied') {
+      conversationWriteLockState.status = 'denied';
+      conversationWriteLockState.owner = ownerInfo;
+      setChatInputReadOnly(true, getWriteLockNoticeText(ownerInfo));
+      if (!options.silent) {
+        const now = Date.now();
+        if (showNotification && now - conversationWriteLockState.lastDeniedAt > WRITE_LOCK_NOTICE_COOLDOWN) {
+          showNotification({ message: getWriteLockNoticeText(ownerInfo), type: 'warning', duration: 2200 });
+          conversationWriteLockState.lastDeniedAt = now;
+        }
+      }
+      return result;
+    }
+
+    return result || { status: 'error' };
+  }
+
+  async function releaseConversationWriteLock(conversationId) {
+    if (!conversationId) return;
+    if (!conversationPresence?.releaseConversationLock) return;
+    try {
+      await conversationPresence.releaseConversationLock(conversationId);
+    } catch (_) {}
+  }
+
+  async function switchConversationWriteLock(nextConversationId, options = {}) {
+    const prevConversationId = conversationWriteLockState.conversationId;
+    if (prevConversationId && prevConversationId !== nextConversationId) {
+      await releaseConversationWriteLock(prevConversationId);
+    }
+    if (!nextConversationId) {
+      conversationWriteLockState.conversationId = null;
+      conversationWriteLockState.status = 'none';
+      conversationWriteLockState.owner = null;
+      setChatInputReadOnly(false);
+      return;
+    }
+    await requestConversationWriteLock(nextConversationId, { silent: options.silent });
+  }
+
+  async function refreshActiveConversationWriteLockFromSnapshot() {
+    if (!currentConversationId) return;
+    const lockInfo = conversationPresence?.getConversationLock?.(currentConversationId) || null;
+    if (!lockInfo) {
+      if (conversationWriteLockState.status !== 'granted') {
+        await requestConversationWriteLock(currentConversationId, { silent: true });
+      }
+      return;
+    }
+    if (isSelfLockOwner(lockInfo)) {
+      if (conversationWriteLockState.status !== 'granted') {
+        conversationWriteLockState.status = 'granted';
+        conversationWriteLockState.owner = lockInfo;
+        setChatInputReadOnly(false);
+      }
+      return;
+    }
+    if (conversationWriteLockState.status !== 'denied') {
+      conversationWriteLockState.status = 'denied';
+      conversationWriteLockState.owner = lockInfo;
+      setChatInputReadOnly(true, getWriteLockNoticeText(lockInfo));
+      const now = Date.now();
+      if (showNotification && now - conversationWriteLockState.lastDeniedAt > WRITE_LOCK_NOTICE_COOLDOWN) {
+        showNotification({ message: getWriteLockNoticeText(lockInfo), type: 'warning', duration: 2200 });
+        conversationWriteLockState.lastDeniedAt = now;
+      }
+    }
+  }
+
+  async function ensureConversationWriteAccess(options = {}) {
+    if (!currentConversationId) return true;
+    const lockInfo = conversationPresence?.getConversationLock?.(currentConversationId) || null;
+    if (lockInfo && isSelfLockOwner(lockInfo)) return true;
+    if (!lockInfo) {
+      const result = await requestConversationWriteLock(currentConversationId, { silent: true });
+      return result?.status === 'granted';
+    }
+    if (!options.silent) {
+      const now = Date.now();
+      if (showNotification && now - conversationWriteLockState.lastDeniedAt > WRITE_LOCK_NOTICE_COOLDOWN) {
+        showNotification({ message: getWriteLockNoticeText(lockInfo), type: 'warning', duration: 2200 });
+        conversationWriteLockState.lastDeniedAt = now;
+      }
+    }
+    return false;
+  }
+
+  function canWriteCurrentConversation() {
+    if (!currentConversationId) return true;
+    const lockInfo = conversationPresence?.getConversationLock?.(currentConversationId) || null;
+    if (!lockInfo) return true;
+    return isSelfLockOwner(lockInfo);
+  }
+
   function invalidateGalleryCache() {
     if (galleryCache.cleanupTimer) {
       clearTimeout(galleryCache.cleanupTimer);
@@ -1890,6 +2060,10 @@ export function createChatHistoryUI(appContext) {
       }
       return;
     }
+    if (isUpdate && currentConversationId) {
+      const canWrite = await ensureConversationWriteAccess({ silent: true });
+      if (!canWrite) return;
+    }
     // 说明：后续的落盘流程会把 dataURL 转换为本地路径，为避免污染实时对话树，
     // 这里先深拷贝一份消息列表，仅在副本上做持久化处理。
     const cloneMessageSafely = (msg) => {
@@ -2085,6 +2259,7 @@ export function createChatHistoryUI(appContext) {
     chatHistory.deletedMessageMap = normalizeDeletedMessageMap(conversationToSave.deletedMessageMap);
 
     broadcastConversationUpdate(conversationToSave.id, conversationToSave.updatedAt);
+    await switchConversationWriteLock(conversationToSave.id, { silent: true });
     if (hasExternalChanges && currentConversationId === conversationToSave.id) {
       scheduleActiveConversationSync(conversationToSave.id, conversationToSave.updatedAt);
     }
@@ -2309,10 +2484,12 @@ export function createChatHistoryUI(appContext) {
       ? lastMainMessage.id
       : (fullConversation.messages.length > 0 ? fullConversation.messages[fullConversation.messages.length - 1].id : null);
     // 保存加载的对话记录ID，用于后续更新操作
+    const previousConversationId = currentConversationId;
     currentConversationId = fullConversation.id;
     
     // 通知消息发送器当前会话ID已更新
     services.messageSender.setCurrentConversationId(currentConversationId);
+    await switchConversationWriteLock(currentConversationId, { silent: true, previousConversationId });
 
     if (!skipScrollToBottom) {
       // 滚动到底部
@@ -2460,6 +2637,7 @@ export function createChatHistoryUI(appContext) {
     services.messageSender.abortCurrentRequest();
     // 清空聊天时不再二次保存，避免覆盖已有记录。
     services.selectionThreadManager?.resetForClearChat?.();
+    const previousConversationId = currentConversationId;
     // 清空聊天容器和内存中的聊天记录
     chatContainer.innerHTML = '';
     // 修改: 直接调用 services.chatHistoryManager.clearHistory()
@@ -2470,6 +2648,7 @@ export function createChatHistoryUI(appContext) {
     
     // 通知消息发送器当前会话ID已重置
     services.messageSender.setCurrentConversationId(null);
+    await switchConversationWriteLock(null, { silent: true, previousConversationId });
   }
 
   /**
@@ -4219,7 +4398,10 @@ export function createChatHistoryUI(appContext) {
 
   // 订阅存在性快照更新：仅在聊天记录面板可见时增量更新右侧标记
   if (conversationPresence?.subscribe) {
-    conversationPresence.subscribe(() => refreshOpenTabUiIfPanelVisible());
+    conversationPresence.subscribe(() => {
+      refreshOpenTabUiIfPanelVisible();
+      void refreshActiveConversationWriteLockFromSnapshot();
+    });
   }
 
   // ==========================================================================
@@ -10676,6 +10858,8 @@ export function createChatHistoryUI(appContext) {
     refreshChatHistory,
     updatePageInfo,
     getCurrentConversationId: () => currentConversationId,
+    canWriteCurrentConversation,
+    ensureConversationWriteAccess,
     clearMemoryCache,
     createForkConversation,
     restartAutoBackupScheduler,

@@ -45,6 +45,10 @@ const CONVERSATION_PRESENCE_PORT_NAME = 'cerebr-conversation-presence';
 const conversationPresencePorts = new Set();
 /** @type {Map<chrome.runtime.Port, ConversationPresenceInfo>} */
 const conversationPresenceByPort = new Map();
+/** @type {Map<string, { port: chrome.runtime.Port, tabId: number|null, windowId: number|null, instanceId: string|null, lastUpdated: number }>} */
+const conversationLockById = new Map();
+/** @type {Map<chrome.runtime.Port, Set<string>>} */
+const conversationLocksByPort = new Map();
 
 function normalizeConversationId(value) {
   if (typeof value !== 'string') return null;
@@ -112,9 +116,80 @@ function broadcastOpenConversationSnapshot() {
   }
 }
 
+function buildConversationLockSnapshot(conversationIds = null) {
+  const filterSet = (() => {
+    if (!Array.isArray(conversationIds) || conversationIds.length === 0) return null;
+    const set = new Set();
+    for (const raw of conversationIds) {
+      const normalized = normalizeConversationId(raw);
+      if (normalized) set.add(normalized);
+    }
+    return set.size ? set : null;
+  })();
+
+  const out = {};
+  for (const [convId, lock] of conversationLockById.entries()) {
+    if (filterSet && !filterSet.has(convId)) continue;
+    out[convId] = {
+      tabId: Number.isFinite(Number(lock?.tabId)) ? Number(lock.tabId) : null,
+      windowId: Number.isFinite(Number(lock?.windowId)) ? Number(lock.windowId) : null,
+      instanceId: typeof lock?.instanceId === 'string' ? lock.instanceId : null,
+      lastUpdated: Number.isFinite(Number(lock?.lastUpdated)) ? Number(lock.lastUpdated) : 0
+    };
+  }
+  return out;
+}
+
+function broadcastConversationLockSnapshot() {
+  const snapshot = buildConversationLockSnapshot(null);
+  for (const port of conversationPresencePorts) {
+    try {
+      port.postMessage({
+        type: 'CONVERSATION_LOCK_SNAPSHOT',
+        locks: snapshot,
+        timestamp: Date.now()
+      });
+    } catch (_) {}
+  }
+}
+
+function assignConversationLock(conversationId, lockInfo) {
+  if (!conversationId || !lockInfo?.port) return;
+  conversationLockById.set(conversationId, lockInfo);
+  if (!conversationLocksByPort.has(lockInfo.port)) {
+    conversationLocksByPort.set(lockInfo.port, new Set());
+  }
+  conversationLocksByPort.get(lockInfo.port).add(conversationId);
+}
+
+function releaseConversationLock(conversationId) {
+  if (!conversationId) return false;
+  const lock = conversationLockById.get(conversationId);
+  if (!lock) return false;
+  conversationLockById.delete(conversationId);
+  const owned = conversationLocksByPort.get(lock.port);
+  if (owned) {
+    owned.delete(conversationId);
+    if (!owned.size) conversationLocksByPort.delete(lock.port);
+  }
+  return true;
+}
+
+function releaseLocksByPort(port) {
+  const owned = conversationLocksByPort.get(port);
+  if (!owned || !owned.size) return false;
+  for (const convId of owned) {
+    conversationLockById.delete(convId);
+  }
+  conversationLocksByPort.delete(port);
+  return true;
+}
+
 function removeConversationPresencePort(port) {
   try { conversationPresencePorts.delete(port); } catch (_) {}
   try { conversationPresenceByPort.delete(port); } catch (_) {}
+  const lockChanged = releaseLocksByPort(port);
+  if (lockChanged) broadcastConversationLockSnapshot();
 }
 
 function registerConversationPresencePort(port) {
@@ -163,6 +238,93 @@ function registerConversationPresencePort(port) {
       broadcastOpenConversationSnapshot();
       return;
     }
+
+    if (message.type === 'REQUEST_CONVERSATION_LOCK') {
+      const convId = normalizeConversationId(message.conversationId);
+      const requestId = message.requestId;
+      if (!convId) {
+        try {
+          port.postMessage({ type: 'CONVERSATION_LOCK_RESULT', requestId, status: 'error', reason: 'invalid_conversation_id' });
+        } catch (_) {}
+        return;
+      }
+
+      const instanceId = typeof message.instanceId === 'string' ? message.instanceId : null;
+      const tabId = Number.isFinite(Number(message.tabId)) ? Number(message.tabId) : (Number.isFinite(Number(info.tabId)) ? Number(info.tabId) : null);
+      const windowId = Number.isFinite(Number(message.windowId)) ? Number(message.windowId) : (Number.isFinite(Number(info.windowId)) ? Number(info.windowId) : null);
+      const now = Date.now();
+
+      const currentLock = conversationLockById.get(convId);
+      const sameOwner = !!(currentLock && (currentLock.port === port || (instanceId && currentLock.instanceId === instanceId)));
+      const allowForce = message.force === true;
+
+      if (!currentLock || sameOwner || allowForce) {
+        if (currentLock && !sameOwner) {
+          releaseConversationLock(convId);
+        }
+        assignConversationLock(convId, {
+          port,
+          tabId,
+          windowId,
+          instanceId,
+          lastUpdated: now
+        });
+        broadcastConversationLockSnapshot();
+        try {
+          port.postMessage({
+            type: 'CONVERSATION_LOCK_RESULT',
+            requestId,
+            status: 'granted',
+            conversationId: convId,
+            owner: { tabId, windowId, instanceId, lastUpdated: now }
+          });
+        } catch (_) {}
+        return;
+      }
+
+      const owner = {
+        tabId: Number.isFinite(Number(currentLock?.tabId)) ? Number(currentLock.tabId) : null,
+        windowId: Number.isFinite(Number(currentLock?.windowId)) ? Number(currentLock.windowId) : null,
+        instanceId: typeof currentLock?.instanceId === 'string' ? currentLock.instanceId : null,
+        lastUpdated: Number.isFinite(Number(currentLock?.lastUpdated)) ? Number(currentLock.lastUpdated) : 0
+      };
+      try {
+        port.postMessage({
+          type: 'CONVERSATION_LOCK_RESULT',
+          requestId,
+          status: 'denied',
+          conversationId: convId,
+          owner
+        });
+      } catch (_) {}
+      return;
+    }
+
+    if (message.type === 'RELEASE_CONVERSATION_LOCK') {
+      const convId = normalizeConversationId(message.conversationId);
+      const requestId = message.requestId;
+      if (!convId) {
+        try {
+          port.postMessage({ type: 'CONVERSATION_LOCK_RESULT', requestId, status: 'error', reason: 'invalid_conversation_id' });
+        } catch (_) {}
+        return;
+      }
+      const currentLock = conversationLockById.get(convId);
+      const instanceId = typeof message.instanceId === 'string' ? message.instanceId : null;
+      const sameOwner = !!(currentLock && (currentLock.port === port || (instanceId && currentLock.instanceId === instanceId)));
+      if (sameOwner) {
+        const changed = releaseConversationLock(convId);
+        if (changed) broadcastConversationLockSnapshot();
+        try {
+          port.postMessage({ type: 'CONVERSATION_LOCK_RESULT', requestId, status: 'released', conversationId: convId });
+        } catch (_) {}
+      } else {
+        try {
+          port.postMessage({ type: 'CONVERSATION_LOCK_RESULT', requestId, status: 'ignored', conversationId: convId });
+        } catch (_) {}
+      }
+      return;
+    }
   });
 
   // 连接建立后立刻回传一次快照，避免 UI 首次打开面板需要额外等待
@@ -173,6 +335,7 @@ function registerConversationPresencePort(port) {
       windowId: info.windowId,
       frameId: info.frameId,
       openConversations: buildOpenConversationSnapshot(null),
+      lockSnapshot: buildConversationLockSnapshot(null),
       timestamp: Date.now()
     });
   } catch (_) {}

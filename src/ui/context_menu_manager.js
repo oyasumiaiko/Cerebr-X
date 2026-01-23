@@ -61,6 +61,11 @@ export function createContextMenuManager(appContext) {
   let currentCodeBlock = null;
   let isEditing = false;
 
+  async function ensureWritable(actionLabel = '') {
+    if (!chatHistoryUI?.ensureConversationWriteAccess) return true;
+    return await chatHistoryUI.ensureConversationWriteAccess({ source: 'context-menu', action: actionLabel });
+  }
+
   function resolveMessageContainer(messageElement) {
     if (!messageElement) return chatContainer;
     if (threadContainer && threadContainer.contains(messageElement)) return threadContainer;
@@ -379,6 +384,7 @@ export function createContextMenuManager(appContext) {
    * 重新生成消息
    */
   async function regenerateMessage(targetMessageElement = null) {
+    if (!(await ensureWritable('regenerate'))) return;
     // 注意：该函数既会被按钮 click 事件直接调用（参数是 MouseEvent），
     // 也会被 Ctrl+Enter 场景传入“被编辑的消息元素”。这里统一做一次参数归一化。
     const elementArg = (targetMessageElement && targetMessageElement.nodeType === 1)
@@ -435,6 +441,7 @@ export function createContextMenuManager(appContext) {
   async function insertBlankMessageBelow(sender) {
     let newMessageDiv = null;
     try {
+      if (!(await ensureWritable('insert'))) return;
       if (!currentMessageElement) return;
       const targetContainer = currentMessageContainer || resolveMessageContainer(currentMessageElement) || chatContainer;
       const afterMessageId = currentMessageElement.getAttribute('data-message-id') || '';
@@ -711,9 +718,12 @@ export function createContextMenuManager(appContext) {
     copyCodeButton.addEventListener('click', copyCodeContent);
     // 重新编辑消息
     editMessageButton.addEventListener('click', () => {
-      if (!currentMessageElement || isEditing) return;
-      startInlineEdit(currentMessageElement);
-      hideContextMenu();
+      (async () => {
+        if (!currentMessageElement || isEditing) return;
+        if (!(await ensureWritable('edit'))) return;
+        startInlineEdit(currentMessageElement);
+        hideContextMenu();
+      })();
     });
     // 修复：使用 messageSender.abortCurrentRequest()，避免未定义的 abortCurrentRequest 引发错误
     stopUpdateButton.addEventListener('click', () => {
@@ -976,6 +986,7 @@ export function createContextMenuManager(appContext) {
    */
   async function applyInlineEdit(messageElement, messageId, newText) {
     try {
+      if (!(await ensureWritable('edit'))) return;
       // 更新历史节点
       const node = chatHistory.messages.find(m => m.id === messageId);
       if (!node) { console.error('未找到消息历史节点'); return; }
