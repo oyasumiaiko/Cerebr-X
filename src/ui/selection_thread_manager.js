@@ -2242,15 +2242,21 @@ export function createSelectionThreadManager(appContext) {
     return { left: safeLeft, right: safeRight, ratio };
   }
 
+  function applyThreadLayoutCssWidths(leftWidth, rightWidth) {
+    if (!document.documentElement) return;
+    const total = leftWidth + rightWidth;
+    document.documentElement.style.setProperty('--cerebr-thread-left-width', `${leftWidth}px`);
+    document.documentElement.style.setProperty('--cerebr-thread-right-width', `${rightWidth}px`);
+    document.documentElement.style.setProperty('--cerebr-thread-total-width', `${total}px`);
+  }
+
   function applyThreadLayoutWidths(leftWidth, rightWidth) {
     if (!document.documentElement) return;
     const total = leftWidth + rightWidth;
     state.threadLayoutLeft = leftWidth;
     state.threadLayoutRight = rightWidth;
     state.threadLayoutRatio = total > 0 ? leftWidth / total : 0.5;
-    document.documentElement.style.setProperty('--cerebr-thread-left-width', `${leftWidth}px`);
-    document.documentElement.style.setProperty('--cerebr-thread-right-width', `${rightWidth}px`);
-    document.documentElement.style.setProperty('--cerebr-thread-total-width', `${total}px`);
+    applyThreadLayoutCssWidths(leftWidth, rightWidth);
   }
 
   function normalizeThreadLayoutPrefs(rawPrefs) {
@@ -2311,13 +2317,20 @@ export function createSelectionThreadManager(appContext) {
 
   function applyThreadLayoutPrefs(prefs) {
     if (!prefs) return;
-    const normalized = normalizeThreadLayoutWidths(prefs.left, prefs.right);
+    const fallback = getDefaultThreadColumnWidth();
+    const rawLeft = Number(prefs.left);
+    const rawRight = Number(prefs.right);
+    const left = Number.isFinite(rawLeft) && rawLeft > 0 ? rawLeft : fallback;
+    const right = Number.isFinite(rawRight) && rawRight > 0 ? rawRight : fallback;
+    const total = left + right;
     state.threadLayoutCustomized = true;
-    state.threadLayoutLeft = normalized.left;
-    state.threadLayoutRight = normalized.right;
-    state.threadLayoutRatio = normalized.ratio;
+    state.threadLayoutLeft = left;
+    state.threadLayoutRight = right;
+    state.threadLayoutRatio = total > 0 ? left / total : 0.5;
     if (isThreadResizeEnabled()) {
-      applyThreadLayoutWidths(normalized.left, normalized.right);
+      const normalized = normalizeThreadLayoutWidths(left, right);
+      state.threadLayoutRatio = normalized.ratio;
+      applyThreadLayoutCssWidths(normalized.left, normalized.right);
     }
   }
 
@@ -2394,7 +2407,7 @@ export function createSelectionThreadManager(appContext) {
     const normalized = normalizeThreadLayoutWidths(left, right);
     state.threadLayoutRatio = normalized.ratio;
     if (!state.threadLayoutCustomized) return;
-    applyThreadLayoutWidths(normalized.left, normalized.right);
+    applyThreadLayoutCssWidths(normalized.left, normalized.right);
   }
 
   function isThreadResizeEnabled() {
