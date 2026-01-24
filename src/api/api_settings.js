@@ -18,6 +18,29 @@ import {
   getChunksFromSync
 } from '../utils/sync_chunk.js';
 
+// 用户消息预处理模板的说明与示例，用于“？”提示与“复制注入块”按钮。
+const USER_MESSAGE_TEMPLATE_HELP_TEXT = [
+  '模板语法：',
+  '- {{input}} / {{text}} / {{message}}：用户输入',
+  '- {{datetime}} / {{date}} / {{time}}：时间占位符',
+  '- 注入块（仅发给 API，不写入聊天记录）：',
+  '  {{#inject}}',
+  '    {{#assistant}}...{{/assistant}} / {{#user}}...{{/user}} / {{#system}}...{{/system}}',
+  '    或 {{#message role="assistant"}}...{{/message}}',
+  '  {{/inject}}',
+  '- inject 块会从最终用户消息中移除'
+].join('\n');
+const USER_MESSAGE_TEMPLATE_INJECT_SNIPPET = [
+  '{{#inject}}',
+  '{{#assistant}}',
+  '这里是你要“虚拟插入”的 AI 回复',
+  '{{/assistant}}',
+  '{{#user}}',
+  '这里是紧跟其后的用户追问',
+  '{{/user}}',
+  '{{/inject}}'
+].join('\n');
+
 export function createApiManager(appContext) {
   // 私有状态
   let apiConfigs = [];
@@ -680,6 +703,8 @@ export function createApiManager(appContext) {
     const customSystemPromptInput = template.querySelector('.custom-system-prompt');
     const userMessageTemplateInput = template.querySelector('.user-message-template');
     const userMessageTemplateIncludeHistoryToggle = template.querySelector('.user-message-template-include-history');
+    const userMessageTemplateHelpBtn = template.querySelector('.template-help-icon');
+    const userMessageTemplateCopyBtn = template.querySelector('.template-inject-copy-btn');
 
     // 在 temperature 设置后添加“聊天历史裁剪”设置：分别控制 user / AI(assistant) 的历史消息条数
     // 背景：超长对话时，AI 回复往往更长；允许只保留最近 N 条 AI，同时保留更多用户指令上下文。
@@ -895,6 +920,9 @@ export function createApiManager(appContext) {
     if (userMessageTemplateIncludeHistoryToggle) {
       userMessageTemplateIncludeHistoryToggle.checked = !!config.userMessagePreprocessorIncludeInHistory;
     }
+    if (userMessageTemplateHelpBtn) {
+      userMessageTemplateHelpBtn.title = USER_MESSAGE_TEMPLATE_HELP_TEXT;
+    }
 
     // 监听温度变化
     temperatureInput.addEventListener('input', (e) => {
@@ -1041,6 +1069,23 @@ export function createApiManager(appContext) {
       userMessageTemplateIncludeHistoryToggle.addEventListener('change', () => {
         apiConfigs[index].userMessagePreprocessorIncludeInHistory = !!userMessageTemplateIncludeHistoryToggle.checked;
         saveAPIConfigs();
+      });
+    }
+
+    if (userMessageTemplateCopyBtn) {
+      userMessageTemplateCopyBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!navigator?.clipboard?.writeText) {
+          utils?.showNotification?.({ message: '当前环境不支持剪贴板复制', type: 'warning', duration: 2200 });
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(USER_MESSAGE_TEMPLATE_INJECT_SNIPPET);
+          utils?.showNotification?.({ message: '已复制注入块', type: 'success', duration: 1800 });
+        } catch (error) {
+          console.error('复制注入块失败:', error);
+          utils?.showNotification?.({ message: '复制失败，请重试', type: 'error', duration: 2200 });
+        }
       });
     }
 

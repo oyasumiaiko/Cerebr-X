@@ -1676,6 +1676,69 @@ input:checked + .slider::before {
     margin-top: 8px;
 }
 
+.user-message-template-options .switch-row-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+}
+
+.user-message-template-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.template-help-icon {
+    border: 1px solid var(--cerebr-control-border);
+    background: transparent;
+    color: var(--cerebr-text-color);
+    width: 22px;
+    height: 22px;
+    min-height: 22px;
+    padding: 0;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: help;
+    box-shadow: none;
+}
+
+.template-help-icon:hover {
+    background: var(--cerebr-control-bg-hover);
+    border-color: var(--cerebr-control-border-hover);
+}
+
+.template-help-icon:active {
+    background: var(--cerebr-control-bg);
+    transform: none;
+}
+
+.template-inject-copy-btn {
+    border: 1px solid var(--cerebr-control-border);
+    background: transparent;
+    color: var(--cerebr-text-color);
+    padding: 6px 10px;
+    min-height: 22px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    box-shadow: none;
+}
+
+.template-inject-copy-btn:hover {
+    background: var(--cerebr-control-bg-hover);
+    border-color: var(--cerebr-control-border-hover);
+}
+
+.template-inject-copy-btn:active {
+    background: var(--cerebr-control-bg);
+    transform: none;
+}
+
 /* 滚动条样式统一到全局 */
 
 /* 移除 headers 相关样式（已不需要） */
