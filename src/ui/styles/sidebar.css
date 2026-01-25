@@ -44,7 +44,7 @@ input, textarea, select {
     --cerebr-scrollbar-thumb: color-mix(in srgb, var(--cerebr-bg-color) 90%, var(--cerebr-text-color) 10%);
     --cerebr-scrollbar-thumb-hover: var(--cerebr-scrollbar-thumb);
     --cerebr-scrollbar-thumb-active: var(--cerebr-scrollbar-thumb);
-    --cerebr-search-highlight: rgba(255, 230, 0, 0.3);
+    --cerebr-search-highlight: rgba(255, 210, 92, 0.35);
     --cerebr-green: #34c759;
     --cerebr-red: #ff3b30;
     --cerebr-orange: #ff9500;
@@ -4705,6 +4705,65 @@ body.hide-references .reference-number.superscript {
 
 .highlight-snippet-line:last-child {
     margin-bottom: 0;
+}
+
+.highlight-snippet mark,
+.search-message-matches mark,
+.chat-history-item .summary mark {
+    background: linear-gradient(transparent 55%, var(--cerebr-search-highlight) 55%);
+    padding: 0 2px;
+    border-radius: 2px;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    color: inherit;
+}
+
+.search-message-matches {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.search-message-match {
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 65%, transparent);
+    background: color-mix(in srgb, var(--cerebr-bg-color) 90%, transparent);
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.search-message-match:hover {
+    border-color: color-mix(in srgb, var(--cerebr-highlight) 35%, var(--cerebr-border-color));
+    background: color-mix(in srgb, var(--cerebr-highlight) 8%, var(--cerebr-bg-color));
+}
+
+.search-message-match--user {
+    background: color-mix(in srgb, var(--cerebr-message-user-bg) 75%, transparent);
+}
+
+.search-message-match--ai {
+    background: color-mix(in srgb, var(--cerebr-message-ai-bg) 75%, transparent);
+}
+
+.search-message-match-main {
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--cerebr-text-color);
+}
+
+.search-message-match-context {
+    font-size: 11px;
+    line-height: 1.4;
+    opacity: 0.7;
+    color: var(--cerebr-text-color);
+}
+
+.search-message-match-context--before::before,
+.search-message-match-context--after::before {
+    content: '↳ ';
+    opacity: 0.6;
 }
 
 .search-result-summary {

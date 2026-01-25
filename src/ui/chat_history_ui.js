@@ -153,6 +153,49 @@ export function createChatHistoryUI(appContext) {
     };
   }
   let searchCache = createEmptySearchCache();
+  const SEARCH_CACHE_TTL = 3 * 60 * 1000;
+  const SEARCH_CACHE_MAX_ENTRIES = 20;
+  let searchCacheStore = new Map();
+
+  function pruneSearchCacheStore() {
+    const now = Date.now();
+    for (const [key, entry] of searchCacheStore.entries()) {
+      if (!entry || !entry.timestamp || (now - entry.timestamp) > SEARCH_CACHE_TTL) {
+        searchCacheStore.delete(key);
+      }
+    }
+    while (searchCacheStore.size > SEARCH_CACHE_MAX_ENTRIES) {
+      const oldestKey = searchCacheStore.keys().next().value;
+      if (!oldestKey) break;
+      searchCacheStore.delete(oldestKey);
+    }
+  }
+
+  function getSearchCacheEntry(cacheKey) {
+    if (!cacheKey) return null;
+    pruneSearchCacheStore();
+    const entry = searchCacheStore.get(cacheKey);
+    if (!entry) return null;
+    const now = Date.now();
+    if (!entry.timestamp || now - entry.timestamp > SEARCH_CACHE_TTL) {
+      searchCacheStore.delete(cacheKey);
+      return null;
+    }
+    searchCacheStore.delete(cacheKey);
+    entry.lastAccess = now;
+    searchCacheStore.set(cacheKey, entry);
+    return entry;
+  }
+
+  function setSearchCacheEntry(entry) {
+    if (!entry || !entry.key) return;
+    const now = Date.now();
+    entry.timestamp = entry.timestamp || now;
+    entry.lastAccess = now;
+    searchCacheStore.delete(entry.key);
+    searchCacheStore.set(entry.key, entry);
+    pruneSearchCacheStore();
+  }
 
   function invalidateGalleryCache() {
     if (galleryCache.cleanupTimer) {
@@ -224,6 +267,7 @@ export function createChatHistoryUI(appContext) {
 
   function invalidateSearchCache() {
     searchCache = createEmptySearchCache();
+    searchCacheStore = new Map();
     try {
       const panel = document.getElementById('chat-history-panel');
       if (panel) removeSearchSummary(panel);
@@ -1279,6 +1323,32 @@ export function createChatHistoryUI(appContext) {
     return extractPlainTextFromMessageContent(msg.content);
   }
 
+  const SEARCH_MESSAGE_PREVIEW_MAIN_CHARS = 120;
+  const SEARCH_MESSAGE_PREVIEW_CONTEXT_CHARS = 72;
+
+  function resolveSearchScope(textPlan) {
+    if (!textPlan) return 'session';
+    if (textPlan.scope === 'message' && textPlan.hasPositive) return 'message';
+    return 'session';
+  }
+
+  function normalizeSearchPreviewText(rawText, maxLength) {
+    const cleaned = typeof rawText === 'string'
+      ? rawText.replace(/\s+/g, ' ').trim()
+      : '';
+    if (!cleaned) return '';
+    const limit = Number.isFinite(maxLength) ? maxLength : SEARCH_MESSAGE_PREVIEW_MAIN_CHARS;
+    if (cleaned.length <= limit) return cleaned;
+    return `${cleaned.slice(0, limit)}…`;
+  }
+
+  function resolveSearchMessageRole(message) {
+    const rawRole = typeof message?.role === 'string' ? message.role.toLowerCase() : '';
+    if (rawRole === 'assistant') return 'ai';
+    if (rawRole) return rawRole;
+    return 'unknown';
+  }
+
   /**
    * 创建“全文搜索取消检查器”。
    *
@@ -1305,32 +1375,128 @@ export function createChatHistoryUI(appContext) {
    * @param {{positiveLower:string[], negativeLower:string[], highlightLower:string[], hasPositive:boolean, hasNegative:boolean}} textPlan
    * @param {string[]|null} remainingTerms - 元数据命中后仍需匹配的正向关键词（小写）
    * @param {() => boolean} isCancelled
-   * @returns {{ cancelled: boolean, matched: boolean, blocked: boolean, matchInfo: {messageId:string|null, excerpts:Array<Object>, reason:string}, pendingContentRefs: Array<{messageId:string|null, contentRef:string}>, remainingTerms: string[] }}
+   * @returns {{ cancelled: boolean, matched: boolean, blocked: boolean, matchInfo: {messageId:string|null, excerpts:Array<Object>, messageMatches:Array<Object>, reason:string}, pendingContentRefs: Array<{messageId:string|null, contentRef:string, beforeText?:string, afterText?:string, role?:string}>, remainingTerms: string[] }}
    */
   function scanConversationInlineMessagesForMatch(conversation, textPlan, remainingTerms, isCancelled) {
     const empty = {
       cancelled: false,
       matched: false,
       blocked: false,
-      matchInfo: { messageId: null, excerpts: [], reason: 'message' },
+      matchInfo: { messageId: null, excerpts: [], messageMatches: [], reason: 'message' },
       pendingContentRefs: [],
       remainingTerms: []
     };
     if (!conversation || !Array.isArray(conversation.messages)) return empty;
 
-    const matchInfo = { messageId: null, excerpts: [], reason: 'message' };
+    const matchInfo = { messageId: null, excerpts: [], messageMatches: [], reason: 'message' };
     const MAX_EXCERPTS = 20;
     const pendingContentRefs = [];
-    const remainingSet = new Set(Array.isArray(remainingTerms) ? remainingTerms : (textPlan?.positiveLower || []));
-    const negativeTerms = Array.isArray(textPlan?.negativeLower) ? textPlan.negativeLower : [];
     const highlightTerms = Array.isArray(textPlan?.highlightLower) ? textPlan.highlightLower : [];
+    const negativeTerms = Array.isArray(textPlan?.negativeLower) ? textPlan.negativeLower : [];
     const hasNegative = !!textPlan?.hasNegative;
+    const shouldCollectMatches = highlightTerms.length > 0;
+    const messageMatchIds = new Set();
 
-    for (const message of conversation.messages) {
+    const pushMessageMatch = (entry) => {
+      if (!entry) return;
+      const messageId = entry.messageId || null;
+      if (messageId && messageMatchIds.has(messageId)) return;
+      if (messageId) messageMatchIds.add(messageId);
+      matchInfo.messageMatches.push(entry);
+      if (!matchInfo.messageId && messageId) matchInfo.messageId = messageId;
+      if (entry.excerpt && matchInfo.excerpts.length < MAX_EXCERPTS) {
+        matchInfo.excerpts.push(entry.excerpt);
+      }
+    };
+
+    const scope = resolveSearchScope(textPlan);
+    if (scope === 'message') {
+      const positiveTerms = Array.isArray(textPlan?.positiveLower) ? textPlan.positiveLower : [];
+      const hasPositive = positiveTerms.length > 0;
+
+      for (let index = 0; index < conversation.messages.length; index++) {
+        if (isCancelled()) return { ...empty, cancelled: true };
+        const message = conversation.messages[index];
+        if (!message) continue;
+
+        const beforeText = normalizeSearchPreviewText(
+          extractMessagePlainText(conversation.messages[index - 1]),
+          SEARCH_MESSAGE_PREVIEW_CONTEXT_CHARS
+        );
+        const afterText = normalizeSearchPreviewText(
+          extractMessagePlainText(conversation.messages[index + 1]),
+          SEARCH_MESSAGE_PREVIEW_CONTEXT_CHARS
+        );
+        const plainText = extractMessagePlainText(message);
+
+        if (plainText) {
+          const lowerText = plainText.toLowerCase();
+          if (hasNegative) {
+            let hasNegativeTerm = false;
+            for (const term of negativeTerms) {
+              if (term && lowerText.includes(term)) {
+                hasNegativeTerm = true;
+                break;
+              }
+            }
+            if (hasNegativeTerm) continue;
+          }
+
+          if (hasPositive) {
+            let matchedInMessage = true;
+            for (const term of positiveTerms) {
+              if (term && !lowerText.includes(term)) {
+                matchedInMessage = false;
+                break;
+              }
+            }
+            if (matchedInMessage) {
+              const entry = buildMessageMatchEntry(message, plainText, highlightTerms, beforeText, afterText);
+              if (entry) pushMessageMatch(entry);
+            }
+          }
+          continue;
+        }
+
+        if (message.contentRef) {
+          pendingContentRefs.push({
+            messageId: message.id || null,
+            contentRef: message.contentRef,
+            beforeText,
+            afterText,
+            role: resolveSearchMessageRole(message)
+          });
+        }
+      }
+
+      const matched = matchInfo.messageMatches.length > 0;
+      return {
+        cancelled: false,
+        matched,
+        blocked: false,
+        matchInfo,
+        pendingContentRefs,
+        remainingTerms: []
+      };
+    }
+
+    const remainingSet = new Set(Array.isArray(remainingTerms) ? remainingTerms : (textPlan?.positiveLower || []));
+
+    for (let index = 0; index < conversation.messages.length; index++) {
       if (isCancelled()) return { ...empty, cancelled: true };
+      const message = conversation.messages[index];
       if (!message) continue;
 
+      const beforeText = normalizeSearchPreviewText(
+        extractMessagePlainText(conversation.messages[index - 1]),
+        SEARCH_MESSAGE_PREVIEW_CONTEXT_CHARS
+      );
+      const afterText = normalizeSearchPreviewText(
+        extractMessagePlainText(conversation.messages[index + 1]),
+        SEARCH_MESSAGE_PREVIEW_CONTEXT_CHARS
+      );
       const plainText = extractMessagePlainText(message);
+
       if (plainText) {
         const lowerText = plainText.toLowerCase();
         if (hasNegative) {
@@ -1358,13 +1524,9 @@ export function createChatHistoryUI(appContext) {
           }
         }
 
-        if (matchedInMessage && !matchInfo.messageId && message.id) {
-          matchInfo.messageId = message.id;
-        }
-
-        if (matchedInMessage && highlightTerms.length && matchInfo.excerpts.length < MAX_EXCERPTS) {
-          const excerpt = buildExcerptSegments(plainText, highlightTerms);
-          if (excerpt) matchInfo.excerpts.push(excerpt);
+        if (shouldCollectMatches && highlightTerms.some(term => term && lowerText.includes(term))) {
+          const entry = buildMessageMatchEntry(message, plainText, highlightTerms, beforeText, afterText);
+          if (entry) pushMessageMatch(entry);
         }
 
         if (!hasNegative && remainingSet.size === 0 && matchInfo.excerpts.length >= MAX_EXCERPTS) {
@@ -1375,7 +1537,13 @@ export function createChatHistoryUI(appContext) {
 
       // contentRef：大型内容（例如图片消息）会被单独存入 messageContents。
       if (message.contentRef) {
-        pendingContentRefs.push({ messageId: message.id || null, contentRef: message.contentRef });
+        pendingContentRefs.push({
+          messageId: message.id || null,
+          contentRef: message.contentRef,
+          beforeText,
+          afterText,
+          role: resolveSearchMessageRole(message)
+        });
       }
     }
 
@@ -1402,18 +1570,83 @@ export function createChatHistoryUI(appContext) {
    * @param {{positiveLower:string[], negativeLower:string[], highlightLower:string[], hasPositive:boolean, hasNegative:boolean}} textPlan
    * @param {string[]|null} remainingTerms - 元数据命中后仍需匹配的正向关键词（小写）
    * @param {() => boolean} isCancelled
-   * @param {{messageId:string|null, excerpts:Array<Object>, reason:string}} matchInfo - 会被原地追加 excerpts/messageId
-   * @returns {{ cancelled: boolean, matched: boolean, blocked: boolean, matchInfo: {messageId:string|null, excerpts:Array<Object>, reason:string}, remainingTerms: string[] }}
+   * @param {{messageId:string|null, excerpts:Array<Object>, messageMatches:Array<Object>, reason:string}} matchInfo - 会被原地追加 excerpts/messageId
+   * @returns {{ cancelled: boolean, matched: boolean, blocked: boolean, matchInfo: {messageId:string|null, excerpts:Array<Object>, messageMatches:Array<Object>, reason:string}, remainingTerms: string[] }}
    */
   function scanConversationContentRefsForMatch(pendingContentRefs, contentMap, textPlan, remainingTerms, isCancelled, matchInfo) {
     const MAX_EXCERPTS = 20;
     const refs = Array.isArray(pendingContentRefs) ? pendingContentRefs : [];
     const map = contentMap instanceof Map ? contentMap : new Map();
-    const info = matchInfo && typeof matchInfo === 'object' ? matchInfo : { messageId: null, excerpts: [], reason: 'message' };
-    const remainingSet = new Set(Array.isArray(remainingTerms) ? remainingTerms : (textPlan?.positiveLower || []));
-    const negativeTerms = Array.isArray(textPlan?.negativeLower) ? textPlan.negativeLower : [];
+    const info = matchInfo && typeof matchInfo === 'object'
+      ? matchInfo
+      : { messageId: null, excerpts: [], messageMatches: [], reason: 'message' };
     const highlightTerms = Array.isArray(textPlan?.highlightLower) ? textPlan.highlightLower : [];
+    const negativeTerms = Array.isArray(textPlan?.negativeLower) ? textPlan.negativeLower : [];
     const hasNegative = !!textPlan?.hasNegative;
+    const shouldCollectMatches = highlightTerms.length > 0;
+    if (!Array.isArray(info.messageMatches)) info.messageMatches = [];
+    const messageMatchIds = new Set(info.messageMatches.map(entry => entry?.messageId).filter(Boolean));
+
+    const pushMessageMatch = (entry) => {
+      if (!entry) return;
+      const messageId = entry.messageId || null;
+      if (messageId && messageMatchIds.has(messageId)) return;
+      if (messageId) messageMatchIds.add(messageId);
+      info.messageMatches.push(entry);
+      if (!info.messageId && messageId) info.messageId = messageId;
+      if (entry.excerpt && info.excerpts.length < MAX_EXCERPTS) {
+        info.excerpts.push(entry.excerpt);
+      }
+    };
+
+    const scope = resolveSearchScope(textPlan);
+    if (scope === 'message') {
+      const positiveTerms = Array.isArray(textPlan?.positiveLower) ? textPlan.positiveLower : [];
+      const hasPositive = positiveTerms.length > 0;
+
+      for (const ref of refs) {
+        if (isCancelled()) return { cancelled: true, matched: false, blocked: false, matchInfo: info, remainingTerms: [] };
+        if (!ref?.contentRef) continue;
+
+        const content = map.get(ref.contentRef);
+        if (content == null) continue;
+
+        const plainText = extractPlainTextFromMessageContent(content);
+        if (!plainText) continue;
+        const lowerText = plainText.toLowerCase();
+
+        if (hasNegative) {
+          let hasNegativeTerm = false;
+          for (const term of negativeTerms) {
+            if (term && lowerText.includes(term)) {
+              hasNegativeTerm = true;
+              break;
+            }
+          }
+          if (hasNegativeTerm) continue;
+        }
+
+        if (hasPositive) {
+          let matchedInMessage = true;
+          for (const term of positiveTerms) {
+            if (term && !lowerText.includes(term)) {
+              matchedInMessage = false;
+              break;
+            }
+          }
+          if (matchedInMessage) {
+            const pseudoMessage = { id: ref.messageId || null, role: ref.role };
+            const entry = buildMessageMatchEntry(pseudoMessage, plainText, highlightTerms, ref.beforeText || '', ref.afterText || '');
+            if (entry) pushMessageMatch(entry);
+          }
+        }
+      }
+
+      const matched = info.messageMatches.length > 0;
+      return { cancelled: false, matched, blocked: false, matchInfo: info, remainingTerms: [] };
+    }
+
+    const remainingSet = new Set(Array.isArray(remainingTerms) ? remainingTerms : (textPlan?.positiveLower || []));
 
     for (const ref of refs) {
       if (isCancelled()) return { cancelled: true, matched: false, blocked: false, matchInfo: info, remainingTerms: Array.from(remainingSet) };
@@ -1445,9 +1678,10 @@ export function createChatHistoryUI(appContext) {
       }
 
       if (matchedInMessage && !info.messageId && ref.messageId) info.messageId = ref.messageId;
-      if (matchedInMessage && highlightTerms.length && info.excerpts.length < MAX_EXCERPTS) {
-        const excerpt = buildExcerptSegments(plainText, highlightTerms);
-        if (excerpt) info.excerpts.push(excerpt);
+      if (shouldCollectMatches && highlightTerms.some(term => term && lowerText.includes(term))) {
+        const pseudoMessage = { id: ref.messageId || null, role: ref.role };
+        const entry = buildMessageMatchEntry(pseudoMessage, plainText, highlightTerms, ref.beforeText || '', ref.afterText || '');
+        if (entry) pushMessageMatch(entry);
       }
       if (!hasNegative && remainingSet.size === 0 && info.excerpts.length >= MAX_EXCERPTS) break;
     }
@@ -1469,7 +1703,7 @@ export function createChatHistoryUI(appContext) {
    * @param {HTMLElement} panel - 用于 runId 取消判断
    * @param {string} runId
    * @param {string[]|null} [remainingTerms=null] - 若已在元数据中匹配过，传入剩余需要匹配的正向词
-   * @returns {Promise<{messageId:string|null, excerpts:Array<Object>, reason:string}|null>}
+   * @returns {Promise<{messageId:string|null, excerpts:Array<Object>, messageMatches:Array<Object>, reason:string}|null>}
    */
   async function scanConversationForTextMatch(conversationId, textPlan, panel, runId, remainingTerms = null) {
     if (!conversationId) return null;
@@ -1582,6 +1816,33 @@ export function createChatHistoryUI(appContext) {
       segments,
       prefixEllipsis: start > 0,
       suffixEllipsis: end < sourceText.length
+    };
+  }
+
+  function appendHighlightSegments(container, segments) {
+    if (!container || !Array.isArray(segments)) return;
+    segments.forEach((segment) => {
+      if (segment.type === 'mark') {
+        const markEl = document.createElement('mark');
+        markEl.textContent = segment.value;
+        container.appendChild(markEl);
+      } else {
+        container.appendChild(document.createTextNode(segment.value));
+      }
+    });
+  }
+
+  function buildMessageMatchEntry(message, plainText, highlightTerms, beforeText, afterText) {
+    if (!plainText) return null;
+    const excerpt = buildExcerptSegments(plainText, highlightTerms);
+    const previewText = normalizeSearchPreviewText(plainText, SEARCH_MESSAGE_PREVIEW_MAIN_CHARS);
+    return {
+      messageId: message?.id || null,
+      role: resolveSearchMessageRole(message),
+      excerpt,
+      previewText,
+      beforeText: normalizeSearchPreviewText(beforeText, SEARCH_MESSAGE_PREVIEW_CONTEXT_CHARS),
+      afterText: normalizeSearchPreviewText(afterText, SEARCH_MESSAGE_PREVIEW_CONTEXT_CHARS)
     };
   }
 
@@ -2564,7 +2825,20 @@ export function createChatHistoryUI(appContext) {
     ['date', 'msgdate'],
     ['msgtime', 'msgdate'],
     ['消息日期', 'msgdate'],
-    ['消息时间', 'msgdate']
+    ['消息时间', 'msgdate'],
+    ['scope', 'scope'],
+    ['范围', 'scope']
+  ]);
+
+  const CHAT_HISTORY_SEARCH_SCOPE_VALUES = new Map([
+    ['message', 'message'],
+    ['msg', 'message'],
+    ['messages', 'message'],
+    ['消息', 'message'],
+    ['session', 'session'],
+    ['conversation', 'session'],
+    ['conv', 'session'],
+    ['会话', 'session']
   ]);
 
   function tokenizeSearchQuery(rawInput) {
@@ -2693,6 +2967,15 @@ export function createChatHistoryUI(appContext) {
       };
     }
 
+    if (key === 'scope') {
+      const rawScope = rawValue.trim();
+      if (!rawScope) return null;
+      const normalized = CHAT_HISTORY_SEARCH_SCOPE_VALUES.get(rawScope.toLowerCase())
+        || CHAT_HISTORY_SEARCH_SCOPE_VALUES.get(rawScope);
+      if (!normalized) return null;
+      return { key, value: normalized };
+    }
+
     const parsed = parseSearchOperatorValue(rawValue);
     if (!parsed) return null;
 
@@ -2718,6 +3001,7 @@ export function createChatHistoryUI(appContext) {
     const terms = [];
     const negativeTerms = [];
     const filters = [];
+    let scope = 'session';
 
     tokens.forEach((token) => {
       let working = token.trim();
@@ -2731,6 +3015,12 @@ export function createChatHistoryUI(appContext) {
 
       const filter = parseSearchFilterToken(working);
       if (filter) {
+        if (filter.key === 'scope') {
+          if (!negated && filter.value) {
+            scope = filter.value;
+          }
+          return;
+        }
         filter.negated = negated;
         filters.push(filter);
         return;
@@ -2754,6 +3044,7 @@ export function createChatHistoryUI(appContext) {
       negativeTerms: negative.raw,
       negativeTermsLower: negative.lower,
       filters,
+      scope,
       hasText: positive.lower.length > 0 || negative.lower.length > 0,
       hasPositiveText: positive.lower.length > 0,
       hasNegativeText: negative.lower.length > 0
@@ -2847,12 +3138,14 @@ export function createChatHistoryUI(appContext) {
     const negativeLower = Array.isArray(searchPlan?.negativeTermsLower) ? searchPlan.negativeTermsLower.slice() : [];
     const highlightRaw = positiveRaw.slice();
     const highlightLower = positiveLower.slice();
+    const scope = searchPlan?.scope === 'message' ? 'message' : 'session';
     return {
       positiveRaw,
       positiveLower,
       negativeLower,
       highlightRaw,
       highlightLower,
+      scope,
       hasPositive: positiveLower.length > 0,
       hasNegative: negativeLower.length > 0
     };
@@ -3208,15 +3501,19 @@ export function createChatHistoryUI(appContext) {
     const hasFilterRules = Array.isArray(searchPlan.filters) && searchPlan.filters.length > 0;
     const hasTextQuery = textPlan.hasPositive || textPlan.hasNegative;
     const hasActiveQuery = hasFilterRules || hasTextQuery;
+    const resolvedScope = resolveSearchScope(textPlan);
+    const shouldUseMetaMatch = resolvedScope === 'session';
 
     const urlFilterMode = panel.dataset.urlFilterMode === 'currentUrl';
     const currentUrl = urlFilterMode ? (state.pageInfo?.url || '').trim() : '';
     const searchCacheContextKey = buildChatHistorySearchCacheContextKey(urlFilterMode, currentUrl);
     const searchCacheKey = buildChatHistorySearchCacheKey(searchPlan, urlFilterMode, currentUrl);
     panel.dataset.searchCacheKey = searchCacheKey;
+    const cachedEntry = hasTextQuery ? getSearchCacheEntry(searchCacheKey) : null;
+    if (cachedEntry) searchCache = cachedEntry;
     const canReuseSearchCache = hasTextQuery
-      && Array.isArray(searchCache?.results)
-      && searchCache.key === searchCacheKey;
+      && cachedEntry
+      && Array.isArray(cachedEntry.results);
 
     // 树状视图：只在“无筛选”场景下改变排序（否则会干扰全文搜索/筛选的直觉）
     const isBranchTreeView = panel.dataset.branchViewMode === 'tree';
@@ -3431,6 +3728,11 @@ export function createChatHistoryUI(appContext) {
                 break;
               }
 
+              if (!shouldUseMetaMatch) {
+                batchToScan.push({ index: batchStart + offset, meta: historyMeta, remainingTerms: null });
+                continue;
+              }
+
               const metaText = buildMetaSearchText(historyMeta);
               const metaResult = evaluateMetaTextMatch(metaText, textPlan);
               if (metaResult.blocked) {
@@ -3444,7 +3746,7 @@ export function createChatHistoryUI(appContext) {
 
               if (!needsMessageScan) {
                 matchedEntries.push({ index: batchStart + offset, data: historyMeta });
-                matchInfoMap.set(historyMeta.id, { messageId: null, excerpts: [], reason: 'meta' });
+                matchInfoMap.set(historyMeta.id, { messageId: null, excerpts: [], messageMatches: [], reason: 'meta' });
                 processedCount++;
                 updateProgress();
               } else {
@@ -3623,7 +3925,7 @@ export function createChatHistoryUI(appContext) {
         const durationMs = performance.now() - searchStartTime;
         const excerptCount = Array.from(matchInfoMap.values()).reduce((acc, info) => acc + (Array.isArray(info?.excerpts) ? info.excerpts.length : 0), 0);
         const scannedCount = Math.min(processedCount, totalItems);
-        searchCache = {
+        const nextSearchCache = {
           query: filterText,
           normalized: normalizedFilter,
           key: searchCacheKey,
@@ -3638,7 +3940,9 @@ export function createChatHistoryUI(appContext) {
             scannedCount
           }
         };
-        sourceHistories = searchCache.results.slice();
+        setSearchCacheEntry(nextSearchCache);
+        searchCache = nextSearchCache;
+        sourceHistories = nextSearchCache.results.slice();
         renderSearchSummary(panel, {
           query: filterText,
           normalized: normalizedFilter,
@@ -4460,6 +4764,87 @@ export function createChatHistoryUI(appContext) {
 
   bindAltPreviewHandlersOnce();
 
+  function getSearchMatchInfoForConversation(conversationId) {
+    if (!conversationId) return null;
+    try {
+      const panelNode = document.getElementById('chat-history-panel');
+      const activeSearchCacheKey = panelNode?.dataset.searchCacheKey || '';
+      if (!activeSearchCacheKey) return null;
+      const entry = getSearchCacheEntry(activeSearchCacheKey);
+      if (!entry || !entry.matchMap) return null;
+      return entry.matchMap.get(conversationId) || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function openConversationFromSearchResult(conversationId, messageId) {
+    hideChatHistoryPreviewTooltip();
+    const conversation = await getConversationFromCacheOrLoad(conversationId);
+    if (!conversation) return;
+    await loadConversationIntoChat(conversation, {
+      skipMessageAnimation: !!messageId,
+      skipScrollToBottom: !!messageId
+    });
+    if (messageId) {
+      highlightMessageInChat(messageId);
+    }
+  }
+
+  function renderSearchMessageMatches(container, matchInfo, conversationId) {
+    if (!container || !matchInfo || !Array.isArray(matchInfo.messageMatches) || matchInfo.messageMatches.length === 0) {
+      return false;
+    }
+
+    const list = document.createElement('div');
+    list.className = 'search-message-matches';
+
+    matchInfo.messageMatches.forEach((match) => {
+      const entry = document.createElement('div');
+      entry.className = 'search-message-match';
+      if (match?.role) {
+        entry.classList.add(`search-message-match--${match.role}`);
+      }
+      if (match?.messageId) {
+        entry.dataset.messageId = match.messageId;
+      }
+
+      if (match?.beforeText) {
+        const beforeLine = document.createElement('div');
+        beforeLine.className = 'search-message-match-context search-message-match-context--before';
+        beforeLine.textContent = match.beforeText;
+        entry.appendChild(beforeLine);
+      }
+
+      const mainLine = document.createElement('div');
+      mainLine.className = 'search-message-match-main';
+      if (match?.excerpt?.segments) {
+        appendHighlightSegments(mainLine, match.excerpt.segments);
+      } else if (match?.previewText) {
+        mainLine.textContent = match.previewText;
+      }
+      entry.appendChild(mainLine);
+
+      if (match?.afterText) {
+        const afterLine = document.createElement('div');
+        afterLine.className = 'search-message-match-context search-message-match-context--after';
+        afterLine.textContent = match.afterText;
+        entry.appendChild(afterLine);
+      }
+
+      entry.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openConversationFromSearchResult(conversationId, match?.messageId || null);
+      });
+
+      list.appendChild(entry);
+    });
+
+    container.appendChild(list);
+    return true;
+  }
+
   function createConversationItemElement(conv, highlightPlan, isPinned) {
     const item = document.createElement('div');
     item.className = 'chat-history-item';
@@ -4499,15 +4884,7 @@ export function createChatHistoryUI(appContext) {
         const segments = buildHighlightSegments(displaySummary, highlightTerms);
         if (segments && segments.length) {
           summaryDiv.textContent = '';
-          segments.forEach((segment) => {
-            if (segment.type === 'mark') {
-              const mark = document.createElement('mark');
-              mark.textContent = segment.value;
-              summaryDiv.appendChild(mark);
-            } else {
-              summaryDiv.appendChild(document.createTextNode(segment.value));
-            }
-          });
+          appendHighlightSegments(summaryDiv, segments);
         } else {
           summaryDiv.textContent = displaySummary;
         }
@@ -4519,14 +4896,7 @@ export function createChatHistoryUI(appContext) {
       summaryDiv.textContent = displaySummary;
     }
 
-    let searchMatchInfo = null;
-    try {
-      const panelNode = document.getElementById('chat-history-panel');
-      const activeSearchCacheKey = panelNode?.dataset.searchCacheKey || '';
-      if (activeSearchCacheKey && searchCache.key === activeSearchCacheKey && searchCache.matchMap) {
-        searchMatchInfo = searchCache.matchMap.get(conv.id) || null;
-      }
-    } catch (_) {}
+    const searchMatchInfo = getSearchMatchInfoForConversation(conv.id);
 
     const infoDiv = document.createElement('div');
     infoDiv.className = 'info';
@@ -4611,6 +4981,10 @@ export function createChatHistoryUI(appContext) {
     item._previewHoverMeta = hoverMeta;
 
     let snippetRendered = false;
+    const messageMatchesRendered = renderSearchMessageMatches(mainDiv, searchMatchInfo, conv.id);
+    if (messageMatchesRendered) {
+      snippetRendered = true;
+    }
     if (hasHighlightTerms && searchMatchInfo && Array.isArray(searchMatchInfo.excerpts) && searchMatchInfo.excerpts.length) {
       const snippetDiv = document.createElement('div');
       snippetDiv.className = 'highlight-snippet';
@@ -4618,15 +4992,7 @@ export function createChatHistoryUI(appContext) {
         const line = document.createElement('div');
         line.className = 'highlight-snippet-line';
         if (excerpt.prefixEllipsis) line.appendChild(document.createTextNode('…'));
-        excerpt.segments.forEach(segment => {
-          if (segment.type === 'mark') {
-            const markEl = document.createElement('mark');
-            markEl.textContent = segment.value;
-            line.appendChild(markEl);
-          } else {
-            line.appendChild(document.createTextNode(segment.value));
-          }
-        });
+        appendHighlightSegments(line, excerpt.segments);
         if (excerpt.suffixEllipsis) line.appendChild(document.createTextNode('…'));
         snippetDiv.appendChild(line);
       });
@@ -4659,15 +5025,7 @@ export function createChatHistoryUI(appContext) {
           const line = document.createElement('div');
           line.className = 'highlight-snippet-line';
           if (excerpt.prefixEllipsis) line.appendChild(document.createTextNode('…'));
-          excerpt.segments.forEach(segment => {
-            if (segment.type === 'mark') {
-              const markEl = document.createElement('mark');
-              markEl.textContent = segment.value;
-              line.appendChild(markEl);
-            } else {
-              line.appendChild(document.createTextNode(segment.value));
-            }
-          });
+          appendHighlightSegments(line, excerpt.segments);
           if (excerpt.suffixEllipsis) line.appendChild(document.createTextNode('…'));
           snippets.push(line);
         }
@@ -4688,28 +5046,9 @@ export function createChatHistoryUI(appContext) {
     }
 
     item.addEventListener('click', async () => {
-      hideChatHistoryPreviewTooltip();
-      const conversation = await getConversationFromCacheOrLoad(conv.id);
-      if (conversation) {
-        const panelNode = document.getElementById('chat-history-panel');
-        const activeSearchCacheKey = panelNode?.dataset.searchCacheKey || '';
-        let jumpMessageId = null;
-        if (activeSearchCacheKey && searchCache.key === activeSearchCacheKey && searchCache.matchMap) {
-          const matchInfo = searchCache.matchMap.get(conv.id);
-          if (matchInfo && matchInfo.messageId) {
-            jumpMessageId = matchInfo.messageId;
-          }
-        }
-
-        await loadConversationIntoChat(conversation, {
-          skipMessageAnimation: !!jumpMessageId,
-          skipScrollToBottom: !!jumpMessageId
-        });
-
-        if (jumpMessageId) {
-          highlightMessageInChat(jumpMessageId);
-        }
-      }
+      const matchInfo = getSearchMatchInfoForConversation(conv.id);
+      const jumpMessageId = matchInfo?.messageId || null;
+      await openConversationFromSearchResult(conv.id, jumpMessageId);
     });
     
     item.addEventListener('contextmenu', (e) => {
