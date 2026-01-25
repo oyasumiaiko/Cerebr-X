@@ -119,6 +119,11 @@ html, body, :root {
     scrollbar-width: thin;
     scrollbar-color: var(--cerebr-border-color) transparent;
 }
+
+html {
+    overflow: hidden;
+    overscroll-behavior: none;
+}
 html::-webkit-scrollbar,
 body::-webkit-scrollbar,
 :root::-webkit-scrollbar,
