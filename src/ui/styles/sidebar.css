@@ -612,7 +612,9 @@ body.thread-resize-active * {
     padding: 8px 10px;
     border-radius: 8px;
     border: 1px dashed color-mix(in srgb, var(--cerebr-border-color) 60%, transparent);
-    background: color-mix(in srgb, var(--cerebr-bg-color) 90%, transparent);
+    background: color-mix(in srgb, var(--cerebr-bg-color) 84%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     color: var(--cerebr-text-color);
     font-size: var(--cerebr-font-size);
     max-height: 60vh;
@@ -2744,6 +2746,12 @@ input:checked + .slider::before {
     font-size: 0.7em;
 }
 
+.selection-thread-bubble[data-type="selection"] .selection-thread-bubble__content-text {
+    max-height: min(40vh, 240px);
+    overflow: auto;
+    padding-right: 2px;
+}
+
 .selection-thread-bubble::after {
     content: '';
     position: absolute;
@@ -2958,8 +2966,12 @@ input:checked + .slider::before {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    flex: 0 0 32px;
+    aspect-ratio: 1 / 1;
     padding: 0;
     border-radius: 8px;
     border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
