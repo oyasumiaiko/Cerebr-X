@@ -131,7 +131,16 @@ export function createContextMenuManager(appContext) {
 
     let userMessageElement = null;
     if (container) {
-      userMessageElement = container.querySelector(`[data-message-id="${userMessageId}"]`);
+      const rawId = String(userMessageId);
+      let safeId = rawId;
+      try {
+        if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+          safeId = CSS.escape(rawId);
+        }
+      } catch (_) {
+        safeId = rawId.replace(/["\\]/g, '\\$&');
+      }
+      userMessageElement = container.querySelector(`.message[data-message-id="${safeId}"]`);
     }
 
     // 线程内链路可能因编辑/删除造成 children 不完整，这里用 DOM 兜底匹配下一条 AI。

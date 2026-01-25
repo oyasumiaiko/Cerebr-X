@@ -37,6 +37,15 @@ function createPageMetaSnapshot(pageInfo) {
   return { url, title };
 }
 
+function buildMessageSelector(rawMessageId) {
+  if (!rawMessageId) return '';
+  const raw = String(rawMessageId);
+  const safeId = (typeof CSS !== 'undefined' && typeof CSS.escape === 'function')
+    ? CSS.escape(raw)
+    : raw.replace(/["\\]/g, '\\$&');
+  return `.message[data-message-id="${safeId}"]`;
+}
+
 export function createMessageProcessor(appContext) {
   const {
     dom,
@@ -54,7 +63,8 @@ export function createMessageProcessor(appContext) {
 
   function resolveMessageElement(messageId) {
     if (!messageId) return null;
-    const selector = `.message[data-message-id="${messageId}"]`;
+    const selector = buildMessageSelector(messageId);
+    if (!selector) return null;
     let element = chatContainer?.querySelector(selector) || null;
     if (element) return element;
 
@@ -229,7 +239,8 @@ export function createMessageProcessor(appContext) {
 
     if (shouldRenderDom) {
       if (messageIdToUpdate) {
-        messageDiv = targetContainer.querySelector(`.message[data-message-id="${messageIdToUpdate}"]`);
+        const selector = buildMessageSelector(messageIdToUpdate);
+        messageDiv = selector ? targetContainer.querySelector(selector) : null;
         if (!messageDiv) {
           console.error('appendMessage: 试图更新的消息未找到 DOM 元素', messageIdToUpdate);
           // Create a new one if update target is missing, this indicates a potential logic flaw elsewhere

@@ -2059,7 +2059,16 @@ export function createChatHistoryUI(appContext) {
   function jumpToMessageById(messageId, options = {}) {
     if (!messageId) return;
     const tryJump = () => {
-      const target = chatContainer.querySelector(`[data-message-id="${messageId}"]`);
+      const rawId = String(messageId);
+      let safeId = rawId;
+      try {
+        if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+          safeId = CSS.escape(rawId);
+        }
+      } catch (_) {
+        safeId = rawId.replace(/["\\]/g, '\\$&');
+      }
+      const target = chatContainer.querySelector(`.message[data-message-id="${safeId}"]`);
       if (!target) return false;
       scrollMessageElementToTop(target, options);
       return true;

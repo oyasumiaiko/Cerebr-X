@@ -130,7 +130,7 @@
       const id = anchorInfo.anchorId || '';
       if (!id) return null;
       const safeId = escapeMessageIdForSelector(id);
-      return container.querySelector(`[data-message-id="${safeId}"]`);
+      return container.querySelector(`.message[data-message-id="${safeId}"]`);
     }
 
     function measureChatWrapWidth(container) {

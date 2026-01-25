@@ -955,7 +955,7 @@ export function createMessageSender(appContext) {
     if (!targetMessageId || targetMessageId !== attemptState.preserveTargetMessageId) return null;
 
     const safeTargetId = escapeMessageIdForSelector(targetMessageId);
-    const targetEl = container.querySelector(`[data-message-id="${safeTargetId}"]`);
+    const targetEl = container.querySelector(`.message[data-message-id="${safeTargetId}"]`);
     if (!targetEl) return null;
 
     const viewportTop = container.scrollTop || 0;
@@ -999,7 +999,7 @@ export function createMessageSender(appContext) {
     if (!anchorId) return;
 
     const safeAnchorId = escapeMessageIdForSelector(anchorId);
-    const anchorEl = container.querySelector(`[data-message-id="${safeAnchorId}"]`);
+    const anchorEl = container.querySelector(`.message[data-message-id="${safeAnchorId}"]`);
     if (!anchorEl) return;
 
     const currentOffset = (anchorEl.offsetTop || 0) - (container.scrollTop || 0);
@@ -1333,9 +1333,12 @@ export function createMessageSender(appContext) {
 
       // 清理与本次尝试相关的 UI 状态
       if (attemptState.aiMessageId) {
-        const selector = `[data-message-id="${attemptState.aiMessageId}"]`;
-        const aiEl = chatContainer.querySelector(selector)
-          || (threadContainer ? threadContainer.querySelector(selector) : null);
+        const safeAiMessageId = escapeMessageIdForSelector(attemptState.aiMessageId);
+        const selector = safeAiMessageId ? `.message[data-message-id="${safeAiMessageId}"]` : '';
+        const aiEl = selector
+          ? (chatContainer.querySelector(selector)
+            || (threadContainer ? threadContainer.querySelector(selector) : null))
+          : null;
         if (aiEl) {
           aiEl.classList.remove('updating');
           aiEl.classList.remove('regenerating');
@@ -1449,9 +1452,12 @@ export function createMessageSender(appContext) {
       if (regenerateMode && normalizedTargetAiMessageId) {
         try {
           const node = chatHistoryManager?.chatHistory?.messages?.find(m => m.id === normalizedTargetAiMessageId) || null;
-          const selector = `[data-message-id="${normalizedTargetAiMessageId}"]`;
-          const el = chatContainer.querySelector(selector)
-            || (threadContainer ? threadContainer.querySelector(selector) : null);
+          const safeTargetId = escapeMessageIdForSelector(normalizedTargetAiMessageId);
+          const selector = safeTargetId ? `.message[data-message-id="${safeTargetId}"]` : '';
+          const el = selector
+            ? (chatContainer.querySelector(selector)
+              || (threadContainer ? threadContainer.querySelector(selector) : null))
+            : null;
           const isAssistantNode = !!(node && node.role === 'assistant');
           const isAiElement = !!(el && el.classList && el.classList.contains('ai-message'));
           // 允许“仅历史节点存在但 DOM 缺失”的场景继续原地替换，避免线程切换时误追加新消息。
@@ -1980,7 +1986,9 @@ export function createMessageSender(appContext) {
 
     if (opts.regenerateMode && opts.messageId) {
       try {
-        const targetEl = chatContainer.querySelector(`[data-message-id="${opts.messageId}"]`);
+        const safeMessageId = escapeMessageIdForSelector(opts.messageId);
+        const selector = safeMessageId ? `.message[data-message-id="${safeMessageId}"]` : '';
+        const targetEl = selector ? chatContainer.querySelector(selector) : null;
         const fromDom = targetEl?.getAttribute('data-original-text');
         if (typeof fromDom === 'string' && fromDom.length > 0) {
           rawText = fromDom;
@@ -2161,9 +2169,12 @@ export function createMessageSender(appContext) {
           node.apiDisplayName = apiConfig?.displayName || '';
           node.apiModelId = apiConfig?.modelName || '';
         }
-        const selector = `[data-message-id="${messageId}"]`;
-        const fallbackEl = chatContainer.querySelector(selector)
-          || (threadContext?.container ? threadContext.container.querySelector(selector) : null);
+        const safeMessageId = escapeMessageIdForSelector(messageId);
+        const selector = safeMessageId ? `.message[data-message-id="${safeMessageId}"]` : '';
+        const fallbackEl = selector
+          ? (chatContainer.querySelector(selector)
+            || (threadContext?.container ? threadContext.container.querySelector(selector) : null))
+          : null;
         renderApiFooter(messageDiv || fallbackEl, node);
       } catch (e) {
         console.warn('记录/渲染API信息失败:', e);
@@ -2349,9 +2360,12 @@ export function createMessageSender(appContext) {
 	            }
 	          }
 
-	          const selector = `[data-message-id="${currentAiMessageId}"]`;
-	          const el = chatContainer.querySelector(selector)
-	            || (threadContext?.container ? threadContext.container.querySelector(selector) : null);
+          const safeMessageId = escapeMessageIdForSelector(currentAiMessageId);
+          const selector = safeMessageId ? `.message[data-message-id="${safeMessageId}"]` : '';
+          const el = selector
+            ? (chatContainer.querySelector(selector)
+              || (threadContext?.container ? threadContext.container.querySelector(selector) : null))
+            : null;
 	          if (el) {
 	            renderApiFooter(el, node);
 	          }
@@ -2954,9 +2968,12 @@ export function createMessageSender(appContext) {
           node.apiDisplayName = apiConfig?.displayName || '';
           node.apiModelId = apiConfig?.modelName || '';
         }
-        const selector = `[data-message-id="${messageId}"]`;
-        const fallbackEl = chatContainer.querySelector(selector)
-          || (threadContext?.container ? threadContext.container.querySelector(selector) : null);
+        const safeMessageId = escapeMessageIdForSelector(messageId);
+        const selector = safeMessageId ? `.message[data-message-id="${safeMessageId}"]` : '';
+        const fallbackEl = selector
+          ? (chatContainer.querySelector(selector)
+            || (threadContext?.container ? threadContext.container.querySelector(selector) : null))
+          : null;
         renderApiFooter(messageDiv || fallbackEl, node);
       } catch (e) {
         console.warn('记录/渲染API信息失败:', e);
@@ -3170,9 +3187,12 @@ export function createMessageSender(appContext) {
     if (existingMessageId) {
       try {
         const existingNode = chatHistoryManager.chatHistory.messages.find(m => m.id === existingMessageId);
-        const selector = `[data-message-id="${existingMessageId}"]`;
-        const existingEl = chatContainer.querySelector(selector)
-          || (threadContext?.container ? threadContext.container.querySelector(selector) : null);
+        const safeMessageId = escapeMessageIdForSelector(existingMessageId);
+        const selector = safeMessageId ? `.message[data-message-id="${safeMessageId}"]` : '';
+        const existingEl = selector
+          ? (chatContainer.querySelector(selector)
+            || (threadContext?.container ? threadContext.container.querySelector(selector) : null))
+          : null;
         if (existingNode && existingNode.role === 'assistant' && existingEl && existingEl.classList.contains('ai-message')) {
           const regenContainer = getUiContainer();
           const anchor = regenContainer

@@ -1124,7 +1124,21 @@ export function createSelectionThreadManager(appContext) {
     if (!node) return null;
     const messageId = node.id || '';
     if (!messageId) return null;
-    return chatContainer?.querySelector(`[data-message-id="${messageId}"]`) || null;
+    const selector = buildMessageSelector(messageId);
+    if (!selector) return null;
+    return chatContainer?.querySelector(selector) || null;
+  }
+
+  function buildMessageSelector(messageId) {
+    const raw = (messageId == null) ? '' : String(messageId);
+    if (!raw) return '';
+    try {
+      if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+        return `.message[data-message-id="${CSS.escape(raw)}"]`;
+      }
+    } catch (_) {}
+    const safeId = raw.replace(/["\\]/g, '\\$&');
+    return `.message[data-message-id="${safeId}"]`;
   }
 
   function ensureThreadAnnotations(node) {
@@ -1534,7 +1548,8 @@ export function createSelectionThreadManager(appContext) {
 
   function scrollThreadMessageIntoView(messageId) {
     if (!threadContainer || !messageId) return;
-    const target = threadContainer.querySelector(`[data-message-id="${messageId}"]`);
+    const selector = buildMessageSelector(messageId);
+    const target = selector ? threadContainer.querySelector(selector) : null;
     if (!target) return;
     const applyScroll = () => {
       if (!threadContainer || !target) return;
@@ -2122,7 +2137,9 @@ export function createSelectionThreadManager(appContext) {
 
   function removeThreadMessageElements(messageId) {
     if (!messageId) return;
-    document.querySelectorAll(`[data-message-id="${messageId}"]`).forEach((node) => {
+    const selector = buildMessageSelector(messageId);
+    if (!selector) return;
+    document.querySelectorAll(selector).forEach((node) => {
       node.remove();
     });
   }
