@@ -2692,6 +2692,11 @@ export function createSelectionThreadManager(appContext) {
     hideBubble(true);
   }
 
+  function handleDocumentContextMenu() {
+    if (!bubbleEl || bubbleEl.style.display === 'none') return;
+    hideBubble(true);
+  }
+
   function bindHighlightEvents(container) {
     if (!container) return;
     container.addEventListener('mouseover', handleHighlightMouseOver);
@@ -2704,6 +2709,7 @@ export function createSelectionThreadManager(appContext) {
     document.addEventListener('mouseup', handleSelectionMouseUp);
     document.addEventListener('selectionchange', handleSelectionChange);
     document.addEventListener('click', handleDocumentClick);
+    document.addEventListener('contextmenu', handleDocumentContextMenu);
     document.addEventListener('mousemove', handleTopEdgeMouseMove);
     bindHighlightEvents(chatContainer);
     bindThreadResizeHandles();
