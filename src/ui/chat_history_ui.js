@@ -2702,18 +2702,18 @@ export function createChatHistoryUI(appContext) {
     ['messagecount', 'count'],
     ['条数', 'count'],
     ['消息数', 'count'],
-    ['start', 'start'],
-    ['begin', 'start'],
-    ['from', 'start'],
-    ['开始', 'start'],
-    ['end', 'end'],
-    ['to', 'end'],
-    ['结束', 'end'],
-    ['msgdate', 'msgdate'],
-    ['date', 'msgdate'],
-    ['msgtime', 'msgdate'],
-    ['消息日期', 'msgdate'],
-    ['消息时间', 'msgdate'],
+    ['date', 'date'],
+    ['msgdate', 'date'],
+    ['msgtime', 'date'],
+    ['消息日期', 'date'],
+    ['消息时间', 'date'],
+    ['start', 'date'],
+    ['begin', 'date'],
+    ['from', 'date'],
+    ['开始', 'date'],
+    ['end', 'date'],
+    ['to', 'date'],
+    ['结束', 'date'],
     ['scope', 'scope'],
     ['范围', 'scope']
   ]);
@@ -2792,9 +2792,46 @@ export function createChatHistoryUI(appContext) {
     return { operator, operand };
   }
 
+  function parseRelativeDateRange(rawValue) {
+    const input = typeof rawValue === 'string' ? rawValue.trim() : '';
+    if (!input) return null;
+    const match = input.match(/^(\d+)\s*([dhwmy])$/i);
+    if (!match) return null;
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    const unit = match[2].toLowerCase();
+    const end = Date.now();
+    const startDate = new Date(end);
+    switch (unit) {
+      case 'h':
+        startDate.setHours(startDate.getHours() - amount);
+        break;
+      case 'd':
+        startDate.setDate(startDate.getDate() - amount);
+        break;
+      case 'w':
+        startDate.setDate(startDate.getDate() - amount * 7);
+        break;
+      case 'm':
+        startDate.setMonth(startDate.getMonth() - amount);
+        break;
+      case 'y':
+        startDate.setFullYear(startDate.getFullYear() - amount);
+        break;
+      default:
+        return null;
+    }
+    const start = startDate.getTime();
+    if (!Number.isFinite(start)) return null;
+    return { start, end, isRelative: true };
+  }
+
   function parseSearchDateRange(rawValue) {
     const input = typeof rawValue === 'string' ? rawValue.trim() : '';
     if (!input) return null;
+
+    const relativeRange = parseRelativeDateRange(input);
+    if (relativeRange) return relativeRange;
 
     if (/^\d{10}$/.test(input)) {
       const seconds = Number(input);
@@ -2873,10 +2910,18 @@ export function createChatHistoryUI(appContext) {
       return { key, operator: parsed.operator, rangeStart: numericValue, rangeEnd: numericValue };
     }
 
-    if (key === 'start' || key === 'end' || key === 'msgdate') {
+    if (key === 'date') {
       const range = parseSearchDateRange(parsed.operand);
       if (!range) return null;
-      return { key, operator: parsed.operator, rangeStart: range.start, rangeEnd: range.end };
+      let operator = parsed.operator;
+      if (range.isRelative) {
+        if (operator === '>' || operator === '>=') {
+          operator = '!=';
+        } else if (operator === '<' || operator === '<=' || operator === '=' || operator === '==') {
+          operator = '=';
+        }
+      }
+      return { key, operator, rangeStart: range.start, rangeEnd: range.end };
     }
 
     return null;
@@ -3006,11 +3051,7 @@ export function createChatHistoryUI(appContext) {
         matched = value ? url.includes(value) : false;
       } else if (filter.key === 'count') {
         matched = compareNumericRange(meta?.messageCount, filter.operator, filter.rangeStart, filter.rangeEnd);
-      } else if (filter.key === 'start') {
-        matched = compareNumericRange(meta?.startTime, filter.operator, filter.rangeStart, filter.rangeEnd);
-      } else if (filter.key === 'end') {
-        matched = compareNumericRange(meta?.endTime, filter.operator, filter.rangeStart, filter.rangeEnd);
-      } else if (filter.key === 'msgdate') {
+      } else if (filter.key === 'date') {
         matched = compareMessageDateRange(meta?.startTime, meta?.endTime, filter.operator, filter.rangeStart, filter.rangeEnd);
       }
 
@@ -6686,6 +6727,84 @@ export function createChatHistoryUI(appContext) {
     ensurePanelStylesInjected();
     let panel = document.getElementById('chat-history-panel');
     let filterInput; // 在外部声明 filterInput 以便在函数末尾访问
+    const ensureSearchSyntaxHelp = (container) => {
+      if (!container || container.querySelector('.search-syntax-btn')) return;
+      const syntaxButton = document.createElement('button');
+      syntaxButton.type = 'button';
+      syntaxButton.className = 'search-syntax-btn';
+      syntaxButton.textContent = '?';
+      syntaxButton.title = '搜索语法说明';
+      syntaxButton.setAttribute('aria-label', '搜索语法说明');
+
+      const syntaxPopover = document.createElement('div');
+      syntaxPopover.className = 'search-syntax-popover';
+      syntaxPopover.dataset.visible = '0';
+      syntaxPopover.innerHTML = `
+        <div class="search-syntax-title">搜索语法</div>
+        <ul>
+          <li>空格：AND（同时包含）</li>
+          <li>!关键词：NOT（排除）</li>
+          <li>"短语"：完整短语匹配</li>
+          <li>url:xxx：按 URL 筛选</li>
+          <li>count:>10：按消息条数筛选</li>
+          <li>date:&lt;5d / date:&lt;1m：最近 5 天/1 个月（d/w/m/y）</li>
+          <li>date:&gt;20250402：晚于指定日期</li>
+          <li>scope:message：仅检索消息内容（默认会话）</li>
+        </ul>
+      `;
+
+      let isVisible = false;
+      let hideTimer = null;
+      const setVisible = (visible) => {
+        if (isVisible === visible) return;
+        isVisible = visible;
+        syntaxPopover.dataset.visible = visible ? '1' : '0';
+        if (visible) {
+          document.addEventListener('keydown', handleDocKeydown);
+        } else {
+          document.removeEventListener('keydown', handleDocKeydown);
+        }
+      };
+
+      const handleDocKeydown = (event) => {
+        if (event.key === 'Escape') setVisible(false);
+      };
+
+      const scheduleHide = () => {
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => {
+          setVisible(false);
+        }, 120);
+      };
+
+      const cancelHide = () => {
+        if (!hideTimer) return;
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      };
+
+      syntaxButton.addEventListener('mouseenter', () => {
+        cancelHide();
+        setVisible(true);
+      });
+      syntaxButton.addEventListener('mouseleave', scheduleHide);
+      syntaxButton.addEventListener('focus', () => {
+        cancelHide();
+        setVisible(true);
+      });
+      syntaxButton.addEventListener('blur', () => {
+        scheduleHide();
+      });
+
+      syntaxPopover.addEventListener('mouseenter', () => {
+        cancelHide();
+        setVisible(true);
+      });
+      syntaxPopover.addEventListener('mouseleave', scheduleHide);
+
+      container.appendChild(syntaxButton);
+      container.appendChild(syntaxPopover);
+    };
 
     if (!panel) {
       panel = document.createElement('div');
@@ -6789,7 +6908,7 @@ export function createChatHistoryUI(appContext) {
       filterContainer.className = 'filter-container';
       filterInput = document.createElement('input');
       filterInput.type = 'text';
-      filterInput.placeholder = '搜索（URL+消息）：空格=AND，!否定，url:xxx，count:>10，start:2024-01-01';
+      filterInput.placeholder = '搜索（URL+消息）：空格=AND，!否定，url:xxx，count:>10，date:<5d';
       
       // 改为输入防抖实时搜索，且输入法构词期间不触发
       let filterDebounceTimer = null;
@@ -6844,8 +6963,8 @@ export function createChatHistoryUI(appContext) {
         const isUrlMode = panel.dataset.urlFilterMode === 'currentUrl';
         const isTreeMode = panel.dataset.branchViewMode === 'tree';
         const base = isUrlMode
-          ? '本页会话搜索：空格=AND，!否定，count:>10，start:2024-01-01'
-          : '搜索（URL+消息）：空格=AND，!否定，url:xxx，count:>10，start:2024-01-01';
+          ? '本页会话搜索：空格=AND，!否定，count:>10，date:<5d'
+          : '搜索（URL+消息）：空格=AND，!否定，url:xxx，count:>10，date:<5d';
         // 树状视图本身只在“无筛选”时改变排序；这里仅提示用户当前处于该模式
         filterInput.placeholder = isTreeMode ? `${base}（树状）` : base;
       };
@@ -6898,6 +7017,7 @@ export function createChatHistoryUI(appContext) {
 
       updateBranchTreeButtonState();
       filterContainer.appendChild(branchTreeButton);
+      ensureSearchSyntaxHelp(filterContainer);
       
       historyContent.appendChild(filterContainer);
 
@@ -6993,6 +7113,8 @@ export function createChatHistoryUI(appContext) {
           services.settingsManager?.refreshSettingsContainers?.();
         }
       }
+      const filterContainer = panel.querySelector('.filter-container');
+      ensureSearchSyntaxHelp(filterContainer);
       const urlFilterButton = panel.querySelector('.filter-container .url-filter-btn.url-filter-toggle');
       const branchTreeButton = panel.querySelector('.filter-container .branch-tree-btn');
       if (urlFilterButton) {
@@ -7011,8 +7133,8 @@ export function createChatHistoryUI(appContext) {
         const isUrlMode = panel.dataset.urlFilterMode === 'currentUrl';
         const isTreeMode = panel.dataset.branchViewMode === 'tree';
         const base = isUrlMode
-          ? '本页会话搜索：空格=AND，!否定，count:>10，start:2024-01-01'
-          : '搜索（URL+消息）：空格=AND，!否定，url:xxx，count:>10，start:2024-01-01';
+          ? '本页会话搜索：空格=AND，!否定，count:>10，date:<5d'
+          : '搜索（URL+消息）：空格=AND，!否定，url:xxx，count:>10，date:<5d';
         filterInput.placeholder = isTreeMode ? `${base}（树状）` : base;
       }
     }

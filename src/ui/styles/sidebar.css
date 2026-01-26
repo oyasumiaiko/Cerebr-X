@@ -5610,6 +5610,7 @@ body.hide-references .reference-number.superscript {
 .filter-container {
   display: flex;
   align-items: center;
+  position: relative;
 }
 .filter-container input {
   flex: 1;
@@ -5652,6 +5653,69 @@ body.hide-references .reference-number.superscript {
 .url-filter-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.search-syntax-btn {
+  border: 1px solid var(--cerebr-control-border);
+  background: transparent;
+  color: inherit;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  margin-left: 5px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.search-syntax-btn:hover {
+  background: var(--cerebr-control-bg-hover);
+  border-color: var(--cerebr-control-border-hover);
+}
+
+.search-syntax-btn:active {
+  background: var(--cerebr-control-bg);
+  transform: none;
+}
+
+.search-syntax-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  display: none;
+  max-width: min(360px, 90vw);
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--cerebr-control-border);
+  background: color-mix(in srgb, var(--cerebr-control-bg) 88%, transparent);
+  color: var(--cerebr-text-color);
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(12px);
+}
+
+.search-syntax-popover[data-visible="1"] {
+  display: block;
+}
+
+.search-syntax-popover .search-syntax-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.search-syntax-popover ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.search-syntax-popover li {
+  margin: 4px 0;
 }
 
 /* 当侧边栏位置为左（即添加了 .position-left 类）时，让 collapse-button 出现在右边 */
