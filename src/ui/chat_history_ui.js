@@ -10216,7 +10216,8 @@ export function createChatHistoryUI(appContext) {
       }
       // 非file协议，返回域名
       const urlObj = new URL(url);
-      return urlObj.hostname || url; // 如果 hostname 为空，则返回原始 URL
+      if (!urlObj.hostname) return url; // 如果 hostname 为空，则返回原始 URL
+      return urlObj.hostname.replace(/^www\./i, '');
     } catch (error) {
       console.warn('解析 URL 失败:', url, error); // 使用 warn 级别，因为它不一定是严重错误
       return url || '无效URL'; // 返回原始 URL 或提示
