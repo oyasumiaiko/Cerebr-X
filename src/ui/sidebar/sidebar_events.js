@@ -249,6 +249,91 @@ function setupEmptyStateHandlers(appContext) {
     });
   }
 
+  if (appContext.dom.emptyStatePageContent && !appContext.state.isStandalone) {
+    // 通过 background 触发 content script 提取网页内容，避免 iframe 无法直接访问页面 DOM。
+    const requestPageContentSnapshot = async () => {
+      if (!chrome?.runtime?.sendMessage) {
+        appContext.utils.showNotification({ message: '无法获取页面内容（环境不支持）', type: 'error' });
+        return null;
+      }
+      try {
+        const payload = await new Promise((resolve, reject) => {
+          try {
+            chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT_FROM_SIDEBAR' }, (response) => {
+              const runtimeError = chrome.runtime.lastError;
+              if (runtimeError) {
+                reject(new Error(runtimeError.message));
+                return;
+              }
+              resolve(response || null);
+            });
+          } catch (err) {
+            reject(err);
+          }
+        });
+        const title = typeof payload?.title === 'string' ? payload.title.trim() : '';
+        const url = typeof payload?.url === 'string' ? payload.url.trim() : '';
+        const content = typeof payload?.content === 'string' ? payload.content.trim() : '';
+        if (!title || !url || !content) {
+          appContext.utils.showNotification({ message: '未能提取到页面内容', type: 'warning' });
+          return null;
+        }
+        return { title, url, content };
+      } catch (error) {
+        console.error('获取页面内容失败:', error);
+        appContext.utils.showNotification({ message: '获取页面内容失败', type: 'error' });
+        return null;
+      }
+    };
+
+    const buildPageContentText = (snapshot, { withPrefix = true } = {}) => {
+      if (!snapshot) return '';
+      const prefix = withPrefix ? '已附加网页内容：\n' : '';
+      return `${prefix}标题：${snapshot.title}\nURL：${snapshot.url}\n内容：${snapshot.content}`;
+    };
+
+    const appendPageContentToChat = async (text) => {
+      try {
+        appContext.services.messageProcessor.appendMessage(text, 'user', false, null, '');
+        try {
+          await appContext.services.chatHistoryUI.saveCurrentConversation(true);
+          appContext.services.messageSender.setCurrentConversationId(
+            appContext.services.chatHistoryUI.getCurrentConversationId()
+          );
+        } catch (_) {}
+        appContext.utils.showNotification('已添加网页内容到历史（未发送）');
+      } catch (error) {
+        console.error('追加网页内容失败:', error);
+        appContext.utils.showNotification({ message: '追加网页内容失败', type: 'error' });
+      }
+    };
+
+    appContext.dom.emptyStatePageContent.addEventListener('click', async () => {
+      const snapshot = await requestPageContentSnapshot();
+      if (!snapshot) return;
+      const text = buildPageContentText(snapshot, { withPrefix: true });
+      await appendPageContentToChat(text);
+    });
+
+    appContext.dom.emptyStatePageContent.addEventListener('contextmenu', async (event) => {
+      event.preventDefault();
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+        appContext.utils.showNotification({ message: '当前环境不支持复制到剪贴板', type: 'warning' });
+        return;
+      }
+      const snapshot = await requestPageContentSnapshot();
+      if (!snapshot) return;
+      const text = buildPageContentText(snapshot, { withPrefix: false });
+      try {
+        await navigator.clipboard.writeText(text);
+        appContext.utils.showNotification({ message: '页面内容已复制到剪贴板', type: 'success' });
+      } catch (error) {
+        console.error('复制页面内容失败:', error);
+        appContext.utils.showNotification({ message: '复制页面内容失败', type: 'error' });
+      }
+    });
+  }
+
   const bindRandomBackgroundButton = (button) => {
     if (!button) return;
     if (button.dataset.randomBackgroundBound === 'true') return;

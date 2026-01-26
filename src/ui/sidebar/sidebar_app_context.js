@@ -70,6 +70,7 @@ export function createSidebarAppContext(isStandalone) {
     emptyStateLoadUrl: document.getElementById('empty-state-load-url'),
     emptyStateScreenshot: document.getElementById('empty-state-screenshot'),
     emptyStateExtract: document.getElementById('empty-state-extract'),
+    emptyStatePageContent: document.getElementById('empty-state-page-content'),
     emptyStateRandomBackground: document.getElementById('empty-state-random-background'),
     statusDot: document.getElementById('status-dot'),
     stopAtTopSwitch: document.getElementById('stop-at-top-switch'),
@@ -671,6 +672,7 @@ export function applyStandaloneAdjustments(appContext) {
     appContext.dom.emptyStateLoadUrl,
     appContext.dom.emptyStateScreenshot,
     appContext.dom.emptyStateExtract,
+    appContext.dom.emptyStatePageContent,
     appContext.dom.emptyStateTempMode,
     appContext.dom.repomixButton
   ];
