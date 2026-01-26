@@ -92,6 +92,50 @@ export function openChatHistoryDB() {
 }
 
 /**
+ * 统计会话消息的数量结构（主对话/线程）。
+ *
+ * 说明：
+ * - 该统计只做轻量遍历，不做任何 DOM/IO；
+ * - 线程消息以 threadId/threadHiddenSelection/threadRootId/threadAnchorId 作为识别信号。
+ *
+ * @param {Array<Object>} messages
+ * @returns {{totalCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number}}
+ */
+function computeConversationMessageStats(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  let totalCount = 0;
+  let mainMessageCount = 0;
+  let threadMessageCount = 0;
+  const threadIds = new Set();
+
+  for (const msg of list) {
+    if (!msg) continue;
+    totalCount += 1;
+
+    const threadId = typeof msg.threadId === 'string' && msg.threadId.trim() ? msg.threadId.trim() : '';
+    const threadRootId = typeof msg.threadRootId === 'string' && msg.threadRootId.trim() ? msg.threadRootId.trim() : '';
+    const threadAnchorId = typeof msg.threadAnchorId === 'string' && msg.threadAnchorId.trim() ? msg.threadAnchorId.trim() : '';
+    const isThreadMessage = !!(threadId || msg.threadHiddenSelection || threadRootId || threadAnchorId);
+
+    if (isThreadMessage) {
+      threadMessageCount += 1;
+      if (threadId) threadIds.add(threadId);
+      else if (threadRootId) threadIds.add(`root:${threadRootId}`);
+      else if (threadAnchorId) threadIds.add(`anchor:${threadAnchorId}`);
+    } else {
+      mainMessageCount += 1;
+    }
+  }
+
+  return {
+    totalCount,
+    mainMessageCount,
+    threadMessageCount,
+    threadCount: threadIds.size
+  };
+}
+
+/**
  * 将 conversations 表中的完整会话对象压缩为“列表/筛选用”的轻量元数据。
  *
  * 注意：
@@ -102,7 +146,7 @@ export function openChatHistoryDB() {
  * - 这不会减少数据库读取成本，但能显著减少 JS 堆里长期保留的数据量。
  *
  * @param {Object} conv
- * @returns {{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, parentConversationId:string|null, forkedFromMessageId:string|null}}
+ * @returns {{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number, parentConversationId:string|null, forkedFromMessageId:string|null}}
  */
 function compactConversationToMetadata(conv) {
   const id = conv?.id || '';
@@ -111,7 +155,27 @@ function compactConversationToMetadata(conv) {
   const summary = typeof conv?.summary === 'string' ? conv.summary : '';
   const startTime = Number(conv?.startTime) || 0;
   const endTime = Number(conv?.endTime) || 0;
-  const messageCount = Number(conv?.messageCount) || (Array.isArray(conv?.messages) ? conv.messages.length : 0) || 0;
+  const storedMessageCount = Number(conv?.messageCount);
+  const storedMainCount = Number(conv?.mainMessageCount);
+  const storedThreadMessageCount = Number(conv?.threadMessageCount);
+  const storedThreadCount = Number(conv?.threadCount);
+  const hasStoredCounts = Number.isFinite(storedMainCount)
+    && Number.isFinite(storedThreadMessageCount)
+    && Number.isFinite(storedThreadCount);
+  const stats = hasStoredCounts ? null : computeConversationMessageStats(conv?.messages);
+
+  const messageCount = Number.isFinite(storedMessageCount)
+    ? storedMessageCount
+    : (stats ? stats.totalCount : (Array.isArray(conv?.messages) ? conv.messages.length : 0) || 0);
+  const mainMessageCount = hasStoredCounts
+    ? storedMainCount
+    : (stats ? stats.mainMessageCount : Math.max(0, messageCount));
+  const threadMessageCount = hasStoredCounts
+    ? storedThreadMessageCount
+    : (stats ? stats.threadMessageCount : 0);
+  const threadCount = hasStoredCounts
+    ? storedThreadCount
+    : (stats ? stats.threadCount : 0);
   // 分支元信息：用于 UI 侧构建“会话分支树”
   const parentConversationId = typeof conv?.parentConversationId === 'string' && conv.parentConversationId.trim()
     ? conv.parentConversationId.trim()
@@ -119,7 +183,20 @@ function compactConversationToMetadata(conv) {
   const forkedFromMessageId = typeof conv?.forkedFromMessageId === 'string' && conv.forkedFromMessageId.trim()
     ? conv.forkedFromMessageId.trim()
     : null;
-  return { id, url, title, summary, startTime, endTime, messageCount, parentConversationId, forkedFromMessageId };
+  return {
+    id,
+    url,
+    title,
+    summary,
+    startTime,
+    endTime,
+    messageCount,
+    mainMessageCount,
+    threadMessageCount,
+    threadCount,
+    parentConversationId,
+    forkedFromMessageId
+  };
 }
 
 /**
@@ -129,7 +206,7 @@ function compactConversationToMetadata(conv) {
  * - 由于 conversations 记录本身包含 messages 大数组，IndexedDB 在读取时仍会结构化克隆整条记录；
  * - 这里的“轻量化”主要是为了减少上层长期保留的 JS 对象体积（避免把 messages/messageIds 留在内存里）。
  *
- * @returns {Promise<Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, parentConversationId:string|null, forkedFromMessageId:string|null}>>}
+ * @returns {Promise<Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number, parentConversationId:string|null, forkedFromMessageId:string|null}>>}
  */
 export async function getAllConversationMetadata() {
   const db = await openChatHistoryDB();
@@ -162,7 +239,7 @@ export async function getAllConversationMetadata() {
 /**
  * 批量按 id 读取会话“轻量元数据”。
  * @param {string[]} ids
- * @returns {Promise<Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, parentConversationId:string|null, forkedFromMessageId:string|null}>>}
+ * @returns {Promise<Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number, parentConversationId:string|null, forkedFromMessageId:string|null}>>}
  */
 export async function getConversationMetadataByIds(ids) {
   const idList = Array.isArray(ids) ? ids.filter(Boolean) : [];
@@ -197,7 +274,7 @@ export async function getConversationMetadataByIds(ids) {
  * @param {number} [options.limit=50]
  * @param {{endTime:number, seenIds:string[]}|null} [options.cursor=null]
  * @param {string[]|Set<string>} [options.excludeIds=[]] - 需要跳过的会话 id（例如置顶会话）
- * @returns {Promise<{items: Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, parentConversationId:string|null, forkedFromMessageId:string|null}>, cursor: {endTime:number, seenIds:string[]} | null, hasMore: boolean}>}
+ * @returns {Promise<{items: Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number, parentConversationId:string|null, forkedFromMessageId:string|null}>, cursor: {endTime:number, seenIds:string[]} | null, hasMore: boolean}>}
  */
 export async function getConversationMetadataPageByEndTimeDesc(options = {}) {
   const limit = Math.max(0, Number(options.limit) || 50);
@@ -331,7 +408,7 @@ export async function getConversationMetadataPageByEndTimeDesc(options = {}) {
  * - 同一会话只会分配到最严格的那个等级（去重逻辑：先处理更严格的 candidate）。
  *
  * @param {string[]} candidateUrls
- * @returns {Promise<Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, parentConversationId:string|null, forkedFromMessageId:string|null, urlMatchLevel:number, urlMatchPrefix:string}>>}
+ * @returns {Promise<Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number, parentConversationId:string|null, forkedFromMessageId:string|null, urlMatchLevel:number, urlMatchPrefix:string}>>}
  */
 export async function listConversationMetadataByUrlCandidates(candidateUrls) {
   const candidates = Array.isArray(candidateUrls)

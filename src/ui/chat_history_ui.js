@@ -1323,6 +1323,55 @@ export function createChatHistoryUI(appContext) {
     return extractPlainTextFromMessageContent(msg.content);
   }
 
+  /**
+   * 纯函数：统计会话的消息数量结构（主对话/线程）。
+   * @param {Array<Object>} messages
+   * @returns {{totalCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number}}
+   */
+  function computeConversationMessageStats(messages) {
+    const list = Array.isArray(messages) ? messages : [];
+    let totalCount = 0;
+    let mainMessageCount = 0;
+    let threadMessageCount = 0;
+    const threadIds = new Set();
+
+    for (const msg of list) {
+      if (!msg) continue;
+      totalCount += 1;
+
+      const threadId = typeof msg.threadId === 'string' && msg.threadId.trim() ? msg.threadId.trim() : '';
+      const threadRootId = typeof msg.threadRootId === 'string' && msg.threadRootId.trim() ? msg.threadRootId.trim() : '';
+      const threadAnchorId = typeof msg.threadAnchorId === 'string' && msg.threadAnchorId.trim() ? msg.threadAnchorId.trim() : '';
+      const isThreadMessage = !!(threadId || msg.threadHiddenSelection || threadRootId || threadAnchorId);
+
+      if (isThreadMessage) {
+        threadMessageCount += 1;
+        if (threadId) threadIds.add(threadId);
+        else if (threadRootId) threadIds.add(`root:${threadRootId}`);
+        else if (threadAnchorId) threadIds.add(`anchor:${threadAnchorId}`);
+      } else {
+        mainMessageCount += 1;
+      }
+    }
+
+    return {
+      totalCount,
+      mainMessageCount,
+      threadMessageCount,
+      threadCount: threadIds.size
+    };
+  }
+
+  function applyConversationMessageStats(conversation) {
+    if (!conversation || !Array.isArray(conversation.messages)) return null;
+    const stats = computeConversationMessageStats(conversation.messages);
+    conversation.messageCount = stats.totalCount;
+    conversation.mainMessageCount = stats.mainMessageCount;
+    conversation.threadMessageCount = stats.threadMessageCount;
+    conversation.threadCount = stats.threadCount;
+    return stats;
+  }
+
   function resolveSearchScope(textPlan) {
     if (!textPlan) return 'session';
     if (textPlan.scope === 'message' && textPlan.hasPositive) return 'message';
@@ -1939,6 +1988,7 @@ export function createChatHistoryUI(appContext) {
     }
 
     const generateConversationId = () => `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const messageStats = computeConversationMessageStats(messagesCopy);
     const conversation = {
       id: isUpdate ? (currentConversationId || generateConversationId()) : generateConversationId(),
       url: urlToSave,
@@ -1947,7 +1997,10 @@ export function createChatHistoryUI(appContext) {
       endTime,
       messages: messagesCopy,
       summary: summaryToSave,
-      messageCount: messagesCopy.length
+      messageCount: messageStats.totalCount,
+      mainMessageCount: messageStats.mainMessageCount,
+      threadMessageCount: messageStats.threadMessageCount,
+      threadCount: messageStats.threadCount
     };
     if (parentConversationIdToSave) {
       conversation.parentConversationId = parentConversationIdToSave;
@@ -4799,7 +4852,15 @@ export function createChatHistoryUI(appContext) {
     const relativeEndTime = formatRelativeTime(endTime);
     const domain = getDisplayUrl(conv.url);
     const chatTimeSpan = relativeTime === relativeEndTime ? relativeTime : `${relativeTime} - ${relativeEndTime}`;
-    const displayInfos = `${chatTimeSpan} · 消息数: ${conv.messageCount} · ${domain}`;
+    const totalCount = Number.isFinite(Number(conv?.messageCount)) ? Number(conv.messageCount) : 0;
+    const mainCount = Number.isFinite(Number(conv?.mainMessageCount))
+      ? Number(conv.mainMessageCount)
+      : Math.max(0, totalCount);
+    const threadMessageCount = Number.isFinite(Number(conv?.threadMessageCount))
+      ? Number(conv.threadMessageCount)
+      : Math.max(0, totalCount - mainCount);
+    const threadCount = Number.isFinite(Number(conv?.threadCount)) ? Number(conv.threadCount) : 0;
+    const displayInfos = `${chatTimeSpan} · 消息 总${totalCount} 主${mainCount} 线程${threadCount} 线程消息${threadMessageCount} · ${domain}`;
     // URL 快速筛选模式下，为每条会话标注“匹配等级”，便于用户理解来源范围
     // - 等级越小越严格（越接近当前页面 URL）
     // - 鼠标悬停可查看匹配前缀
@@ -5532,7 +5593,7 @@ export function createChatHistoryUI(appContext) {
       }
 
       if (convChanged) {
-        conv.messageCount = Array.isArray(conv.messages) ? conv.messages.length : 0;
+        applyConversationMessageStats(conv);
         await putConversation(conv);
         updateConversationInCache(conv);
         if (activeConversation?.id === conv.id) activeConversation = conv;
@@ -8424,7 +8485,7 @@ export function createChatHistoryUI(appContext) {
       }
 
       if (convChanged && conv) {
-        conv.messageCount = Array.isArray(conv.messages) ? conv.messages.length : 0;
+        applyConversationMessageStats(conv);
         conv.endTime = Number(conv.endTime) || conv.endTime || now;
         await putConversation(conv);
         updateConversationInCache(conv);
@@ -8546,7 +8607,7 @@ export function createChatHistoryUI(appContext) {
       }
 
       if (convChanged && conv) {
-        conv.messageCount = Array.isArray(conv.messages) ? conv.messages.length : 0;
+        applyConversationMessageStats(conv);
         await putConversation(conv);
         updateConversationInCache(conv);
         if (activeConversation?.id === conv.id) activeConversation = conv;
@@ -9163,7 +9224,7 @@ export function createChatHistoryUI(appContext) {
       }
 
       if (convChanged && conv) {
-        conv.messageCount = Array.isArray(conv.messages) ? conv.messages.length : 0;
+        applyConversationMessageStats(conv);
         await putConversation(conv);
         updateConversationInCache(conv);
         if (activeConversation?.id === conv.id) activeConversation = conv;
@@ -9542,7 +9603,7 @@ export function createChatHistoryUI(appContext) {
       }
 
       if (convChanged && conv) {
-        conv.messageCount = Array.isArray(conv.messages) ? conv.messages.length : 0;
+        applyConversationMessageStats(conv);
         await putConversation(conv);
         updateConversationInCache(conv);
         if (activeConversation?.id === conv.id) activeConversation = conv;
