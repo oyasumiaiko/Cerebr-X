@@ -126,6 +126,7 @@ export function createSettingsManager(appContext) {
       type: 'select',
       id: 'theme-select',
       label: '主题选择',
+      uiHidden: true,
       options: () => (themeManager.getAvailableThemes?.() || []).map(t => ({ label: t.name, value: t.id })),
       defaultValue: DEFAULT_SETTINGS.theme,
       apply: (v) => applyTheme(v)
@@ -231,6 +232,7 @@ export function createSettingsManager(appContext) {
       key: 'enableDollarMath',
       type: 'toggle',
       menu: 'quick',
+      group: 'display',
       label: '使用 $ / $$ 作为公式分隔符',
       defaultValue: DEFAULT_SETTINGS.enableDollarMath
     },
@@ -248,6 +250,7 @@ export function createSettingsManager(appContext) {
       key: 'sidebarPosition',
       type: 'toggle',
       menu: 'quick',
+      group: 'layout',
       id: 'sidebar-position-switch',
       label: '侧栏在右侧显示',
       defaultValue: DEFAULT_SETTINGS.sidebarPosition,
@@ -261,6 +264,7 @@ export function createSettingsManager(appContext) {
       key: 'sidebarWidth',
       type: 'range',
       menu: 'quick',
+      group: 'layout',
       id: 'sidebar-width',
       label: '侧栏宽度',
       min: 500,
@@ -288,6 +292,7 @@ export function createSettingsManager(appContext) {
       key: 'fontSize',
       type: 'range',
       menu: 'quick',
+      group: 'display',
       id: 'font-size',
       label: '字体大小',
       min: 12,
@@ -302,6 +307,7 @@ export function createSettingsManager(appContext) {
       key: 'scaleFactor',
       type: 'range',
       menu: 'quick',
+      group: 'layout',
       id: 'scale-factor',
       label: '缩放比例',
       min: 0.5,
@@ -457,7 +463,6 @@ export function createSettingsManager(appContext) {
       }
       return autoSection;
     };
-
     const resolveContainer = (def) => {
       const wantsQuick = def.menu === 'quick';
       if (wantsQuick) {
@@ -473,21 +478,26 @@ export function createSettingsManager(appContext) {
     // 为每个注册项生成控件（若页面已存在同ID控件则跳过；uiHidden=true 时不渲染控件）
     for (const def of getActiveRegistry()) {
       if (def.uiHidden === true) {
-        // 不渲染、不绑定 UI，但该设置仍会被加载/保存/应用（通过 applyAllSettings）
+        const existingHidden = document.getElementById(def.id || `setting-${def.key}`);
+        if (existingHidden) {
+          dynamicElements.set(def.key, existingHidden);
+        }
+        // 不渲染 UI，但该设置仍会被加载/保存/应用（通过 applyAllSettings）
         continue;
       }
       const { container, scope } = resolveContainer(def);
       const autoSection = ensureAutoSection(container, scope);
+      const targetSection = autoSection;
       const existing = document.getElementById(def.id || `setting-${def.key}`);
       if (existing) {
         dynamicElements.set(def.key, existing);
         const existingItem = existing.closest('.menu-item');
-        if (autoSection && existingItem && existingItem.parentElement !== autoSection) {
-          autoSection.appendChild(existingItem);
+        if (targetSection && existingItem && existingItem.parentElement !== targetSection) {
+          targetSection.appendChild(existingItem);
         }
         continue;
       }
-      if (!autoSection) continue;
+      if (!autoSection || !targetSection) continue;
 
       const item = document.createElement('div');
       item.className = 'menu-item';
@@ -507,7 +517,7 @@ export function createSettingsManager(appContext) {
         wrap.appendChild(input);
         wrap.appendChild(slider);
         item.appendChild(wrap);
-        autoSection.appendChild(item);
+        targetSection.appendChild(item);
         dynamicElements.set(def.key, input);
       } else if (def.type === 'range') {
         const input = document.createElement('input');
@@ -524,7 +534,7 @@ export function createSettingsManager(appContext) {
         });
         item.appendChild(input);
         item.appendChild(valueSpan);
-        autoSection.appendChild(item);
+        targetSection.appendChild(item);
         dynamicElements.set(def.key, input);
       } else if (def.type === 'text') {
         if (def.id === 'background-image-url') {
@@ -571,7 +581,7 @@ export function createSettingsManager(appContext) {
           actions.appendChild(clearBtn);
 
           item.appendChild(actions);
-          autoSection.appendChild(item);
+          targetSection.appendChild(item);
 
           dynamicElements.set(def.key, input);
 
@@ -623,7 +633,7 @@ export function createSettingsManager(appContext) {
           actionBar.appendChild(clearBtn);
           item.appendChild(actionBar);
 
-          autoSection.appendChild(item);
+          targetSection.appendChild(item);
           dynamicElements.set(def.key, input);
         }
       } else if (def.type === 'select') {
@@ -640,7 +650,7 @@ export function createSettingsManager(appContext) {
           select.appendChild(o);
         });
         item.appendChild(select);
-        autoSection.appendChild(item);
+        targetSection.appendChild(item);
         dynamicElements.set(def.key, select);
       }
     }

@@ -6904,28 +6904,9 @@ export function createChatHistoryUI(appContext) {
       escSettingsMenu.classList.add('esc-settings-menu');
       settingsContent.appendChild(escSettingsMenu);
       dom.escSettingsMenu = escSettingsMenu;
-      // 将主菜单中的设置项迁移到 Esc 面板（主题选择/收藏 API 保留在原菜单）
-      const moveSettingsMenuItems = (targetMenu) => {
-        const settingsMenu = dom.settingsMenu || document.getElementById('settings-menu');
-        if (!settingsMenu || !targetMenu) return;
-        const moveIds = [
-          'clear-chat',
-          'quick-summary',
-          'debug-chat-tree-btn',
-          'prompt-settings-toggle',
-          'api-settings-toggle',
-          'fullscreen-toggle',
-          'open-standalone-page',
-          'chat-history-menu'
-        ];
-        moveIds.forEach((id) => {
-          const item = settingsMenu.querySelector(`#${id}`);
-          if (!item) return;
-          targetMenu.appendChild(item);
-        });
-      };
-      services.settingsManager?.refreshSettingsContainers?.();
-      moveSettingsMenuItems(escSettingsMenu);
+      if (escSettingsMenu && escSettingsMenu.childElementCount === 0) {
+        services.settingsManager?.refreshSettingsContainers?.();
+      }
 
       // 提示词设置标签内容（复用 sidebar.html 中的 DOM）
       const promptSettingsContent = dom.promptSettingsPanel;
@@ -6981,6 +6962,9 @@ export function createChatHistoryUI(appContext) {
       });
       
       document.body.appendChild(panel);
+      if (escSettingsMenu && escSettingsMenu.childElementCount === 0) {
+        services.settingsManager?.refreshSettingsContainers?.();
+      }
     } else {
       // 兼容旧 DOM：如果历史面板是由旧版本创建出来的（没有 data-branch-view-mode），
       // 则补上默认值（关闭树状），以符合“打开时默认平铺”的行为。
@@ -6994,7 +6978,9 @@ export function createChatHistoryUI(appContext) {
       const existingEscSettingsMenu = panel.querySelector('#esc-settings-menu');
       if (existingEscSettingsMenu) {
         dom.escSettingsMenu = existingEscSettingsMenu;
-        services.settingsManager?.refreshSettingsContainers?.();
+        if (existingEscSettingsMenu.childElementCount === 0) {
+          services.settingsManager?.refreshSettingsContainers?.();
+        }
       }
       const urlFilterButton = panel.querySelector('.filter-container .url-filter-btn.url-filter-toggle');
       const branchTreeButton = panel.querySelector('.filter-container .branch-tree-btn');

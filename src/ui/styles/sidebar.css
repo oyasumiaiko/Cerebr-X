@@ -5014,15 +5014,25 @@ body.hide-references .reference-number.superscript {
     gap: 8px;
 }
 
-#chat-history-panel .settings-tab-content .esc-settings-menu,
-#chat-history-panel .settings-tab-content .settings-auto-section {
+#chat-history-panel .settings-tab-content .esc-settings-menu {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
 }
 
-#chat-history-panel .settings-tab-content .menu-item {
+#chat-history-panel .settings-tab-content .settings-auto-section[data-scope="panel"] {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+}
+
+#chat-history-panel .settings-tab-content .settings-auto-section[data-scope="panel"] .menu-item {
     width: 100%;
+}
+
+#chat-history-panel .settings-tab-content .settings-auto-section[data-scope="panel"] .background-image-setting,
+#chat-history-panel .settings-tab-content .settings-auto-section[data-scope="panel"] .menu-item--stack {
+    grid-column: 1 / -1;
 }
 
 /* 滚动条样式统一至全局 */
