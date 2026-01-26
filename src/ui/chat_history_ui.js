@@ -4862,9 +4862,6 @@ export function createChatHistoryUI(appContext) {
     const threadCount = Number.isFinite(Number(conv?.threadCount)) ? Number(conv.threadCount) : 0;
     const hasThreads = threadCount !== 0 || threadMessageCount !== 0;
     const statsMetaParts = [`消息 ${totalCount}`];
-    if (hasThreads && mainCount !== 0) {
-      statsMetaParts.push(`主要 ${mainCount}`);
-    }
     if (hasThreads) {
       const threadMetaParts = [];
       if (threadCount !== 0) {
@@ -4895,9 +4892,6 @@ export function createChatHistoryUI(appContext) {
       statsWrap.appendChild(stat);
     };
     appendStat('fa-comments', totalCount, `消息 ${totalCount}`);
-    if (hasThreads && mainCount !== 0) {
-      appendStat('fa-comment', mainCount, `主要 ${mainCount}`);
-    }
     if (hasThreads) {
       const threadStat = document.createElement('span');
       threadStat.className = 'conversation-stat conversation-stat-thread';
