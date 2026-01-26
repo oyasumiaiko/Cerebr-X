@@ -3,7 +3,7 @@
  */
 
 /**
- * 打开或创建 "ChatHistoryDB" 数据库以及 "conversations" 和 "messageContents" 对象存储
+ * 打开或创建 "ChatHistoryDB" 数据库以及 "conversations" 对象存储
  * @returns {Promise<IDBDatabase>}
  */
 let cachedDbPromise = null;
@@ -62,26 +62,6 @@ export function openChatHistoryDB() {
         }
       }
       
-      // 创建或确保存在消息内容存储
-      if (!db.objectStoreNames.contains('messageContents')) {
-        const store = db.createObjectStore('messageContents', { keyPath: 'id' });
-        store.createIndex('conversationId', 'conversationId', { unique: false });
-      } else {
-        // 兼容旧库：补齐 messageContents.conversationId 索引
-        try {
-          const store = tx.objectStore('messageContents');
-          if (store && !store.indexNames.contains('conversationId')) {
-            store.createIndex('conversationId', 'conversationId', { unique: false });
-          }
-        } catch (_) {}
-      }
-      
-      // 从数据库版本1升级到版本2的逻辑
-      if (event.oldVersion === 1) {
-        console.log('升级数据库：将聊天内容分离存储');
-        // 不需要迁移数据，因为版本1的数据格式与版本2兼容
-      }
-
       if (event.oldVersion < 3) {
         console.log('升级数据库：为 conversations 增加 endTime/url 索引（提升历史列表与 URL 筛选性能）');
       }
@@ -626,8 +606,8 @@ export async function findMostRecentConversationMetadataByUrlCandidates(candidat
 }
 
 /**
- * 获取全部对话记录(包含完整消息内容)
- * @param {boolean} [loadFullContent=true] - 是否加载完整消息内容
+ * 获取全部对话记录
+ * @param {boolean} [loadFullContent=true] - 兼容保留：已不再区分加载方式
  * @returns {Promise<Array<Object>>} 包含所有对话记录的数组
  */
 export async function getAllConversations(loadFullContent = true) {
@@ -642,27 +622,7 @@ export async function getAllConversations(loadFullContent = true) {
     request.onerror = () => reject(request.error);
   });
 
-  // 如果不需要加载完整内容或没有会话，直接返回
-  if (!loadFullContent || !conversations || conversations.length === 0) {
-    return conversations;
-  }
-
-  // 加载所有引用的消息内容
-  const transaction = db.transaction('messageContents', 'readonly');
-  const contentStore = transaction.objectStore('messageContents');
-
-  // 处理每个会话，使用 attachContentToMessage 替换重复逻辑
-  for (const conversation of conversations) {
-    if (conversation.messages) {
-      for (let i = 0; i < conversation.messages.length; i++) {
-        const msg = conversation.messages[i];
-        if (msg.contentRef) {
-          conversation.messages[i] = await attachContentToMessage(msg, contentStore);
-        }
-      }
-    }
-  }
-
+  void loadFullContent;
   return conversations;
 }
 
@@ -670,12 +630,10 @@ export async function getAllConversations(loadFullContent = true) {
  * 添加或更新一条对话记录。
  *
  * 说明：
- * - 分离存储（messageContents/contentRef）已弃用，避免继续扩大结构复杂度；
  * - separateContent 参数仅为历史兼容保留，不再生效；
- * - 若消息已携带 content，则会移除 contentRef，确保后续仅保存内联内容。
  *
  * @param {Object} conversation - 对话记录对象
- * @param {boolean} [separateContent=false] - 已弃用：不再分离存储
+ * @param {boolean} [separateContent=false] - 已弃用：不再生效
  * @returns {Promise<void>}
  */
 export async function putConversation(conversation, separateContent = false) {
@@ -686,17 +644,6 @@ export async function putConversation(conversation, separateContent = false) {
 
   // 复制会话对象，避免修改原始对象
   const conversationToStore = { ...conversation };
-
-  if (Array.isArray(conversationToStore.messages) && conversationToStore.messages.length > 0) {
-    // 仅做“去引用”处理：有 content 时移除 contentRef，避免继续使用分离存储
-    conversationToStore.messages = conversationToStore.messages.map((msg) => {
-      const messageToStore = { ...msg };
-      if (messageToStore.contentRef && messageToStore.content !== undefined && messageToStore.content !== null) {
-        delete messageToStore.contentRef;
-      }
-      return messageToStore;
-    });
-  }
 
   return new Promise((resolve, reject) => {
     const request = conversationStore.put(conversationToStore);
@@ -713,25 +660,8 @@ export async function putConversation(conversation, separateContent = false) {
 export async function deleteConversation(conversationId) {
   const db = await openChatHistoryDB();
   
-  // 先获取会话数据，以便删除相关的消息内容
-  const conversation = await getConversationById(conversationId);
-  
-  const transaction = db.transaction(['conversations', 'messageContents'], 'readwrite');
+  const transaction = db.transaction('conversations', 'readwrite');
   const conversationStore = transaction.objectStore('conversations');
-  const contentStore = transaction.objectStore('messageContents');
-  
-  // 删除相关的消息内容
-  if (conversation && conversation.messages) {
-    for (const msg of conversation.messages) {
-      if (msg.contentRef) {
-        await new Promise((resolve, reject) => {
-          const request = contentStore.delete(msg.contentRef);
-          request.onsuccess = () => resolve();
-          request.onerror = () => reject(request.error);
-        });
-      }
-    }
-  }
   
   // 删除会话记录
   return new Promise((resolve, reject) => {
@@ -742,32 +672,9 @@ export async function deleteConversation(conversationId) {
 }
 
 /**
- * 纯函数：从消息对象中加载并附加引用的消息内容，返回新的消息对象
- * @param {Object} msg - 原始消息对象
- * @param {IDBObjectStore} contentStore - 用于获取消息内容的对象仓库
- * @returns {Promise<Object>} 返回一个新消息对象，包含解引用后的内容
- */
-async function attachContentToMessage(msg, contentStore) {
-  if (!msg.contentRef) return msg;
-  try {
-    const contentRecord = await new Promise((resolve, reject) => {
-      const request = contentStore.get(msg.contentRef);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    if (contentRecord) {
-      return { ...msg, content: contentRecord.content };
-    }
-  } catch (error) {
-    console.error(`加载消息内容失败: ${msg.contentRef}`, error);
-  }
-  return msg;
-}
-
-/**
  * 根据对话 ID 获取单条对话记录，可选择是否加载完整消息内容
  * @param {string} conversationId - 要查找的对话记录 id
- * @param {boolean} [loadFullContent=true] - 是否加载完整消息内容
+ * @param {boolean} [loadFullContent=true] - 兼容保留：已不再区分加载方式
  * @returns {Promise<Object|null>} 返回匹配的对话记录对象，如果不存在则返回 null
  */
 export async function getConversationById(conversationId, loadFullContent = true) {
@@ -782,23 +689,7 @@ export async function getConversationById(conversationId, loadFullContent = true
     request.onerror = () => reject(request.error);
   });
   
-  // 如果不需要加载完整内容或会话不存在，直接返回
-  if (!loadFullContent || !conversation || !conversation.messages) {
-    return conversation;
-  }
-  
-  // 加载引用的消息内容
-  const transaction = db.transaction('messageContents', 'readonly');
-  const contentStore = transaction.objectStore('messageContents');
-  
-  // 遍历每条消息，利用纯函数附加引用的内容
-  for (let i = 0; i < conversation.messages.length; i++) {
-    const msg = conversation.messages[i];
-    if (msg.contentRef) {
-      conversation.messages[i] = await attachContentToMessage(msg, contentStore);
-    }
-  }
-  
+  void loadFullContent;
   return conversation;
 }
 
@@ -811,7 +702,7 @@ export async function getConversationById(conversationId, loadFullContent = true
  *
  * 注意：
  * - 返回数组会尽量保持与入参 ids 的顺序一致（缺失项返回 null 并在最终结果中过滤掉）。
- * - loadFullContent=true 时会再开一个 messageContents 事务解引用 contentRef（与 getConversationById 一致）。
+ * - loadFullContent 参数仅为历史兼容保留，不再区分加载方式。
  *
  * @param {string[]} ids - 会话 id 列表
  * @param {boolean} [loadFullContent=true] - 是否加载完整消息内容
@@ -847,104 +738,14 @@ export async function getConversationsByIds(ids, loadFullContent = true) {
     }
   });
 
-  const results = Array.isArray(conversations) ? conversations.filter(Boolean) : [];
-  if (!loadFullContent || results.length === 0) return results;
-
-  // 2) 需要完整内容：批量解引用 messageContents（复用 attachContentToMessage 的逻辑）
-  try {
-    const transaction = db.transaction('messageContents', 'readonly');
-    const contentStore = transaction.objectStore('messageContents');
-    for (const conversation of results) {
-      if (!conversation?.messages || !Array.isArray(conversation.messages)) continue;
-      for (let i = 0; i < conversation.messages.length; i++) {
-        const msg = conversation.messages[i];
-        if (msg?.contentRef) {
-          conversation.messages[i] = await attachContentToMessage(msg, contentStore);
-        }
-      }
-    }
-  } catch (error) {
-    console.warn('批量加载会话完整内容失败，将返回未解引用的 messages:', error);
-  }
-
-  return results;
-}
-
-/**
- * 批量按 contentRefId 读取 messageContents.content。
- *
- * 主要用于“全文搜索”在需要检查 contentRef（图片/多模态消息）时，减少多次事务开销。
- *
- * @param {string[]} contentRefIds
- * @returns {Promise<Map<string, any>>} Map: contentRefId -> content
- */
-export async function loadMessageContentsByIds(contentRefIds) {
-  const idList = Array.isArray(contentRefIds) ? contentRefIds.filter(Boolean) : [];
-  if (idList.length === 0) return new Map();
-
-  const db = await openChatHistoryDB();
-  const results = await new Promise((resolve) => {
-    try {
-      const transaction = db.transaction('messageContents', 'readonly');
-      const store = transaction.objectStore('messageContents');
-
-      const tasks = idList.map((id) => new Promise((taskResolve) => {
-        try {
-          const request = store.get(id);
-          request.onsuccess = () => taskResolve({ id, record: request.result || null });
-          request.onerror = () => taskResolve({ id, record: null });
-        } catch (_) {
-          taskResolve({ id, record: null });
-        }
-      }));
-
-      Promise.all(tasks)
-        .then(resolve)
-        .catch(() => resolve([]));
-    } catch (_) {
-      resolve([]);
-    }
-  });
-
-  const map = new Map();
-  const list = Array.isArray(results) ? results : [];
-  for (const item of list) {
-    const id = item?.id;
-    const content = item?.record?.content;
-    if (typeof id !== 'string' || !id) continue;
-    if (content === undefined) continue;
-    map.set(id, content);
-  }
-  return map;
-}
-
-/**
- * 加载指定消息的内容
- * @param {string} contentRefId - 内容引用ID
- * @returns {Promise<any>} 消息内容
- */
-export async function loadMessageContent(contentRefId) {
-  const db = await openChatHistoryDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction('messageContents', 'readonly');
-    const store = transaction.objectStore('messageContents');
-    const request = store.get(contentRefId);
-    request.onsuccess = () => {
-      if (request.result) {
-        resolve(request.result.content);
-      } else {
-        reject(new Error(`找不到内容引用: ${contentRefId}`));
-      }
-    };
-    request.onerror = () => reject(request.error);
-  });
+  void loadFullContent;
+  return Array.isArray(conversations) ? conversations.filter(Boolean) : [];
 }
 
 /**
  * 释放指定会话的内存（兼容接口）。
  *
  * 说明：
- * - 分离存储已弃用，为避免重新生成 contentRef 导致数据不一致，这里不再做内容分离；
  * - 仅返回浅拷贝，保持调用端“不会直接修改原对象”的预期。
  *
  * @param {Object} conversation - 对话记录对象
@@ -962,68 +763,11 @@ export function releaseConversationMemory(conversation) {
 }
 
 /**
- * 扫描 messageContents 表，删除未被任何消息引用的内容，避免遗留的 base64 或孤儿记录撑爆存储
- * @returns {Promise<{ removed: number, total: number }>}
- */
-export async function purgeOrphanMessageContents() {
-  const db = await openChatHistoryDB();
-  const transaction = db.transaction(['conversations', 'messageContents'], 'readwrite');
-  const conversationStore = transaction.objectStore('conversations');
-  const contentStore = transaction.objectStore('messageContents');
-
-  // 收集所有会话中仍在使用的 contentRef ID
-  const usedRefs = new Set();
-  await new Promise((resolve, reject) => {
-    const request = conversationStore.openCursor();
-    request.onsuccess = (event) => {
-      const cursor = event.target.result;
-      if (cursor) {
-        const conv = cursor.value;
-        if (conv?.messages && Array.isArray(conv.messages)) {
-          conv.messages.forEach((msg) => {
-            if (msg?.contentRef) usedRefs.add(msg.contentRef);
-          });
-        }
-        cursor.continue();
-      } else {
-        resolve();
-      }
-    };
-    request.onerror = () => reject(request.error);
-  });
-
-  // 遍历 messageContents，删除不在引用集合中的记录
-  let removed = 0;
-  let total = 0;
-  await new Promise((resolve, reject) => {
-    const request = contentStore.openCursor();
-    request.onsuccess = (event) => {
-      const cursor = event.target.result;
-      if (cursor) {
-        total += 1;
-        const key = cursor.primaryKey;
-        if (!usedRefs.has(key)) {
-          cursor.delete();
-          removed += 1;
-        }
-        cursor.continue();
-      } else {
-        resolve();
-      }
-    };
-    request.onerror = () => reject(request.error);
-  });
-
-  return { removed, total };
-}
-
-/**
  * 获取数据库存储统计信息
  * @returns {Promise<Object>} 包含数据库统计信息的对象
  */
 export async function getDatabaseStats() {
   try {
-    const db = await openChatHistoryDB();
     const encoder = new TextEncoder();
     const calcJsonBytes = (value) => {
       if (value === null || value === undefined) return 0;
@@ -1155,15 +899,6 @@ export async function getDatabaseStats() {
     // 获取所有会话
     const conversations = await getAllConversations(false);
     
-    // 获取所有分离的消息内容
-    const contentRefs = await new Promise((resolve, reject) => {
-      const transaction = db.transaction('messageContents', 'readonly');
-      const store = transaction.objectStore('messageContents');
-      const request = store.getAll();
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    
     // 计算统计信息
     let totalMessages = 0;
     let totalImageMessages = 0;
@@ -1233,40 +968,6 @@ export async function getDatabaseStats() {
       }
     });
     
-    // 分析分离存储的内容
-    contentRefs.forEach(ref => {
-      if (ref.content) {
-        let refSize = 0;
-        if (typeof ref.content === 'string') {
-          const size = encoder.encode(ref.content).length;
-          totalTextSize += size;
-          refSize += size;
-        } else if (Array.isArray(ref.content)) {
-          ref.content.forEach(part => {
-            if (part.type === 'text' && part.text) {
-              const textSize = encoder.encode(part.text).length;
-              totalTextSize += textSize;
-              refSize += textSize;
-            } else if (part.type === 'image_url' && part.image_url) {
-              const sizes = measureImageUrlBytes(part.image_url);
-              if (sizes.hasImage) totalImageMessages++;
-              if (sizes.textSize) {
-                totalTextSize += sizes.textSize;
-                refSize += sizes.textSize;
-              }
-              if (sizes.imageSize) {
-                totalImageSize += sizes.imageSize;
-                refSize += sizes.imageSize;
-              }
-            }
-          });
-        }
-        if (refSize) {
-          largestMessage = Math.max(largestMessage, refSize);
-        }
-      }
-    });
-    
     // 生成域名 Top 10
     const topDomains = Array.from(domainCounts.entries())
       .sort((a,b)=>b[1]-a[1])
@@ -1302,7 +1003,6 @@ export async function getDatabaseStats() {
       conversationsCount,
       messagesCount: totalMessages,
       imageMessagesCount: totalImageMessages,
-      messageContentRefsCount: contentRefs.length,
       totalTextSize: totalTextSize,
       totalTextSizeFormatted: formatSize(totalTextSize),
       totalImageSize: totalImageSize,

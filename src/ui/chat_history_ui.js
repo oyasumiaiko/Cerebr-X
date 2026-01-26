@@ -13,10 +13,7 @@ import {
   deleteConversation, 
   getConversationById,
   getConversationsByIds,
-  loadMessageContent,
-  loadMessageContentsByIds,
-  getDatabaseStats,
-  purgeOrphanMessageContents
+  getDatabaseStats
 } from '../storage/indexeddb_helper.js';
 import { storageService } from '../utils/storage_service.js';
 import { extractThinkingFromText, mergeThoughts } from '../utils/thoughts_parser.js';
@@ -1556,8 +1553,8 @@ export function createChatHistoryUI(appContext) {
    *
    * 设计目标（关键性能点）：
    * - 不污染 UI 的会话缓存（loadedConversations），避免搜索过程导致缓存暴涨/刷屏日志；
-   * - 只读取 conversations 表（loadFullContent=false），避免引入 messageContents 的额外读取；
-   * - 仅扫描内联消息文本（contentRef 分离存储已合并，不再参与搜索）。
+   * - 只读取 conversations 表（loadFullContent=false），避免额外的读取开销；
+   * - 仅扫描内联消息文本。
    *
    * @param {string} conversationId
    * @param {{positiveLower:string[], negativeLower:string[], highlightLower:string[], hasPositive:boolean, hasNegative:boolean}} textPlan
@@ -1571,7 +1568,7 @@ export function createChatHistoryUI(appContext) {
 
     let conversation = null;
     try {
-      // 重要：这里显式禁止加载 messageContents，避免把图片等大对象拉进内存。
+      // 重要：这里显式禁止加载重资源内容，避免把图片等大对象拉进内存。
       conversation = await getConversationById(conversationId, false);
     } catch (error) {
       console.error(`搜索会话 ${conversationId} 失败:`, error);
@@ -4134,7 +4131,7 @@ export function createChatHistoryUI(appContext) {
         }
       } catch (_) {}
 
-      // 2) 内存没有则从 IndexedDB 取“轻量会话”（不解引用全部 contentRef）
+      // 2) 内存没有则从 IndexedDB 取“轻量会话”
       if (!messages) {
         try {
           const conv = await getConversationById(id, false);
@@ -4147,25 +4144,6 @@ export function createChatHistoryUI(appContext) {
       const { totalCount, selected, hasGap } = computeConversationPreviewMessageList(messages);
       if (selected.length === 0) return { totalCount, items: [] };
 
-      // 3) 只为“预览需要的消息”解引用 contentRef，避免全量加载造成卡顿
-      const contentRefIds = [];
-      for (const msg of selected) {
-        if (!msg) continue;
-        const hasInlineContent = msg.content !== undefined && msg.content !== null;
-        if (!hasInlineContent && typeof msg.contentRef === 'string' && msg.contentRef.trim()) {
-          contentRefIds.push(msg.contentRef.trim());
-        }
-      }
-
-      let contentMap = new Map();
-      if (contentRefIds.length > 0) {
-        try {
-          contentMap = await loadMessageContentsByIds(Array.from(new Set(contentRefIds)));
-        } catch (_) {
-          contentMap = new Map();
-        }
-      }
-
       const items = [];
       const firstTwo = selected.slice(0, Math.min(2, selected.length));
       const lastTwo = selected.slice(Math.max(0, selected.length - 2));
@@ -4173,8 +4151,6 @@ export function createChatHistoryUI(appContext) {
       const resolveContent = (msg) => {
         if (!msg) return '';
         if (msg.content !== undefined && msg.content !== null) return msg.content;
-        const ref = typeof msg.contentRef === 'string' ? msg.contentRef.trim() : '';
-        if (ref && contentMap.has(ref)) return contentMap.get(ref);
         return '';
       };
 
@@ -6279,10 +6255,6 @@ export function createChatHistoryUI(appContext) {
           <div class="db-stats-metric-label">最大消息</div>
         </div>
         <div class="db-stats-metric">
-          <div class="db-stats-metric-value">${stats.messageContentRefsCount}</div>
-          <div class="db-stats-metric-label">分离存储数</div>
-        </div>
-        <div class="db-stats-metric">
           <div class="db-stats-metric-value">${loadedConversations.size}</div>
           <div class="db-stats-metric-label">内存缓存数</div>
         </div>
@@ -7374,15 +7346,9 @@ export function createChatHistoryUI(appContext) {
             } else {
               next.content = textChunks.join('');
             }
-            if (next.contentRef) delete next.contentRef; // 去掉对已被剥离图片内容的引用
           } else if (typeof msg.content === 'string') {
             const cleaned = stripDataUrlsFromString(msg.content);
             next.content = cleaned.text;
-            if (!keepImageRefs && next.contentRef) delete next.contentRef;
-          } else if (!keepImageRefs && next.contentRef) {
-            // 仅有 contentRef 的场景直接去掉引用，避免恢复后指向不存在的图片数据
-            next.content = '';
-            delete next.contentRef;
           }
           return next;
         });
@@ -7428,7 +7394,6 @@ export function createChatHistoryUI(appContext) {
               }
             }
             next.content = parts.length > 0 ? parts : '';
-            if (next.contentRef) delete next.contentRef;
           } else if (typeof msg.content === 'string') {
             const cleaned = stripDataUrlsFromString(msg.content);
             next.content = cleaned.text;
@@ -8207,9 +8172,6 @@ export function createChatHistoryUI(appContext) {
       failed += res.failed;
     }
 
-    // 移除已无用的内容引用，避免保留旧的 base64 内容
-    if (changed && msg.contentRef) delete msg.contentRef;
-
     return { changed, found, converted, failed };
   }
 
@@ -8423,26 +8385,18 @@ export function createChatHistoryUI(appContext) {
    * 全量清理历史会话中的图片 base64/dataURL：
    * - 逐条会话迁移图片到本地文件（下载目录）并替换引用；
    * - 清理 image_url.url 冗余字段；
-   * - 最后清除孤儿 messageContents，避免遗留 base64 继续占用空间。
+   * - 不再包含分离存储清理步骤。
    *
    * 注意：此操作会触发大量本地文件写入，耗时取决于图片数量与磁盘性能。
    */
   async function cleanAllImageDataUrlsInDb() {
     await loadDownloadRoot();
-    const sp = utils.createStepProgress({ steps: ['加载会话', '处理图片', '清理残留', '完成'], type: 'info' });
+    const sp = utils.createStepProgress({ steps: ['加载会话', '处理图片', '完成'], type: 'info' });
     sp.setStep(0);
 
     const metas = await getAllConversationMetadata();
     sp.next('处理图片');
     const result = await cleanImagesByMetas(metas, sp, { progressLabel: '处理图片', cleanImageUrls: true });
-
-    sp.next('清理残留');
-    let orphan = { removed: 0, total: 0 };
-    try {
-      orphan = await purgeOrphanImageContents();
-    } catch (e) {
-      console.warn('清理孤儿内容失败:', e);
-    }
 
     sp.complete('完成', true);
     invalidateMetadataCache();
@@ -8453,9 +8407,7 @@ export function createChatHistoryUI(appContext) {
       convertedImages: result.convertedImages,
       failedConversions: result.failedConversions,
       removedUrl: result.removedUrl,
-      addedPath: result.addedPath,
-      orphanRemoved: orphan.removed,
-      orphanTotal: orphan.total
+      addedPath: result.addedPath
     };
   }
 
@@ -9447,82 +9399,6 @@ export function createChatHistoryUI(appContext) {
   }
 
   /**
-   * 清理 IndexedDB 中孤立的 messageContents 记录，避免无引用的图片残留占用空间
-   * @returns {Promise<{removed:number,total:number}>}
-   */
-  async function purgeOrphanImageContents() {
-    return await purgeOrphanMessageContents();
-  }
-
-  /**
-   * 合并分离存储：将 messageContents 中的 contentRef 物化回会话消息并清空分离表。
-   *
-   * 说明：
-   * - 分离存储最初用于隔离 dataURL，现已禁用 dataURL，因此不再需要；
-   * - 该操作会扫描全部会话，移除 contentRef，随后清理 messageContents；
-   * - 若某条消息缺失 content，会计入 missingContent（表示该 contentRef 已无法解引用）。
-   */
-  async function mergeSeparatedMessageContentsInDb() {
-    const sp = utils.createStepProgress({ steps: ['加载会话', '物化内容', '清理分离存储', '完成'], type: 'info' });
-    sp.setStep(0);
-
-    const metas = await getAllConversationMetadata();
-    const total = metas.length || 1;
-    let updatedConversations = 0;
-    let updatedMessages = 0;
-    let missingContent = 0;
-
-    sp.next('物化内容');
-    for (let i = 0; i < metas.length; i++) {
-      const conv = await getConversationById(metas[i].id, true);
-      let convChanged = false;
-
-      if (conv && Array.isArray(conv.messages)) {
-        for (const msg of conv.messages) {
-          if (!msg?.contentRef) continue;
-          if (msg.content === undefined || msg.content === null) {
-            missingContent += 1;
-          }
-          delete msg.contentRef;
-          convChanged = true;
-          updatedMessages += 1;
-        }
-      }
-
-      if (convChanged && conv) {
-        applyConversationMessageStats(conv);
-        await putConversation(conv);
-        updateConversationInCache(conv);
-        if (activeConversation?.id === conv.id) activeConversation = conv;
-        updatedConversations += 1;
-      }
-
-      try {
-        sp?.updateSub?.(i + 1, total, `物化内容 (${i + 1}/${total})`);
-      } catch (_) {}
-    }
-
-    sp.next('清理分离存储');
-    let orphanResult = { removed: 0, total: 0 };
-    try {
-      orphanResult = await purgeOrphanImageContents();
-    } catch (e) {
-      console.warn('清理分离存储失败:', e);
-    }
-
-    sp.complete('完成', true);
-    invalidateMetadataCache();
-    return {
-      scannedConversations: metas.length,
-      updatedConversations,
-      updatedMessages,
-      missingContent,
-      orphanRemoved: orphanResult.removed,
-      orphanTotal: orphanResult.total
-    };
-  }
-
-  /**
    * 工具：读取备份文件文本，支持 .json 及 .json.gz
    * @param {File} file
    * @returns {Promise<string>}
@@ -9685,10 +9561,6 @@ export function createChatHistoryUI(appContext) {
     cleanupBtn.textContent = '清理图片存储（迁移 base64）';
     cleanupButtons.appendChild(cleanupBtn);
 
-    const mergeSeparatedBtn = document.createElement('button');
-    mergeSeparatedBtn.className = 'backup-button';
-    mergeSeparatedBtn.textContent = '合并分离存储（移除 contentRef）';
-    cleanupButtons.appendChild(mergeSeparatedBtn);
 
     const compactMetaBtn = document.createElement('button');
     compactMetaBtn.className = 'backup-button';
@@ -9702,10 +9574,6 @@ export function createChatHistoryUI(appContext) {
     cleanupHint.textContent = '将历史会话中的 dataURL/base64 图片迁移到本地文件并清理残留，耗时较长。';
     cleanupSection.appendChild(cleanupHint);
 
-    const mergeSeparatedHint = document.createElement('div');
-    mergeSeparatedHint.className = 'backup-panel-hint';
-    mergeSeparatedHint.textContent = '将 messageContents 合并回会话并清空分离存储；后续不再使用分离存储。';
-    cleanupSection.appendChild(mergeSeparatedHint);
 
     const compactMetaHint = document.createElement('div');
     compactMetaHint.className = 'backup-panel-hint';
@@ -9984,8 +9852,7 @@ export function createChatHistoryUI(appContext) {
           `更新 ${result.updatedConversations} 会话`,
           `发现 base64 ${result.base64Found}`,
           `迁移 ${result.convertedImages}`,
-          `失败 ${result.failedConversions}`,
-          `孤儿清理 ${result.orphanRemoved}/${result.orphanTotal}`
+          `失败 ${result.failedConversions}`
         ].join('；');
         showNotification?.({
           message: '图片清理完成',
@@ -10004,54 +9871,6 @@ export function createChatHistoryUI(appContext) {
       } finally {
         cleanupBtn.disabled = false;
         cleanupBtn.textContent = originalText;
-      }
-    });
-
-    mergeSeparatedBtn.addEventListener('click', async () => {
-      const confirmFn = appContext?.utils?.showConfirm;
-      let confirmed = true;
-      if (typeof confirmFn === 'function') {
-        confirmed = await confirmFn({
-          message: '确认合并分离存储？',
-          description: '该操作会扫描全部会话，移除 contentRef 并清空 messageContents；执行后不再使用分离存储。',
-          confirmText: '开始合并',
-          cancelText: '取消',
-          type: 'warning'
-        });
-      } else {
-        confirmed = window.confirm('将扫描全部会话并合并分离存储，执行后不再使用 contentRef，是否继续？');
-      }
-      if (!confirmed) return;
-
-      const originalText = mergeSeparatedBtn.textContent;
-      mergeSeparatedBtn.disabled = true;
-      mergeSeparatedBtn.textContent = '合并中...';
-      try {
-        const result = await mergeSeparatedMessageContentsInDb();
-        const summary = [
-          `扫描 ${result.scannedConversations} 会话`,
-          `更新 ${result.updatedConversations} 会话`,
-          `移除引用 ${result.updatedMessages}`,
-          `缺失内容 ${result.missingContent}`,
-          `分离清理 ${result.orphanRemoved}/${result.orphanTotal}`
-        ].join('；');
-        showNotification?.({
-          message: '分离存储合并完成',
-          description: summary,
-          type: result.missingContent > 0 ? 'warning' : 'success',
-          duration: 4200
-        });
-      } catch (error) {
-        console.error('合并分离存储失败:', error);
-        showNotification?.({
-          message: '合并分离存储失败',
-          description: String(error?.message || error),
-          type: 'error',
-          duration: 3200
-        });
-      } finally {
-        mergeSeparatedBtn.disabled = false;
-        mergeSeparatedBtn.textContent = originalText;
       }
     });
 
@@ -10391,11 +10210,7 @@ export function createChatHistoryUI(appContext) {
         currentNode: null
       };
 
-      // 说明：
-      // - 这里必须“物化(materialize)”每条消息的 content，禁止把旧会话的 contentRef 直接带进新会话；
-      // - 否则新会话会与旧会话共享同一个 messageContents 记录：
-      //   1) 一旦删除分支会话，deleteConversation 会把共享 contentRef 删掉，导致原会话图片丢失；
-      //   2) 若分支消息仅有 contentRef 而无 content，putConversation 可能误判并清理引用，进一步造成丢失。
+      // 说明：避免复用旧节点引用，确保分支会话内容独立。
       const cloneSafely = (obj) => {
         try { return structuredClone(obj); } catch (_) {}
         try { return JSON.parse(JSON.stringify(obj)); } catch (_) {}
@@ -10406,15 +10221,6 @@ export function createChatHistoryUI(appContext) {
         if (!msg) return '';
         if (msg.content !== undefined && msg.content !== null) return cloneSafely(msg.content);
         if (msg.content === null) return '';
-        if (msg.contentRef) {
-          try {
-            const loaded = await loadMessageContent(msg.contentRef);
-            return cloneSafely(loaded);
-          } catch (e) {
-            console.warn('创建分支对话：读取消息内容引用失败，将回退为空内容', msg.contentRef, e);
-            return '';
-          }
-        }
         return '';
       };
 
@@ -10432,9 +10238,6 @@ export function createChatHistoryUI(appContext) {
           children: [],
           content: normalizeStoredMessageContent(resolvedContent)
         };
-        // 永远不要复用旧会话的 contentRef（避免跨会话共享 messageContents 记录）
-        if (newMsg.contentRef) delete newMsg.contentRef;
-        
         if (previousId) {
           const parentMsg = newChatHistory.messages.find(m => m.id === previousId);
           if (parentMsg) {
@@ -10546,8 +10349,6 @@ export function createChatHistoryUI(appContext) {
     createForkConversation,
     restartAutoBackupScheduler,
     repairRecentImages,
-    purgeOrphanImageContents,
-    mergeSeparatedMessageContentsInDb,
     migrateImagePathsToRelative,
     resaveImagesWithNewScheme,
     setDownloadRootManual,

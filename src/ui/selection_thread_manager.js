@@ -1801,9 +1801,6 @@ export function createSelectionThreadManager(appContext) {
     );
     if (!node) return null;
     copyThreadMessageFields(sourceNode, node);
-    if (sourceNode.contentRef) {
-      node.contentRef = sourceNode.contentRef;
-    }
     node.threadId = threadMeta.threadId;
     node.threadAnchorId = threadMeta.anchorMessageId;
     node.threadSelectionText = threadMeta.selectionText || '';
