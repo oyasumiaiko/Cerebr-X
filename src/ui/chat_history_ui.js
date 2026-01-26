@@ -4768,16 +4768,67 @@ export function createChatHistoryUI(appContext) {
     }
   }
 
+  function resolveThreadInfoFromMessage(conversation, messageId) {
+    if (!conversation || !messageId) return null;
+    const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+    if (!messages.length) return null;
+    const target = messages.find(msg => msg?.id === messageId) || null;
+    if (!target) return null;
+
+    const threadIdRaw = typeof target.threadId === 'string' ? target.threadId.trim() : '';
+    const rootId = typeof target.threadRootId === 'string' ? target.threadRootId.trim() : '';
+    const anchorId = typeof target.threadAnchorId === 'string' ? target.threadAnchorId.trim() : '';
+    const isThreadCandidate = !!(threadIdRaw || target.threadHiddenSelection || rootId || anchorId);
+    if (!isThreadCandidate) return null;
+
+    const resolveFromAnnotations = (annotations, rootMessageId) => {
+      if (!Array.isArray(annotations) || !annotations.length) return '';
+      if (rootMessageId) {
+        const matched = annotations.find(item => item?.rootMessageId === rootMessageId);
+        if (matched?.id) return matched.id;
+      }
+      return '';
+    };
+
+    let threadId = threadIdRaw;
+    if (!threadId && anchorId) {
+      const anchor = messages.find(msg => msg?.id === anchorId) || null;
+      threadId = resolveFromAnnotations(anchor?.threadAnnotations, rootId);
+    }
+    if (!threadId && rootId) {
+      for (const msg of messages) {
+        threadId = resolveFromAnnotations(msg?.threadAnnotations, rootId);
+        if (threadId) break;
+      }
+    }
+    if (!threadId) return null;
+
+    let focusMessageId = messageId;
+    if (target.threadHiddenSelection) {
+      const fallback = messages.find(msg => msg?.threadId === threadId && !msg?.threadHiddenSelection) || null;
+      if (fallback?.id) focusMessageId = fallback.id;
+    }
+
+    return { threadId, focusMessageId };
+  }
+
   async function openConversationFromSearchResult(conversationId, messageId) {
     hideChatHistoryPreviewTooltip();
     const conversation = await getConversationFromCacheOrLoad(conversationId);
     if (!conversation) return;
+    const threadInfo = messageId ? resolveThreadInfoFromMessage(conversation, messageId) : null;
     await loadConversationIntoChat(conversation, {
       skipMessageAnimation: !!messageId,
       skipScrollToBottom: !!messageId
     });
     if (messageId) {
-      highlightMessageInChat(messageId);
+      if (threadInfo?.threadId && services.selectionThreadManager?.enterThread) {
+        await services.selectionThreadManager.enterThread(threadInfo.threadId, {
+          focusMessageId: threadInfo.focusMessageId || messageId
+        });
+      } else {
+        highlightMessageInChat(messageId);
+      }
     }
   }
 
