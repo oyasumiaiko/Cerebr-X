@@ -106,7 +106,8 @@ export function createChatHistoryUI(appContext) {
     selectMode: false,
     selectedKeys: new Set(),
     thumbSize: 92,
-    layoutMode: 'grid'
+    layoutMode: 'grid',
+    paused: false // 非活动标签时暂停相册加载，避免后台持续扫描
   };
   const GALLERY_RENDER_BATCH_SIZE = 120;
   const GALLERY_META_PAGE_SIZE = 80;
@@ -210,6 +211,7 @@ export function createChatHistoryUI(appContext) {
     galleryCache.runId = null;
     galleryCache.scanState = null;
     galleryCache.inactiveAt = 0;
+    galleryCache.paused = false;
     galleryCache.scrollTop = 0;
     galleryCache.scrollRestorePending = false;
     galleryCache.selectMode = false;
@@ -385,6 +387,7 @@ export function createChatHistoryUI(appContext) {
   }
 
   function markGalleryInactive(panel) {
+    galleryCache.paused = true;
     const galleryContent = panel?.querySelector('.history-tab-content[data-tab="gallery"]');
     if (galleryContent) {
       galleryCache.scrollTop = galleryContent.scrollTop;
@@ -397,6 +400,7 @@ export function createChatHistoryUI(appContext) {
   function markGalleryActive(panel, container) {
     cancelGalleryCleanupTimer();
     galleryCache.inactiveAt = 0;
+    galleryCache.paused = false;
     if (container) {
       setupGalleryScrollTracking(container);
       if (galleryCache.scrollTop > 0) {
@@ -404,6 +408,7 @@ export function createChatHistoryUI(appContext) {
         requestAnimationFrame(() => restoreGalleryScrollIfNeeded(container));
       }
     }
+    scheduleGalleryThumbDrain();
   }
 
   function scheduleGalleryThumbDrain() {
@@ -421,6 +426,7 @@ export function createChatHistoryUI(appContext) {
   }
 
   function drainGalleryThumbQueue() {
+    if (galleryCache.paused) return;
     while (galleryThumbQueue.active < GALLERY_THUMB_CONCURRENCY && galleryThumbQueue.pending.length > 0) {
       const item = galleryThumbQueue.pending.shift();
       if (!item) break;
@@ -5584,6 +5590,11 @@ export function createChatHistoryUI(appContext) {
     const renderPromise = (async () => {
       const runId = createRunId();
       container.dataset.galleryRunId = runId;
+      const isGalleryActive = () => {
+        const panel = container.closest('#chat-history-panel');
+        return !!(panel && panel.classList.contains('visible') && container.classList.contains('active'));
+      };
+      const shouldCancel = () => container.dataset.galleryRunId !== runId || !isGalleryActive();
       revokeGalleryThumbUrls(container);
       container.innerHTML = '';
 
@@ -6078,6 +6089,7 @@ export function createChatHistoryUI(appContext) {
         renderScheduled = true;
         requestAnimationFrame(() => {
           renderScheduled = false;
+          if (shouldCancel()) return;
           appendBatch();
           flushDupBadgeUpdates();
           restoreGalleryScrollIfNeeded(container);
@@ -6101,7 +6113,6 @@ export function createChatHistoryUI(appContext) {
       updateStatus();
       scheduleAppend();
 
-      const shouldCancel = () => container.dataset.galleryRunId !== runId;
       await loadGalleryImages(forceRefresh, {
         runId,
         shouldCancel,
@@ -6725,11 +6736,6 @@ export function createChatHistoryUI(appContext) {
       historyTab.textContent = '聊天记录';
       historyTab.dataset.tab = 'history';
 
-      const settingsTab = document.createElement('div');
-      settingsTab.className = 'history-tab';
-      settingsTab.textContent = '偏好设置';
-      settingsTab.dataset.tab = 'settings';
-
       const promptTab = document.createElement('div');
       promptTab.className = 'history-tab';
       promptTab.textContent = '提示词设置';
@@ -6744,6 +6750,11 @@ export function createChatHistoryUI(appContext) {
       galleryTab.className = 'history-tab';
       galleryTab.textContent = '图片相册';
       galleryTab.dataset.tab = 'gallery';
+
+      const settingsTab = document.createElement('div');
+      settingsTab.className = 'history-tab';
+      settingsTab.textContent = '偏好设置';
+      settingsTab.dataset.tab = 'settings';
       
       const statsTab = document.createElement('div');
       statsTab.className = 'history-tab';
@@ -6756,10 +6767,10 @@ export function createChatHistoryUI(appContext) {
       backupTab.dataset.tab = 'backup-settings';
       
       tabBar.appendChild(historyTab);
-      tabBar.appendChild(settingsTab);
       tabBar.appendChild(promptTab);
       tabBar.appendChild(apiTab);
       tabBar.appendChild(galleryTab);
+      tabBar.appendChild(settingsTab);
       tabBar.appendChild(statsTab);
       tabBar.appendChild(backupTab);
       panel.appendChild(tabBar);
@@ -6947,10 +6958,10 @@ export function createChatHistoryUI(appContext) {
 
       // 添加标签内容到容器
       tabContents.appendChild(historyContent);
-      tabContents.appendChild(settingsContent);
       if (promptSettingsContent) tabContents.appendChild(promptSettingsContent);
       if (apiSettingsContent) tabContents.appendChild(apiSettingsContent);
       tabContents.appendChild(galleryContent);
+      tabContents.appendChild(settingsContent);
       tabContents.appendChild(statsContent);
       tabContents.appendChild(backupSettingsContent);
       panel.appendChild(tabContents);
