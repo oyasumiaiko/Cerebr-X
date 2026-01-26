@@ -1398,13 +1398,13 @@ export function createChatHistoryUI(appContext) {
    *
    * 返回值约定：
    * - matched=true：matchInfo 已包含 excerpts，可直接使用；
-   * - matched=false：若 pendingContentRefs 非空，则说明需要进一步解引用 messageContents 才能保证搜索正确性。
+   * - matched=false：表示内联文本未命中。
    *
    * @param {Object} conversation
    * @param {{positiveLower:string[], negativeLower:string[], highlightLower:string[], hasPositive:boolean, hasNegative:boolean}} textPlan
    * @param {string[]|null} remainingTerms - 元数据命中后仍需匹配的正向关键词（小写）
    * @param {() => boolean} isCancelled
-   * @returns {{ cancelled: boolean, matched: boolean, blocked: boolean, matchInfo: {messageId:string|null, excerpts:Array<Object>, reason:string}, pendingContentRefs: Array<{messageId:string|null, contentRef:string}>, remainingTerms: string[] }}
+   * @returns {{ cancelled: boolean, matched: boolean, blocked: boolean, matchInfo: {messageId:string|null, excerpts:Array<Object>, reason:string}, remainingTerms: string[] }}
    */
   function scanConversationInlineMessagesForMatch(conversation, textPlan, remainingTerms, isCancelled) {
     const empty = {
@@ -1412,14 +1412,12 @@ export function createChatHistoryUI(appContext) {
       matched: false,
       blocked: false,
       matchInfo: { messageId: null, excerpts: [], reason: 'message' },
-      pendingContentRefs: [],
       remainingTerms: []
     };
     if (!conversation || !Array.isArray(conversation.messages)) return empty;
 
     const matchInfo = { messageId: null, excerpts: [], reason: 'message' };
     const MAX_EXCERPTS = 20;
-    const pendingContentRefs = [];
     const highlightTerms = Array.isArray(textPlan?.highlightLower) ? textPlan.highlightLower : [];
     const negativeTerms = Array.isArray(textPlan?.negativeLower) ? textPlan.negativeLower : [];
     const hasNegative = !!textPlan?.hasNegative;
@@ -1473,9 +1471,6 @@ export function createChatHistoryUI(appContext) {
           continue;
         }
 
-        if (message.contentRef) {
-          pendingContentRefs.push({ messageId: message.id || null, contentRef: message.contentRef });
-        }
       }
 
       const matched = !!matchInfo.messageId;
@@ -1484,7 +1479,6 @@ export function createChatHistoryUI(appContext) {
         matched,
         blocked: false,
         matchInfo,
-        pendingContentRefs,
         remainingTerms: []
       };
     }
@@ -1502,16 +1496,15 @@ export function createChatHistoryUI(appContext) {
         if (hasNegative) {
           for (const term of negativeTerms) {
             if (term && lowerText.includes(term)) {
-              return {
-                cancelled: false,
-                matched: false,
-                blocked: true,
-                matchInfo,
-                pendingContentRefs: [],
-                remainingTerms: Array.from(remainingSet)
-              };
-            }
+            return {
+              cancelled: false,
+              matched: false,
+              blocked: true,
+              matchInfo,
+              remainingTerms: Array.from(remainingSet)
+            };
           }
+        }
         }
 
         let matchedInMessage = false;
@@ -1545,149 +1538,17 @@ export function createChatHistoryUI(appContext) {
         continue;
       }
 
-      // contentRef：大型内容（例如图片消息）会被单独存入 messageContents。
-      if (message.contentRef) {
-        pendingContentRefs.push({ messageId: message.id || null, contentRef: message.contentRef });
-      }
     }
 
-    const needsContentScan = pendingContentRefs.length > 0 && (remainingSet.size > 0 || hasNegative);
-    const matched = remainingSet.size === 0 && !needsContentScan;
+    const matched = remainingSet.size === 0;
 
     return {
       cancelled: false,
       matched,
       blocked: false,
       matchInfo,
-      pendingContentRefs,
       remainingTerms: Array.from(remainingSet)
     };
-  }
-
-  /**
-   * 全文搜索（阶段2）：对 pendingContentRefs 执行解引用并扫描文本。
-   *
-   * 注意：该函数不做“是否需要扫描”的判断；调用方应当只在阶段1未命中时调用。
-   *
-   * @param {Array<{messageId:string|null, contentRef:string}>} pendingContentRefs
-   * @param {Map<string, any>} contentMap - contentRefId -> content
-   * @param {{positiveLower:string[], negativeLower:string[], highlightLower:string[], hasPositive:boolean, hasNegative:boolean}} textPlan
-   * @param {string[]|null} remainingTerms - 元数据命中后仍需匹配的正向关键词（小写）
-   * @param {() => boolean} isCancelled
-   * @param {{messageId:string|null, excerpts:Array<Object>, reason:string}} matchInfo - 会被原地追加 excerpts/messageId
-   * @returns {{ cancelled: boolean, matched: boolean, blocked: boolean, matchInfo: {messageId:string|null, excerpts:Array<Object>, reason:string}, remainingTerms: string[] }}
-   */
-  function scanConversationContentRefsForMatch(pendingContentRefs, contentMap, textPlan, remainingTerms, isCancelled, matchInfo) {
-    const MAX_EXCERPTS = 20;
-    const refs = Array.isArray(pendingContentRefs) ? pendingContentRefs : [];
-    const map = contentMap instanceof Map ? contentMap : new Map();
-    const info = matchInfo && typeof matchInfo === 'object'
-      ? matchInfo
-      : { messageId: null, excerpts: [], reason: 'message' };
-    const highlightTerms = Array.isArray(textPlan?.highlightLower) ? textPlan.highlightLower : [];
-    const negativeTerms = Array.isArray(textPlan?.negativeLower) ? textPlan.negativeLower : [];
-    const hasNegative = !!textPlan?.hasNegative;
-
-    const scope = resolveSearchScope(textPlan);
-    if (scope === 'message') {
-      const positiveTerms = Array.isArray(textPlan?.positiveLower) ? textPlan.positiveLower : [];
-      const hasPositive = positiveTerms.length > 0;
-
-      for (const ref of refs) {
-        if (isCancelled()) return { cancelled: true, matched: false, blocked: false, matchInfo: info, remainingTerms: [] };
-        if (!ref?.contentRef) continue;
-
-        const content = map.get(ref.contentRef);
-        if (content == null) continue;
-
-        const plainText = extractPlainTextFromMessageContent(content);
-        if (!plainText) continue;
-        const lowerText = plainText.toLowerCase();
-
-        if (hasNegative) {
-          let hasNegativeTerm = false;
-          for (const term of negativeTerms) {
-            if (term && lowerText.includes(term)) {
-              hasNegativeTerm = true;
-              break;
-            }
-          }
-          if (hasNegativeTerm) continue;
-        }
-
-        if (hasPositive) {
-          let matchedInMessage = true;
-          for (const term of positiveTerms) {
-            if (term && !lowerText.includes(term)) {
-              matchedInMessage = false;
-              break;
-            }
-          }
-          if (matchedInMessage) {
-            if (!info.messageId && ref.messageId) info.messageId = ref.messageId;
-            if (highlightTerms.length && info.excerpts.length < MAX_EXCERPTS) {
-              const excerpt = buildExcerptSegments(plainText, highlightTerms);
-              if (excerpt) {
-                excerpt.messageId = ref.messageId || null;
-                info.excerpts.push(excerpt);
-              }
-            }
-            if (info.excerpts.length >= MAX_EXCERPTS) break;
-          }
-        }
-      }
-
-      const matched = !!info.messageId;
-      return { cancelled: false, matched, blocked: false, matchInfo: info, remainingTerms: [] };
-    }
-
-    const remainingSet = new Set(Array.isArray(remainingTerms) ? remainingTerms : (textPlan?.positiveLower || []));
-
-    for (const ref of refs) {
-      if (isCancelled()) return { cancelled: true, matched: false, blocked: false, matchInfo: info, remainingTerms: Array.from(remainingSet) };
-      if (!ref?.contentRef) continue;
-
-      const content = map.get(ref.contentRef);
-      if (content == null) continue;
-
-      const plainText = extractPlainTextFromMessageContent(content);
-      if (!plainText) continue;
-      const lowerText = plainText.toLowerCase();
-
-      if (hasNegative) {
-        for (const term of negativeTerms) {
-          if (term && lowerText.includes(term)) {
-            return { cancelled: false, matched: false, blocked: true, matchInfo: info, remainingTerms: Array.from(remainingSet) };
-          }
-        }
-      }
-
-      let matchedInMessage = false;
-      if (remainingSet.size > 0) {
-        for (const term of Array.from(remainingSet)) {
-          if (term && lowerText.includes(term)) {
-            remainingSet.delete(term);
-            matchedInMessage = true;
-          }
-        }
-      }
-
-      if (matchedInMessage && !info.messageId && ref.messageId) info.messageId = ref.messageId;
-      if (highlightTerms.length && info.excerpts.length < MAX_EXCERPTS) {
-        const hasHighlightTerm = highlightTerms.some(term => term && lowerText.includes(term));
-        if (hasHighlightTerm) {
-          const excerpt = buildExcerptSegments(plainText, highlightTerms);
-          if (excerpt) {
-            excerpt.messageId = ref.messageId || null;
-            info.excerpts.push(excerpt);
-          }
-        }
-      }
-      if (!hasNegative && remainingSet.size === 0 && info.excerpts.length >= MAX_EXCERPTS) break;
-    }
-
-    const matched = remainingSet.size === 0;
-    return { cancelled: false, matched, blocked: false, matchInfo: info, remainingTerms: Array.from(remainingSet) };
   }
 
   /**
@@ -1695,8 +1556,8 @@ export function createChatHistoryUI(appContext) {
    *
    * 设计目标（关键性能点）：
    * - 不污染 UI 的会话缓存（loadedConversations），避免搜索过程导致缓存暴涨/刷屏日志；
-   * - 优先只读取 conversations 表（loadFullContent=false），避免不必要地解引用 messageContents（图像等大对象）；
-   * - 仅当会话在“内联消息文本”中未命中，才按需解引用 contentRef（保证搜索正确性）。
+   * - 只读取 conversations 表（loadFullContent=false），避免引入 messageContents 的额外读取；
+   * - 仅扫描内联消息文本（contentRef 分离存储已合并，不再参与搜索）。
    *
    * @param {string} conversationId
    * @param {{positiveLower:string[], negativeLower:string[], highlightLower:string[], hasPositive:boolean, hasNegative:boolean}} textPlan
@@ -1721,7 +1582,7 @@ export function createChatHistoryUI(appContext) {
     const isCancelled = createSearchCancelledChecker(panel, runId);
     if (isCancelled()) return null;
 
-    // 阶段1：扫描 conversations 记录内的消息文本（不解引用 contentRef）
+    // 阶段1：扫描 conversations 记录内的消息文本
     const positiveTerms = Array.isArray(remainingTerms)
       ? remainingTerms
       : (Array.isArray(textPlan?.positiveLower) ? textPlan.positiveLower : []);
@@ -1729,31 +1590,7 @@ export function createChatHistoryUI(appContext) {
     if (inlineScan.cancelled) return null;
     if (inlineScan.blocked) return null;
     if (inlineScan.matched) return inlineScan.matchInfo;
-
-    // 阶段2：仅在阶段1未命中时，按需解引用 contentRef（批量读取，避免多次事务）
-    const pendingRefs = Array.isArray(inlineScan.pendingContentRefs) ? inlineScan.pendingContentRefs : [];
-    if (pendingRefs.length === 0) return null;
-
-    const contentRefIds = pendingRefs.map((r) => r?.contentRef).filter(Boolean);
-    let contentMap = new Map();
-    try {
-      contentMap = await loadMessageContentsByIds(contentRefIds);
-    } catch (_) {
-      // contentRef 缺失/读取失败时不阻断整个搜索流程，直接按“未命中”处理。
-      contentMap = new Map();
-    }
-
-    const refScan = scanConversationContentRefsForMatch(
-      pendingRefs,
-      contentMap,
-      textPlan,
-      inlineScan.remainingTerms,
-      isCancelled,
-      inlineScan.matchInfo
-    );
-    if (refScan.cancelled) return null;
-    if (refScan.blocked) return null;
-    return refScan.matched ? refScan.matchInfo : null;
+    return null;
   }
 
   function escapeRegExp(rawValue) {
@@ -3767,10 +3604,6 @@ export function createChatHistoryUI(appContext) {
                 if (conv?.id) conversationById.set(conv.id, conv);
               }
 
-              // 2.1 先扫内联 messages；必要时收集 contentRef，后续批量解引用
-              const pendingRefByConversationId = new Map();
-              const pendingRefIdSet = new Set();
-
               for (const item of batchToScan) {
                 if (isCancelled()) {
                   cancelled = true;
@@ -3803,23 +3636,10 @@ export function createChatHistoryUI(appContext) {
                 if (inlineScan.matched) {
                   matchInfoMap.set(item.meta.id, inlineScan.matchInfo);
                   matchedEntries.push({ index: item.index, data: item.meta });
-                  processedCount++;
-                  updateProgress();
-                } else if (Array.isArray(inlineScan.pendingContentRefs) && inlineScan.pendingContentRefs.length > 0) {
-                  pendingRefByConversationId.set(item.meta.id, {
-                    index: item.index,
-                    meta: item.meta,
-                    matchInfo: inlineScan.matchInfo,
-                    pendingRefs: inlineScan.pendingContentRefs,
-                    remainingTerms: inlineScan.remainingTerms
-                  });
-                  inlineScan.pendingContentRefs.forEach((ref) => {
-                    if (ref?.contentRef) pendingRefIdSet.add(ref.contentRef);
-                  });
-                } else {
-                  processedCount++;
-                  updateProgress();
                 }
+
+                processedCount++;
+                updateProgress();
 
                 // 让出主线程给 UI（进度条/滚动/输入），避免长时间占用导致卡顿。
                 const now = performance.now();
@@ -3830,64 +3650,6 @@ export function createChatHistoryUI(appContext) {
               }
 
               if (cancelled) break;
-
-              // 2.2 仍未命中：批量解引用 messageContents 并扫描文本（图片/多模态消息）
-              if (pendingRefByConversationId.size > 0 && pendingRefIdSet.size > 0) {
-                let contentMap = new Map();
-                try {
-                  contentMap = await loadMessageContentsByIds(Array.from(pendingRefIdSet));
-                } catch (_) {
-                  contentMap = new Map();
-                }
-
-                if (isCancelled()) {
-                  cancelled = true;
-                  break;
-                }
-
-                for (const [conversationId, payload] of pendingRefByConversationId.entries()) {
-                  if (isCancelled()) {
-                    cancelled = true;
-                    break;
-                  }
-
-                  const refScan = scanConversationContentRefsForMatch(
-                    payload.pendingRefs,
-                    contentMap,
-                    textPlan,
-                    payload.remainingTerms,
-                    isCancelled,
-                    payload.matchInfo
-                  );
-                  if (refScan.cancelled) {
-                    cancelled = true;
-                    break;
-                  }
-                  if (refScan.blocked) {
-                    processedCount++;
-                    updateProgress();
-                    continue;
-                  }
-
-                  if (refScan.matched) {
-                    matchInfoMap.set(conversationId, refScan.matchInfo);
-                    matchedEntries.push({ index: payload.index, data: payload.meta });
-                  }
-
-                  processedCount++;
-                  updateProgress();
-
-                  const now = performance.now();
-                  if (now - lastYieldTime >= 16) {
-                    lastYieldTime = now;
-                    await new Promise(resolve => setTimeout(resolve, 0));
-                  }
-                }
-              } else if (pendingRefByConversationId.size > 0) {
-                // 无法解引用（极少数异常情况），也要推进进度，避免进度条卡死。
-                processedCount += pendingRefByConversationId.size;
-                updateProgress(true);
-              }
             }
 
             // 让出主线程给 UI（进度条/滚动/输入），避免长时间占用导致卡顿。
