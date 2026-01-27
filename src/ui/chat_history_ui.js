@@ -1032,8 +1032,8 @@ export function createChatHistoryUI(appContext) {
   contain-intrinsic-size: 1000px 600px;
 }
 .skeleton-item {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-color, #2a2a2a);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--cerebr-border-color);
   animation: skeletonPulse 1.2s ease-in-out infinite;
 }
 .skeleton-title, .skeleton-sub {
@@ -1041,8 +1041,8 @@ export function createChatHistoryUI(appContext) {
   background-size: 400% 100%;
   border-radius: 6px;
 }
-.skeleton-title { height: 14px; width: 70%; margin-bottom: 8px; }
-.skeleton-sub { height: 10px; width: 45%; }
+.skeleton-title { height: 12px; width: 62%; margin-bottom: 6px; }
+.skeleton-sub { height: 9px; width: 38%; }
 @keyframes skeletonPulse {
   0% { opacity: .7 }
   50% { opacity: 1 }
@@ -3348,12 +3348,10 @@ export function createChatHistoryUI(appContext) {
     // 生成本次加载的 runId 并标记到面板，用于取消过期任务
     ensurePanelStylesInjected();
     const effectiveOptions = (options && typeof options === 'object') ? options : {};
-    const keepExistingList = !!effectiveOptions.keepExistingList;
     const restoreScrollTop = Number.isFinite(effectiveOptions.restoreScrollTop)
       ? Math.max(0, Number(effectiveOptions.restoreScrollTop))
       : null;
     let restoreScrollPending = Number.isFinite(restoreScrollTop) && restoreScrollTop > 0;
-    const previousFilter = panel.dataset.currentFilter || '';
     const runId = createRunId();
     panel.dataset.currentFilter = filterText;
     panel.dataset.runId = runId;
@@ -3365,6 +3363,44 @@ export function createChatHistoryUI(appContext) {
     const listContainer = panel.querySelector('#chat-history-list');
     if (!listContainer) return;
 
+    const setSearchProgressVisible = (indicator, visible) => {
+      if (!indicator) return;
+      indicator.classList.toggle('is-visible', visible);
+      indicator.dataset.visible = visible ? '1' : '0';
+    };
+
+    const resetListContent = (options = {}) => {
+      const keepIndicator = options.keepIndicator !== false;
+      const indicator = keepIndicator ? listContainer.querySelector('.search-loading-indicator') : null;
+      Array.from(listContainer.children).forEach((child) => {
+        if (indicator && child === indicator) return;
+        child.remove();
+      });
+    };
+
+    const ensureBaseIndicator = () => {
+      let indicator = null;
+      try {
+        indicator = panel.querySelector('.search-loading-indicator');
+      } catch (_) {
+        indicator = null;
+      }
+      if (indicator) {
+        if (indicator.parentNode !== listContainer) {
+          indicator.remove();
+          listContainer.insertBefore(indicator, listContainer.firstChild);
+        }
+        return indicator;
+      }
+      indicator = document.createElement('div');
+      indicator.className = 'search-loading-indicator';
+      indicator.dataset.visible = '0';
+      listContainer.insertBefore(indicator, listContainer.firstChild);
+      return indicator;
+    };
+
+    ensureBaseIndicator();
+
     const applyScrollRestore = () => {
       if (!restoreScrollPending || restoreScrollTop == null) return;
       const maxScroll = Math.max(0, listContainer.scrollHeight - listContainer.clientHeight);
@@ -3375,56 +3411,65 @@ export function createChatHistoryUI(appContext) {
       }
     };
 
-    const canReuseExistingList = keepExistingList
-      && previousFilter === filterText
-      && !!listContainer.querySelector('.chat-history-item');
-    // 说明：允许在“重新打开面板”时先复用旧列表，减少空白等待；等新数据就绪后再整体替换。
+    const hasExistingItems = !!listContainer.querySelector('.chat-history-item');
+    // 说明：允许在“重新打开面板”或“筛选变化”时先复用旧列表，减少空白等待；等新数据就绪后再整体替换。
     let deferListReset = false;
-    if (!canReuseExistingList) {
-      // 重置并显示骨架屏，立刻给到视觉反馈
-      listContainer.innerHTML = '';
+    if (hasExistingItems) {
+      deferListReset = true;
+    } else {
+      // 无可复用内容时，显示骨架屏给到视觉反馈
+      resetListContent();
       listContainer.scrollTop = 0;
       renderSkeleton(listContainer, 8);
-    } else {
-      deferListReset = true;
     }
 
     // 清理上一轮搜索残留的进度条（避免在新一轮加载时出现“旧进度”闪烁）
     try {
-      panel.querySelectorAll('.search-loading-indicator').forEach((n) => n.remove());
+      const baseIndicator = ensureBaseIndicator();
+      setSearchProgressVisible(baseIndicator, false);
+      panel.querySelectorAll('.search-loading-indicator').forEach((n) => {
+        if (n !== baseIndicator) n.remove();
+      });
     } catch (_) {}
 
-    const upsertSearchProgressIndicator = () => {
-      let indicator = null;
-      try {
-        indicator = panel.querySelector('.search-loading-indicator');
-      } catch (_) {
-        indicator = null;
-      }
-      if (indicator) return indicator;
+    const upsertSearchProgressIndicator = () => ensureBaseIndicator();
 
-      indicator = document.createElement('div');
-      indicator.className = 'search-loading-indicator';
-
-      const filterBoxContainer = panel.querySelector('.filter-container');
-      if (filterBoxContainer && filterBoxContainer.parentNode === listContainer.parentNode) {
-        filterBoxContainer.insertAdjacentElement('afterend', indicator);
-      } else {
-        listContainer.insertBefore(indicator, listContainer.firstChild);
+    const getSearchProgressState = () => {
+      if (!panel._searchProgressState) {
+        panel._searchProgressState = { percent: 0, updatedAt: 0 };
       }
-      return indicator;
+      return panel._searchProgressState;
+    };
+
+    const ensureSearchProgressParts = (indicator) => {
+      if (!indicator) return null;
+      if (indicator._progressParts) return indicator._progressParts;
+      indicator.innerHTML = '';
+      const progress = document.createElement('div');
+      progress.className = 'search-progress';
+      const barEl = document.createElement('div');
+      barEl.className = 'search-progress-bar';
+      const fillEl = document.createElement('div');
+      fillEl.className = 'search-progress-fill';
+      barEl.appendChild(fillEl);
+      progress.appendChild(barEl);
+      indicator.appendChild(progress);
+      indicator._progressParts = { fillEl };
+      return indicator._progressParts;
     };
 
     const setSearchProgressStage = (indicator, text) => {
       if (!indicator) return;
-      indicator.innerHTML = `
-        <div class="search-progress">
-          <div class="search-progress-text">${text || ''}</div>
-          <div class="search-progress-bar">
-            <div class="search-progress-fill" style="width: 0%"></div>
-          </div>
-        </div>
-      `;
+      const parts = ensureSearchProgressParts(indicator);
+      if (!parts) return;
+      const state = getSearchProgressState();
+      const now = Date.now();
+      const reuse = state.updatedAt && (now - state.updatedAt < 900);
+      const basePercent = reuse ? Math.max(8, Math.min(state.percent || 0, 18)) : 0;
+      parts.fillEl.style.width = `${basePercent}%`;
+      state.percent = basePercent;
+      state.updatedAt = now;
+      setSearchProgressVisible(indicator, true);
     };
 
     const hasFilterRules = Array.isArray(searchPlan.filters) && searchPlan.filters.length > 0;
@@ -3529,7 +3574,7 @@ export function createChatHistoryUI(appContext) {
 
         baseHistories = await getAllConversationMetadataWithCache();
         if (panel.dataset.runId !== runId) {
-          if (warmupIndicator && warmupIndicator.parentNode) warmupIndicator.remove();
+          setSearchProgressVisible(warmupIndicator, false);
           return;
         }
       }
@@ -3597,12 +3642,14 @@ export function createChatHistoryUI(appContext) {
         let nextIndex = 0;
         let processedCount = 0;
         let lastProgressUpdate = 0;
+        let lastProgressUpdateTime = 0;
         let cancelled = false;
 
         // 在列表容器顶部插入搜索进度指示器
         const searchProgressIndicator = upsertSearchProgressIndicator();
 
         const PROGRESS_UPDATE_INTERVAL = 10;
+        const PROGRESS_UPDATE_MIN_INTERVAL = 120;
         // 批量读取会话后，每个 worker 的“单次工作量”更大；并发过高反而可能造成 IndexedDB 竞争与 UI 抖动。
         const CONCURRENCY = Math.min(4, Math.max(2, navigator?.hardwareConcurrency ? Math.floor(navigator.hardwareConcurrency / 2) : 4));
         const SEARCH_SCAN_BATCH_SIZE = 12;
@@ -3610,21 +3657,22 @@ export function createChatHistoryUI(appContext) {
         const isCancelled = createSearchCancelledChecker(panel, runId);
 
         const updateProgress = (force = false) => {
-          if (!force && processedCount - lastProgressUpdate < PROGRESS_UPDATE_INTERVAL) return;
+          const now = performance.now();
+          if (!force) {
+            if (processedCount - lastProgressUpdate < PROGRESS_UPDATE_INTERVAL) return;
+            if (now - lastProgressUpdateTime < PROGRESS_UPDATE_MIN_INTERVAL) return;
+          }
           lastProgressUpdate = processedCount;
+          lastProgressUpdateTime = now;
           const percentComplete = totalItems === 0 ? 100 : Math.round((processedCount / totalItems) * 100);
-          const matchCount = matchedEntries.length;
-          const reuseHint = canReusePrefixCache ? ' · 候选池来自缓存' : '';
-          searchProgressIndicator.innerHTML = `
-            <div class="search-progress">
-              <div class="search-progress-text">
-                正在搜索聊天记录... (${processedCount}/${totalItems}${matchCount ? ` · 已找到 ${matchCount}` : ''}${reuseHint})
-              </div>
-              <div class="search-progress-bar">
-                <div class="search-progress-fill" style="width: ${percentComplete}%"></div>
-              </div>
-            </div>
-          `;
+          const parts = ensureSearchProgressParts(searchProgressIndicator);
+          if (!parts) return;
+          const state = getSearchProgressState();
+          const nextPercent = Math.max(state.percent || 0, percentComplete);
+          parts.fillEl.style.width = `${nextPercent}%`;
+          state.percent = nextPercent;
+          state.updatedAt = Date.now();
+          setSearchProgressVisible(searchProgressIndicator, true);
         };
 
         updateProgress(true);
@@ -3767,12 +3815,12 @@ export function createChatHistoryUI(appContext) {
         await Promise.all(workers);
 
         if (panel.dataset.runId !== runId || cancelled) {
-          if (searchProgressIndicator.parentNode) searchProgressIndicator.remove();
+          setSearchProgressVisible(searchProgressIndicator, false);
           return;
         }
 
         updateProgress(true);
-        if (searchProgressIndicator.parentNode) searchProgressIndicator.remove();
+        setSearchProgressVisible(searchProgressIndicator, false);
 
         matchedEntries.sort((a, b) => a.index - b.index);
         const finalResults = matchedEntries.map(entry => entry.data);
@@ -3864,19 +3912,13 @@ export function createChatHistoryUI(appContext) {
       panel._historyDataSource.loadedIdSet = new Set(currentDisplayItems.map((item) => item?.id).filter(Boolean));
     }
 
-    if (deferListReset) {
-      // 说明：保留旧列表直到新结果准备就绪，再一次性替换，减少打开时的空白感。
-      listContainer.innerHTML = '';
+    setSearchProgressVisible(listContainer.querySelector('.search-loading-indicator'), false);
+
+    const hasSkeleton = !!listContainer.querySelector('.skeleton-item');
+    if (currentDisplayItems.length === 0) {
+      resetListContent();
       listContainer.scrollTop = 0;
       deferListReset = false;
-    }
-
-    currentlyRenderedCount = 0;
-    currentGroupLabelForBatchRender = null;
-    isLoadingMoreItems = false;
-
-    if (currentDisplayItems.length === 0) {
-      removeSkeleton(listContainer);
       const emptyMsg = document.createElement('div');
       if (hasActiveQuery) {
         emptyMsg.textContent = '没有匹配的聊天记录';
@@ -3886,6 +3928,17 @@ export function createChatHistoryUI(appContext) {
       listContainer.appendChild(emptyMsg);
       return;
     }
+
+    if (deferListReset || hasSkeleton) {
+      // 说明：保留旧列表直到新结果准备就绪，再一次性替换，减少打开时的空白感。
+      resetListContent();
+      listContainer.scrollTop = 0;
+      deferListReset = false;
+    }
+
+    currentlyRenderedCount = 0;
+    currentGroupLabelForBatchRender = null;
+    isLoadingMoreItems = false;
 
     if (currentPinnedItemsCountInDisplay > 0) {
       removeSkeleton(listContainer);

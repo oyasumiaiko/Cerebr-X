@@ -4917,30 +4917,40 @@ body.hide-references .reference-number.superscript {
 
 /* 搜索加载指示器 */
 .search-loading-indicator {
-    font-family: monospace;
-    text-align: center;
-    padding: 20px;
-    color: var(--cerebr-text-color);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    height: 3px;
+    padding: 0;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
 }
+
+.search-loading-indicator.is-visible {
+    opacity: 1;
+}
+
 .search-progress {
-    padding: 10px;
-    text-align: center;
+    padding: 0;
+    height: 3px;
 }
 .search-progress-text {
-    margin-bottom: 8px;
-    color: var(--cerebr-text-color);
+    display: none;
 }
 .search-progress-bar {
     width: 100%;
-    height: 4px;
-    background: var(--cerebr-border-color);
-    border-radius: 2px;
+    height: 3px;
+    background: color-mix(in srgb, var(--cerebr-border-color) 45%, transparent);
+    border-radius: 999px;
     overflow: hidden;
 }
 .search-progress-fill {
     height: 100%;
     background: var(--cerebr-highlight);
-    transition: width 0.2s ease;
+    opacity: 0.7;
+    transition: width 0.4s ease;
 }
 /* 添加更多间距 */
 #chat-history-panel .panel-header {
