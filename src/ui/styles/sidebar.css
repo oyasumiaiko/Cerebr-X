@@ -3956,71 +3956,92 @@ body.hide-references .reference-number.superscript {
     user-select: auto;
 }
 
+/* 提示词设置：现代化紧凑布局，减少分栏与嵌套层级 */
 .prompt-settings-content {
-    display: block;
+    display: grid;
+    gap: 12px;
 }
 
+/* 使用 display: contents 打平外层分组结构，避免多层嵌套盒子 */
 .settings-section {
-    margin-bottom: 14px;
-    padding: 12px;
-    border-radius: 12px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
-    border: 1px solid var(--cerebr-border-color);
+    display: contents;
 }
 
 .section-title {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin: 0 0 10px 0;
-    font-size: 13px;
+    gap: 6px;
+    margin: 0;
+    padding: 8px 0 6px;
+    font-size: 11px;
     font-weight: 600;
-    opacity: 0.9;
+    letter-spacing: 0.06em;
+    color: color-mix(in srgb, var(--cerebr-text-color) 72%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
 }
-.section-title i { opacity: 0.7; }
 
-.prompt-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+.settings-section:first-of-type .section-title {
+    padding-top: 0;
+    border-top: none;
 }
-.prompt-grid.one-column { grid-template-columns: 1fr; }
+
+.section-title i {
+    opacity: 0.45;
+    font-size: 12px;
+}
+
+/* 取消分栏容器，只保留提示词卡片 */
+.prompt-grid {
+    display: contents;
+}
+
+.prompt-grid.one-column {
+    display: contents;
+}
 
 .prompt-group {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 12px;
-    border-radius: 10px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    gap: 6px 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--cerebr-message-ai-bg) 80%, transparent);
     border: 1px solid var(--cerebr-border-color);
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.02);
-    transition: box-shadow 0.2s ease, transform 0.1s ease;
+    transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
 .prompt-group:hover {
-    box-shadow: 0 2px 6px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.03);
+    border-color: color-mix(in srgb, var(--cerebr-border-color) 80%, var(--cerebr-text-color) 20%);
 }
 
-.prompt-group label {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--cerebr-text-color);
+.prompt-group:focus-within {
+    border-color: rgba(0, 122, 255, 0.5);
+    background: color-mix(in srgb, var(--cerebr-message-ai-bg) 86%, transparent);
+}
+
+.prompt-group > label {
+    display: none;
 }
 
 .prompt-group textarea {
-    min-height: 120px;
+    grid-column: 1 / -1;
+    min-height: 92px;
     max-width: -webkit-fill-available;
-    padding: 12px;
-    border-radius: 8px;
-    background: var(--cerebr-message-ai-bg);
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--cerebr-input-bg);
     border: 1px solid var(--cerebr-border-color);
     color: var(--cerebr-text-color);
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: 12px;
+    line-height: 1.45;
     resize: vertical;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
     /* 滚动条样式统一至全局 */
+}
+
+.prompt-group .url-rules-container {
+    grid-column: 1 / -1;
 }
 
 /* 滚动条样式统一至全局 */
@@ -4033,22 +4054,27 @@ body.hide-references .reference-number.superscript {
 
 .prompt-actions {
     display: flex;
-    gap: 12px;
+    gap: 8px;
+    align-items: center;
     justify-content: flex-end;
-    margin-top: 12px;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--cerebr-border-color);
+    background: color-mix(in srgb, var(--cerebr-bg-color) 92%, transparent);
+    z-index: 2;
 }
 /* 保存状态提示 */
 .prompt-actions .save-status {
     margin-right: auto;
     align-self: center;
-    font-size: 12px;
+    font-size: 11px;
     opacity: 0.7;
 }
 
 .prompt-actions button {
-    padding: 8px 16px;
+    padding: 6px 12px;
     border-radius: 6px;
-    font-size: 14px;
+    font-size: 13px;
     cursor: pointer;
     transition: all 0.2s ease;
 }
@@ -4077,7 +4103,7 @@ body.hide-references .reference-number.superscript {
 
 /* 深色模式适配 */
 :root.dark-theme .prompt-group textarea {
-    background: var(--cerebr-message-ai-bg);
+    background: var(--cerebr-input-bg);
     border-color: var(--cerebr-border-color);
 }
 
@@ -4091,15 +4117,17 @@ body.hide-references .reference-number.superscript {
 
 /* 提示词设置样式 */
 .prompt-header-container {
+    grid-column: 1 / 2;
+    grid-row: 1;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 0 2px;
+    gap: 6px;
+    padding: 0;
 }
 
 .prompt-label-text {
-    font-size: 14px;
-    font-weight: 500;
+    font-size: 12px;
+    font-weight: 600;
     color: var(--cerebr-text-color);
 }
 
@@ -4107,8 +4135,8 @@ body.hide-references .reference-number.superscript {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
     padding: 0;
     border: none;
     background: transparent;
@@ -4159,20 +4187,44 @@ body.hide-references .reference-number.superscript {
     box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.2);
 }
 
+/* 提示词设置内的模型选择器收拢到标题行，避免占用额外纵向空间 */
+#prompt-settings .model-select-container {
+    grid-column: 2 / 3;
+    grid-row: 1;
+    margin-top: 0;
+    padding: 0;
+    background: transparent;
+    justify-self: end;
+    align-self: center;
+}
+
+#prompt-settings .model-select-container label {
+    font-size: 11px;
+}
+
+#prompt-settings .model-select-container .model-select {
+    flex: 0 0 auto;
+    min-width: 140px;
+    max-width: 220px;
+    padding: 4px 8px;
+    font-size: 12px;
+    background: var(--cerebr-input-bg);
+}
+
 /* URL 规则列表美化 */
 .url-rules-container {
-    padding: 8px;
+    padding: 6px;
     background: var(--cerebr-message-user-bg);
     border: 1px dashed var(--cerebr-border-color);
-    border-radius: 8px;
+    border-radius: 6px;
 }
 .url-rules-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
 }
 .url-rule-item {
-    padding: 8px;
+    padding: 6px;
     border: 1px solid var(--cerebr-border-color);
     border-radius: 6px;
     background: var(--cerebr-message-ai-bg);
@@ -4189,7 +4241,7 @@ body.hide-references .reference-number.superscript {
 }
 .url-rule-pattern-input {
     flex: 1;
-    padding: 6px 10px;
+    padding: 4px 8px;
     border: 1px solid var(--cerebr-border-color);
     border-radius: 6px;
     background: var(--cerebr-bg-color);
@@ -4200,8 +4252,8 @@ body.hide-references .reference-number.superscript {
     gap: 6px;
 }
 .url-rule-action-btn {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -4212,13 +4264,13 @@ body.hide-references .reference-number.superscript {
     cursor: pointer;
 }
 .url-rule-content {
-    margin-top: 8px;
+    margin-top: 6px;
     display: grid;
-    grid-template-columns: minmax(140px, 220px) 1fr;
-    gap: 8px;
+    grid-template-columns: minmax(120px, 200px) 1fr;
+    gap: 6px;
 }
 .url-rule-content textarea.url-rule-prompt {
-    min-height: 80px;
+    min-height: 72px;
     border-radius: 6px;
 }
 
@@ -5105,6 +5157,35 @@ body.hide-references .reference-number.superscript {
 #chat-history-panel #prompt-settings .settings-header,
 #chat-history-panel #api-settings .settings-header {
     display: none;
+}
+
+#chat-history-panel #prompt-settings {
+    padding: 10px 12px 12px;
+}
+
+#chat-history-panel #prompt-settings .prompt-settings-content {
+    gap: 8px;
+}
+
+#chat-history-panel #prompt-settings .section-title {
+    padding: 6px 0 4px;
+    font-size: 11px;
+}
+
+#chat-history-panel #prompt-settings .prompt-group {
+    padding: 8px 10px;
+}
+
+#chat-history-panel #prompt-settings .prompt-group textarea {
+    min-height: 80px;
+}
+
+#chat-history-panel #prompt-settings .model-select-container .model-select {
+    min-width: 120px;
+}
+
+#chat-history-panel #prompt-settings .prompt-actions {
+    margin-top: 6px;
 }
 
 /* 旧遮罩层淡入动画会把卡片设为 opacity:0，这里需要恢复为可见 */
