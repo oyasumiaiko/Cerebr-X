@@ -20,78 +20,11 @@ const DEFAULT_PROMPTS = {
         prompt: `数学公式请使用LaTeX表示，行间公式请使用\\[...\\]表示，行内公式请使用\\(...\\)表示，禁止使用$美元符号包裹数学公式。始终使用**中文**回答用户问题。`,
         model: 'follow_current'
     },
-    screenshot: {
-        prompt: `请分析这个截图的内容，包括：
-
-1. 内容类型：
-   - 这是什么类型的图片（图表、界面、流程图等）
-   - 图片的主要用途和场景
-
-2. 核心信息：
-   - 图片传达的主要信息和观点
-   - 重要的数据、指标或关键点
-   - 图片中的特殊标记或重点强调部分
-
-3. 上下文解释：
-   - 这些信息在当前场景下的含义
-   - 可能的应用场景或实际价值
-
-请用清晰的结构和通俗的语言解释，确保内容准确、全面且易于理解。`,
-        model: 'follow_current'
-    },
-    extract: {
-        prompt: `请从页面内容中提取并整理以下关键信息：
-
-1. 实体信息：
-   - 人物：姓名、职位、角色
-   - 组织：公司、机构、团体
-   - 地点：地址、区域、场所
-
-2. 数值信息：
-   - 数字指标：具体数值、百分比、比率
-   - 时间节点：日期、时间段、期限
-   - 金额：价格、成本、预算
-
-3. 技术参数：
-   - 规格：尺寸、重量、容量
-   - 性能：速度、效率、功耗
-   - 标准：等级、评级、指标
-
-4. 关键概念：
-   - 专业术语及其定义
-   - 重要观点和结论
-   - 核心价值主张
-
-请以结构化的方式呈现这些信息，并标注信息的出处或位置。如果某类信息不存在，可以略过对应部分。`,
-        model: 'follow_current'
-    },
-    image: {
-        prompt: `如果是图片，请解释图片内容，包括:
-- 图片类型（照片、图表、截图等）
-- 主要内容和主题
-- 关键信息和重点
-
-如果是图片主体是文本内容，首先提取原始文本，提取后翻译成中文。`,
-        model: 'follow_current'
-    },
     selection: {
         prompt: `请根据以下内容的复杂度，编写3-20条多方面、多层次、多角度的queries，使用google_search(queries)工具执行。
 "<SELECTION>"
 
 请全面、客观地总结以下搜索结果，既要突出核心要点，也要保留重要细节`,
-        model: 'follow_current'
-    },
-    pdf: {
-        prompt: `请对这个PDF文档进行分析：
-1. 首先列出文档的详细大纲结构，包括各级标题和对应的主要内容；
-2. 然后根据大纲结构，按照以下方面展开总结：
-   - 文档的主要目的和核心论点
-   - 每个主要部分的关键内容和要点
-   - 重要的数据、图表或研究发现
-   - 作者的结论和建议
-3. 最后，总结文档的创新点、局限性和实际应用价值。
-
-请用清晰的层级结构和要点形式展示以上内容。`,
         model: 'follow_current'
     },
     summary: {
@@ -164,12 +97,8 @@ class PromptSettings {
         this.savePromptsButton = dom.savePromptsButton;
         this.selectionPrompt = dom.selectionPrompt;
         this.systemPrompt = dom.systemPrompt;
-        this.pdfPrompt = dom.pdfPrompt;
         this.summaryPrompt = dom.summaryPrompt;
         this.queryPrompt = dom.queryPrompt;
-        this.imagePrompt = dom.imagePrompt;
-        this.screenshotPrompt = dom.screenshotPrompt;
-        this.extractPrompt = dom.extractPrompt;
         this.urlRulesPrompt = dom.urlRulesPrompt;
 
         // 模型选择下拉框
@@ -214,7 +143,7 @@ class PromptSettings {
 
     // 初始化模型选择下拉框
     initModelSelects() {
-        const promptTypes = ['selection', 'query', 'pdf', 'summary', 'image', 'urlRules']; 
+        const promptTypes = ['selection', 'query', 'summary', 'urlRules']; 
 
         // 获取所有可用的模型
         const getAvailableModels = () => {
@@ -385,8 +314,6 @@ class PromptSettings {
             'summary': '快速总结提示词',
             'query': '划词方式1',
             'selection': '划词方式2',
-            'pdf': 'PDF快速总结提示词',
-            'image': '图片默认提示词',
             'urlRules': 'URL规则'
         };
         return nameMap[promptType] || promptType;

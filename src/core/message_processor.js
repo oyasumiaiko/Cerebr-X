@@ -935,22 +935,12 @@ export function createMessageProcessor(appContext) {
    * 获取提示词类型
    * @param {HTMLElement|string} content - 输入内容，可以是HTML元素或字符串
    * @param {Object} prompts - 提示词设置对象
-   * @returns {string} 提示词类型 ('image'|'pdf'|'summary'|'selection'|'query'|'none')
+   * @returns {string} 提示词类型 ('summary'|'selection'|'query'|'none')
    */
   function getPromptTypeFromContent(content, prompts) {
     if (!prompts) return 'none';
     // 归一化输入文本（去掉前后空白）
     const normalizedContent = (typeof content === 'string') ? content.trim() : content;
-
-    // 如果content是图片提示词，则返回image
-    if (prompts.image?.prompt && normalizedContent === prompts.image.prompt.trim()) {
-      return 'image';
-    }
-
-    // 检查是否是PDF提示词
-    if (prompts.pdf?.prompt && normalizedContent === prompts.pdf.prompt.trim()) {
-      return 'pdf';
-    }
 
     // 检查是否是页面总结提示词
     if (prompts.summary?.prompt && normalizedContent === prompts.summary.prompt.trim()) {

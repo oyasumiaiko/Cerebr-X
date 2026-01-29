@@ -389,8 +389,6 @@ body.standalone-mode #dock-mode-toggle,
 body.standalone-mode #open-standalone-page,
 body.standalone-mode #empty-state-summary,
 body.standalone-mode #empty-state-load-url,
-body.standalone-mode #empty-state-screenshot,
-body.standalone-mode #empty-state-extract,
 body.standalone-mode #empty-state-temp-mode,
 body.standalone-mode #empty-state-repomix {
     display: none !important;

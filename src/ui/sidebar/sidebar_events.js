@@ -231,25 +231,6 @@ function setupEmptyStateHandlers(appContext) {
     });
   }
 
-  if (appContext.dom.emptyStateScreenshot && !appContext.state.isStandalone) {
-    appContext.dom.emptyStateScreenshot.addEventListener('click', () => {
-      const prompts = appContext.services.promptSettingsManager.getPrompts();
-      appContext.utils.requestScreenshot();
-      appContext.utils.waitForScreenshot().then(() => {
-        appContext.dom.messageInput.textContent = prompts.screenshot.prompt;
-        appContext.services.messageSender.sendMessage({ api: prompts.screenshot?.model });
-      });
-    });
-  }
-
-  if (appContext.dom.emptyStateExtract && !appContext.state.isStandalone) {
-    appContext.dom.emptyStateExtract.addEventListener('click', async () => {
-      const prompts = appContext.services.promptSettingsManager.getPrompts();
-      appContext.dom.messageInput.textContent = prompts.extract.prompt;
-      appContext.services.messageSender.sendMessage({ api: prompts.extract?.model });
-    });
-  }
-
   if (appContext.dom.emptyStatePageContent && !appContext.state.isStandalone) {
     // 通过 background 触发 content script 提取网页内容，避免 iframe 无法直接访问页面 DOM。
     const requestPageContentSnapshot = async () => {

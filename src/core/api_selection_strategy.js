@@ -8,7 +8,7 @@
 /**
  * 根据提示词类型选择 API 配置
  * @param {Object} params
- * @param {string} params.promptType - 提示词类型：'selection'|'query'|'summary'|'pdf'|'image'|'screenshot'|'extract'
+ * @param {string} params.promptType - 提示词类型：'selection'|'query'|'summary'
  * @param {Object} params.prompts - PromptSettings.getPrompts() 返回的对象
  * @param {Object} params.apiManager - api_manager 实例，需提供 resolveApiParam()
  * @returns {Object|null} 解析出的 API 配置或 null（表示使用当前选中）

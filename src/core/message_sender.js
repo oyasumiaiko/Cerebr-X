@@ -1721,7 +1721,7 @@ export function createMessageSender(appContext) {
       }
 
       const configForMaxHistory = preferredApiConfig || apiManager.getSelectedConfig();
-      const sendChatHistoryFlag = (shouldSendChatHistory && currentPromptType !== 'image') || forceSendFullHistory;
+      const sendChatHistoryFlag = shouldSendChatHistory || forceSendFullHistory;
       const messages = composeMessages({
         prompts: promptsConfig,
         injectedSystemMessages,
@@ -3543,9 +3543,6 @@ export function createMessageSender(appContext) {
         webpageSelection?.trim() || '';
 
       // 获取页面类型
-      const contentType = await getDocumentType();
-      const isPDF = contentType === 'application/pdf';
-
       // 获取当前提示词设置
       const prompts = promptSettingsManager.getPrompts();
 
@@ -3574,8 +3571,7 @@ export function createMessageSender(appContext) {
         }
         await chatHistoryUI.clearChatHistory();
 
-        // 为PDF文件使用自定义的PDF提示词
-        const promptType = isPDF ? 'pdf' : 'summary';
+        const promptType = 'summary';
         messageInput.textContent = prompts[promptType].prompt;
         // 发送消息时指定提示词类型并传入 API 偏好
         await sendMessage({ specificPromptType: promptType, api: prompts[promptType]?.model });
@@ -3587,23 +3583,6 @@ export function createMessageSender(appContext) {
       if (wasTemporaryMode) {
         enterTemporaryMode();
       }
-    }
-  }
-
-  /**
-   * 获取页面类型
-   * @private
-   * @returns {Promise<string|null>} 页面内容类型
-   */
-  async function getDocumentType() {
-    try {
-      const response = await chrome.runtime.sendMessage({
-        type: 'GET_DOCUMENT_TYPE'
-      });
-      return response?.contentType;
-    } catch (error) {
-      console.error('获取页面类型失败:', error);
-      return null;
     }
   }
 

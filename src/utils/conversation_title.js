@@ -143,9 +143,7 @@ function resolveSelectionText(message, promptsConfig, plainText) {
  *
  * 规则（可按需扩展）：
  * - summary：`[总结] + 页面标题`（若可获取）
- * - pdf：`[PDF总结]`
  * - selection/query：`[划词解释] + 划词内容`
- * - image：`[解释图片]`
  * - 其它：使用第一条用户消息的摘要
  *
  * @param {Object|null} firstUserMessage
@@ -166,10 +164,6 @@ export function buildConversationSummaryFromFirstUserMessage(firstUserMessage, o
   if (promptType === 'summary') {
     const normalizedTitle = normalizeWhitespace(pageTitle);
     summary = normalizedTitle ? `[总结] ${normalizedTitle}` : '[总结]';
-  } else if (promptType === 'pdf') {
-    summary = '[PDF总结]';
-  } else if (promptType === 'image') {
-    summary = '[解释图片]';
   } else if (promptType === 'selection' || promptType === 'query') {
     const selectionText = normalizeWhitespace(resolveSelectionText(firstUserMessage, promptsConfig, plainText));
     summary = selectionText ? `[划词解释] ${selectionText}` : '[划词解释]';

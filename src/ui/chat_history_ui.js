@@ -1829,7 +1829,7 @@ export function createChatHistoryUI(appContext) {
     // 对话摘要（对话列表显示的标题）：
     // - 优先使用发送时写入到消息节点的 promptType/promptMeta（避免基于字符串/正则猜测）；
     // - 对于 selection/query：标题为「[划词解释] + 划词内容」；
-    // - 对于 summary/pdf/image：标题使用固定标签；
+    // - 对于 summary：标题使用固定标签；
     // - 其它情况回退为第一条用户消息的摘要。
     //
     // 重要：summary/promptType === 'summary' 时会拼接页面标题，因此这里必须使用“会话起始页”的 title，

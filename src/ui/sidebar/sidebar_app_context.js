@@ -69,8 +69,6 @@ export function createSidebarAppContext(isStandalone) {
     emptyStateSummary: document.getElementById('empty-state-summary'),
     emptyStateTempMode: document.getElementById('empty-state-temp-mode'),
     emptyStateLoadUrl: document.getElementById('empty-state-load-url'),
-    emptyStateScreenshot: document.getElementById('empty-state-screenshot'),
-    emptyStateExtract: document.getElementById('empty-state-extract'),
     emptyStatePageContent: document.getElementById('empty-state-page-content'),
     emptyStateRandomBackground: document.getElementById('empty-state-random-background'),
     statusDot: document.getElementById('status-dot'),
@@ -89,12 +87,8 @@ export function createSidebarAppContext(isStandalone) {
     savePromptsButton: document.getElementById('save-prompts'),
     selectionPrompt: document.getElementById('selection-prompt'),
     systemPrompt: document.getElementById('system-prompt'),
-    pdfPrompt: document.getElementById('pdf-prompt'),
     summaryPrompt: document.getElementById('summary-prompt'),
     queryPrompt: document.getElementById('query-prompt'),
-    imagePrompt: document.getElementById('image-prompt'),
-    screenshotPrompt: document.getElementById('screenshot-prompt'),
-    extractPrompt: document.getElementById('extract-prompt'),
     urlRulesPrompt: document.getElementById('urlRules-prompt'),
     urlRulesList: document.getElementById('url-rules-list'),
     showThoughtProcessSwitch: document.getElementById('show-thought-process-switch'),
@@ -588,23 +582,6 @@ export function registerSidebarUtilities(appContext) {
     window.parent.postMessage({ type: 'CAPTURE_SCREENSHOT' }, '*');
   };
 
-  appContext.utils.waitForScreenshot = () => {
-    return new Promise((resolve) => {
-      const startTime = Date.now();
-      const interval = setInterval(() => {
-        const screenshotImg = appContext.dom.imageContainer?.querySelector('img[alt="page-screenshot.png"]');
-        if (screenshotImg) {
-          clearInterval(interval);
-          resolve();
-        } else if (Date.now() - startTime > 5000) {
-          clearInterval(interval);
-          console.warn('等待截屏图片超时');
-          resolve();
-        }
-      }, 100);
-    });
-  };
-
   appContext.utils.addImageToContainer = (imageData, fileName) => {
     const imageTag = appContext.services.imageHandler.createImageTag(imageData, fileName);
     appContext.dom.imageContainer.appendChild(imageTag);
@@ -671,8 +648,6 @@ export function applyStandaloneAdjustments(appContext) {
     appContext.dom.quickSummary,
     appContext.dom.emptyStateSummary,
     appContext.dom.emptyStateLoadUrl,
-    appContext.dom.emptyStateScreenshot,
-    appContext.dom.emptyStateExtract,
     appContext.dom.emptyStatePageContent,
     appContext.dom.emptyStateTempMode,
     appContext.dom.repomixButton
