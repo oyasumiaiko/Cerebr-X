@@ -1173,12 +1173,7 @@ export function createContextMenuManager(appContext) {
           const processed = appContext.services.messageProcessor.processMathAndMarkdown(newText);
           textDiv.innerHTML = processed;
           // 复用 appendMessage 中的后处理逻辑：链接与代码高亮
-          textDiv
-            .querySelectorAll('a:not(.reference-number)')
-            .forEach(link => {
-              link.target = '_blank';
-              link.rel = 'noopener noreferrer';
-            });
+          appContext.services.messageProcessor.decorateMarkdownLinks?.(textDiv);
           textDiv
             .querySelectorAll('pre code')
             .forEach(block => {

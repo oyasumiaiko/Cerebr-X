@@ -46,6 +46,110 @@ function buildMessageSelector(rawMessageId) {
   return `.message[data-message-id="${safeId}"]`;
 }
 
+/**
+ * 规范化 pathname，避免“尾部斜杠差异”导致的同页误判。
+ * - 根路径 "/" 保持不变；
+ * - 其它路径移除末尾 "/"。
+ * @param {string} pathname
+ * @returns {string}
+ */
+function normalizePathname(pathname) {
+  if (typeof pathname !== 'string' || !pathname) return '/';
+  if (pathname.length > 1 && pathname.endsWith('/')) {
+    return pathname.slice(0, -1);
+  }
+  return pathname;
+}
+
+/**
+ * 安全解析 URL：失败时返回 null，避免在纯函数中抛错。
+ * @param {string} value
+ * @returns {URL|null}
+ */
+function safeParseUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    return new URL(value);
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * 生成“Markdown 链接解析上下文”，提前缓存 base URL，避免重复解析。
+ * @param {string} baseUrl - 当前页面 URL（来自 content script 的 pageInfo）
+ * @param {boolean} isStandalone - 是否独立模式（非 iframe）
+ * @returns {{ baseUrl: string, base: URL|null, isStandalone: boolean }}
+ */
+function buildMarkdownLinkContext(baseUrl, isStandalone) {
+  const normalizedBase = (typeof baseUrl === 'string') ? baseUrl.trim() : '';
+  return {
+    baseUrl: normalizedBase,
+    base: safeParseUrl(normalizedBase),
+    isStandalone: !!isStandalone
+  };
+}
+
+/**
+ * 解析 Markdown 链接并产出“打开策略”。
+ *
+ * 设计说明（新接手同学重点看这里）：
+ * - 侧栏运行在扩展 iframe 内，Markdown 的相对链接/哈希默认会解析到扩展页面；
+ * - 这会导致“本页内跳转”失效（例如 #anchor、#:~:text 或 ?t= 时间跳转）；
+ * - 因此需要用“当前页面 URL”作为 base 重新解析，并判断是否属于“同页跳转”。
+ *
+ * 判定规则：
+ * - 仅在 iframe 模式（非 standalone）下生效；
+ * - 若解析后与当前页面“同源 + 同路径”，视为“同页跳转”，在当前标签页打开（target=_top）；
+ * - 其它链接保持新标签页打开（target=_blank）；
+ * - 无论打开方式如何，只要能解析出绝对 URL，就回写到 href，确保相对链接指向正确页面。
+ *
+ * @param {string} rawHref - 原始 href（未解析）
+ * @param {{ baseUrl: string, base: URL|null, isStandalone: boolean }} context
+ * @returns {{ resolvedUrl: string, target: string, rel: string }}
+ */
+function getMarkdownLinkPolicy(rawHref, context) {
+  const result = {
+    resolvedUrl: '',
+    target: '_blank',
+    rel: 'noopener noreferrer'
+  };
+
+  const hrefText = (typeof rawHref === 'string') ? rawHref.trim() : '';
+  if (!hrefText) return result;
+
+  const base = context?.base || null;
+  let resolved = null;
+  if (base) {
+    try {
+      resolved = new URL(hrefText, base.href);
+    } catch (_) {
+      resolved = null;
+    }
+  } else {
+    resolved = safeParseUrl(hrefText);
+  }
+
+  if (resolved) {
+    result.resolvedUrl = resolved.href;
+  }
+
+  // 独立模式不做“同页跳转”判断，避免导航离开扩展页面。
+  if (context?.isStandalone) return result;
+
+  if (!base || !resolved) return result;
+
+  const sameOrigin = resolved.origin === base.origin;
+  const samePath = normalizePathname(resolved.pathname) === normalizePathname(base.pathname);
+
+  if (sameOrigin && samePath) {
+    result.target = '_top';
+    result.rel = '';
+  }
+
+  return result;
+}
+
 export function createMessageProcessor(appContext) {
   const {
     dom,
@@ -60,6 +164,45 @@ export function createMessageProcessor(appContext) {
   const scrollToBottom = utils.scrollToBottom;
   
   // 保留占位：数学渲染现改为在 Markdown 渲染阶段由 KaTeX 完成
+
+  /**
+   * 为 Markdown 渲染区域设置“智能链接打开策略”。
+   * @param {HTMLElement} rootElement - 消息容器或具体的 Markdown 区域
+   */
+  function decorateMarkdownLinks(rootElement) {
+    if (!rootElement || typeof rootElement.querySelectorAll !== 'function') return;
+
+    const baseUrl = (typeof state?.pageInfo?.url === 'string') ? state.pageInfo.url : '';
+    const linkContext = buildMarkdownLinkContext(baseUrl, state?.isStandalone);
+
+    const containers = [];
+    if (typeof rootElement.matches === 'function' && rootElement.matches('.text-content, .thoughts-content')) {
+      containers.push(rootElement);
+    }
+    rootElement.querySelectorAll('.text-content, .thoughts-content').forEach((node) => containers.push(node));
+
+    const uniqueContainers = Array.from(new Set(containers));
+    uniqueContainers.forEach((container) => {
+      container.querySelectorAll('a:not(.reference-number)').forEach((link) => {
+        // 跳过引用 tooltip 内的链接：它们由引用系统生成，保留其原有行为。
+        if (link.closest('.reference-tooltip')) return;
+
+        const rawHref = link.getAttribute('href') || '';
+        const policy = getMarkdownLinkPolicy(rawHref, linkContext);
+
+        if (policy.resolvedUrl) {
+          link.setAttribute('href', policy.resolvedUrl);
+        }
+
+        link.target = policy.target;
+        if (policy.rel) {
+          link.setAttribute('rel', policy.rel);
+        } else {
+          link.removeAttribute('rel');
+        }
+      });
+    });
+  }
 
   function resolveMessageElement(messageId) {
     if (!messageId) return null;
@@ -309,10 +452,7 @@ export function createMessageProcessor(appContext) {
         textContentDiv.innerText = messageText;
       }
       
-      messageDiv.querySelectorAll('a:not(.reference-number)').forEach(link => { // Avoid affecting reference links
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-      });
+      decorateMarkdownLinks(messageDiv);
 
       messageDiv.querySelectorAll('pre code').forEach(block => {
         hljs.highlightElement(block);
@@ -556,10 +696,7 @@ export function createMessageProcessor(appContext) {
 
     textContentDiv.innerHTML = processMathAndMarkdown(processedText);
 
-    textContentDiv.querySelectorAll('a:not(.reference-number)').forEach(link => {
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-    });
+    decorateMarkdownLinks(messageDiv);
 
     textContentDiv.querySelectorAll('pre code').forEach(block => {
       hljs.highlightElement(block);
@@ -1065,8 +1202,9 @@ export function createMessageProcessor(appContext) {
     appendMessage,
     updateAIMessage,
     processMathAndMarkdown,
+    decorateMarkdownLinks,
     addGroundingToMessage,
     getPromptTypeFromContent,
     extractSystemContent
   };
-} 
+}
