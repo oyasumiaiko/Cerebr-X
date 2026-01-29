@@ -104,6 +104,7 @@ export function createSettingsManager(appContext) {
     autoRetry: false,
     showReference: true,
     sidebarPosition: 'right', // 'left' 或 'right'
+    sidebarDocked: false,
     stopAtTop: true, // 滚动到顶部时停止
     scaleFactor: 1, // Added default scaleFactor
     backgroundImageUrl: '',
@@ -257,6 +258,17 @@ export function createSettingsManager(appContext) {
       readFromUI: (el) => el?.checked ? 'right' : 'left',
       writeToUI: (el, v) => { if (el) el.checked = (v === 'right'); },
       apply: (v) => applySidebarPosition(v),
+      standaloneHidden: true
+    },
+    {
+      key: 'sidebarDocked',
+      type: 'toggle',
+      menu: 'quick',
+      group: 'layout',
+      id: 'sidebar-dock-mode-switch',
+      label: '停靠模式（占据布局）',
+      defaultValue: DEFAULT_SETTINGS.sidebarDocked,
+      apply: (v) => applySidebarDocked(v),
       standaloneHidden: true
     },
     // 侧边栏宽度
@@ -1314,6 +1326,15 @@ export function createSettingsManager(appContext) {
     // 通知父窗口侧边栏位置变化
     notifySidebarPositionChange(position);
   }
+
+  function applySidebarDocked(enabled) {
+    const normalized = !!enabled;
+    const dockSwitch = document.getElementById('sidebar-dock-mode-switch');
+    if (dockSwitch) {
+      dockSwitch.checked = normalized;
+    }
+    notifySidebarDockModeChange(normalized);
+  }
   
   // 更新引用标记可见性
   function updateReferenceVisibility(shouldShow) {
@@ -1346,6 +1367,13 @@ export function createSettingsManager(appContext) {
     window.parent.postMessage({
       type: 'SIDEBAR_POSITION_CHANGE',
       position: position
+    }, '*');
+  }
+
+  function notifySidebarDockModeChange(isDocked) {
+    window.parent.postMessage({
+      type: 'SIDEBAR_DOCK_MODE_CHANGE',
+      docked: !!isDocked
     }, '*');
   }
   

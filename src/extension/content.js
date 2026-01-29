@@ -101,7 +101,9 @@ class CerebrSidebar {
     this.initialized = false;
     this.lastUrl = window.location.href;
     this.isFullscreen = false;
+    this.isDocked = false;
     this.sidebarPosition = 'right'; // 默认侧边栏位置为右侧
+    this.dockStyleElement = null;
     // console.log('CerebrSidebar 实例创建');
     this.initializeSidebar();
     this.setupUrlChangeListener();
@@ -113,6 +115,7 @@ class CerebrSidebar {
     this.sidebarWidth = width;
     this.sidebar.style.width = `calc(${this.sidebarWidth}px * var(--scale-ratio, 1) / ${this.scaleFactor})`;
     chrome.storage.sync.set({ sidebarWidth: this.sidebarWidth });
+    this.updateDockLayout();
   }
 
   // 添加更新侧边栏位置的方法
@@ -125,18 +128,20 @@ class CerebrSidebar {
     // 移除两侧的定位
     style.left = '';
     style.right = '';
+    const offset = this.isDocked ? '0px' : 'calc(10px * var(--scale-ratio, 1))';
+    const hiddenOffset = this.isDocked ? '0px' : 'calc(10px * var(--scale-ratio, 1))';
     
     // 设置新的定位和变换
     if (position === 'left') {
-      style.left = `calc(10px * var(--scale-ratio, 1))`;
+      style.left = offset;
       // 更新进入和退出动画的变换
-      this.sidebar.style.setProperty('--transform-hidden', `translateX(calc(-100% - calc(10px * var(--scale-ratio, 1))))`);
-      this.sidebar.style.setProperty('--box-shadow-visible', `2px 0 15px rgba(0,0,0,0.1)`);
+      this.sidebar.style.setProperty('--transform-hidden', `translateX(calc(-100% - ${hiddenOffset}))`);
+      this.sidebar.style.setProperty('--box-shadow-visible', this.isDocked ? 'none' : `2px 0 15px rgba(0,0,0,0.1)`);
     } else {
-      style.right = `calc(10px * var(--scale-ratio, 1))`;
+      style.right = offset;
       // 更新进入和退出动画的变换
-      this.sidebar.style.setProperty('--transform-hidden', `translateX(calc(100% + calc(10px * var(--scale-ratio, 1))))`);
-      this.sidebar.style.setProperty('--box-shadow-visible', `-2px 0 15px rgba(0,0,0,0.1)`);
+      this.sidebar.style.setProperty('--transform-hidden', `translateX(calc(100% + ${hiddenOffset}))`);
+      this.sidebar.style.setProperty('--box-shadow-visible', this.isDocked ? 'none' : `-2px 0 15px rgba(0,0,0,0.1)`);
     }
     
     // 如果侧边栏没有显示，立即应用隐藏的变换
@@ -145,8 +150,100 @@ class CerebrSidebar {
     }
 
     chrome.storage.sync.set({ sidebarPosition: this.sidebarPosition });
+    this.updateDockLayout();
     
     // console.log(`侧边栏位置已更新为: ${position}, 可见状态: ${this.isVisible}`);
+  }
+
+  // 停靠模式：通过页面 padding 预留侧栏布局空间
+  ensureDockStyle() {
+    if (this.dockStyleElement) return;
+    const existing = document.querySelector('style[data-cerebr-dock-style="true"]');
+    if (existing) {
+      this.dockStyleElement = existing;
+      return;
+    }
+    const style = document.createElement('style');
+    style.dataset.cerebrDockStyle = 'true';
+    style.textContent = `
+      html.cerebr-dock-mode {
+        overflow-x: hidden !important;
+      }
+      html.cerebr-dock-mode,
+      html.cerebr-dock-mode body {
+        box-sizing: border-box !important;
+      }
+      html.cerebr-dock-mode body {
+        width: 100% !important;
+      }
+      html.cerebr-dock-mode[data-cerebr-dock-position="right"] body {
+        padding-right: var(--cerebr-dock-width, 0px) !important;
+      }
+      html.cerebr-dock-mode[data-cerebr-dock-position="left"] body {
+        padding-left: var(--cerebr-dock-width, 0px) !important;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+    this.dockStyleElement = style;
+  }
+
+  getDockWidth() {
+    const dpr = Number(window.devicePixelRatio);
+    const safeDpr = (Number.isFinite(dpr) && dpr > 0) ? dpr : 1;
+    let width = this.sidebarWidth / safeDpr;
+    if (this.sidebar) {
+      const rect = this.sidebar.getBoundingClientRect();
+      if (rect && rect.width > 0) {
+        width = rect.width;
+      }
+    }
+    return Math.max(0, Math.round(width));
+  }
+
+  applyDockLayout() {
+    if (!this.sidebar) return;
+    this.ensureDockStyle();
+    const root = document.documentElement;
+    if (!root) return;
+    root.classList.add('cerebr-dock-mode');
+    root.dataset.cerebrDockPosition = this.sidebarPosition === 'left' ? 'left' : 'right';
+    root.style.setProperty('--cerebr-dock-width', `${this.getDockWidth()}px`);
+  }
+
+  clearDockLayout() {
+    const root = document.documentElement;
+    if (!root) return;
+    root.classList.remove('cerebr-dock-mode');
+    root.removeAttribute('data-cerebr-dock-position');
+    root.style.removeProperty('--cerebr-dock-width');
+  }
+
+  updateDockLayout() {
+    if (!this.isDocked || this.isFullscreen || !this.isVisible) return;
+    this.applyDockLayout();
+  }
+
+  setDockMode(isDocked, options = {}) {
+    const next = !!isDocked;
+    if (this.isDocked === next) {
+      this.updateDockLayout();
+      return;
+    }
+    this.isDocked = next;
+    if (this.sidebar) {
+      this.sidebar.classList.toggle('docked', this.isDocked && !this.isFullscreen);
+    }
+    if (this.isDocked && !this.isFullscreen && this.isVisible) {
+      this.applyDockLayout();
+    } else {
+      this.clearDockLayout();
+    }
+    if (!options.skipStorage) {
+      chrome.storage.sync.set({ sidebarDocked: this.isDocked });
+    }
+    if (!this.isFullscreen) {
+      this.updatePosition(this.sidebarPosition);
+    }
   }
 
   setupUrlChangeListener() {
@@ -217,10 +314,11 @@ class CerebrSidebar {
       // console.log('开始初始化侧边栏');
 
       // 从存储中加载宽度、缩放因子和位置
-      const result = await chrome.storage.sync.get(['sidebarWidth', 'scaleFactor', 'sidebarPosition']);
+      const result = await chrome.storage.sync.get(['sidebarWidth', 'scaleFactor', 'sidebarPosition', 'sidebarDocked']);
       this.sidebarWidth = result.sidebarWidth || 800; // 确保默认值一致
       this.scaleFactor = result.scaleFactor || 1.0;
       this.sidebarPosition = result.sidebarPosition || 'right';
+      this.isDocked = result.sidebarDocked === true;
       
       // console.log(`初始化侧边栏: 宽度=${this.sidebarWidth}, 缩放=${this.scaleFactor}, 位置=${this.sidebarPosition}`);
 
@@ -296,6 +394,19 @@ class CerebrSidebar {
           contain: style layout size;
         }
 
+        .cerebr-sidebar.docked {
+          top: 0;
+          height: 100vh;
+          border-radius: 0;
+          box-shadow: none;
+        }
+        .cerebr-sidebar.docked.visible {
+          box-shadow: none;
+        }
+        .cerebr-sidebar.docked .cerebr-sidebar__content {
+          border-radius: 0;
+        }
+
         .cerebr-sidebar.fullscreen {
           transition: all 0s !important;
 
@@ -333,6 +444,9 @@ class CerebrSidebar {
 
       this.sidebar = document.createElement('div');
       this.sidebar.className = 'cerebr-sidebar';
+      if (this.isDocked) {
+        this.sidebar.classList.add('docked');
+      }
 
       // 防止外部JavaScript访问和修改侧边栏
       Object.defineProperty(this.sidebar, 'remove', {
@@ -509,6 +623,9 @@ class CerebrSidebar {
         case 'SIDEBAR_POSITION_CHANGE':
           this.updatePosition(event.data.position);
           break;
+        case 'SIDEBAR_DOCK_MODE_CHANGE':
+          this.setDockMode(event.data.docked);
+          break;
 
         case 'CLOSE_SIDEBAR':
           this.toggle(false);  // 明确传入 false 表示关闭
@@ -593,6 +710,7 @@ class CerebrSidebar {
         this.sidebar.style.display = 'block';
         // 强制重排（读取 offsetWidth ）以确保初始状态被应用
         this.sidebar.offsetWidth;
+        this.updateDockLayout();
         this.sidebar.classList.add('visible');
 
         // 如果当前为全屏模式，则隐藏滚动条
@@ -629,6 +747,9 @@ class CerebrSidebar {
         this.sidebar.addEventListener('transitionend', (e) => {
           if (!this.sidebar.classList.contains('visible')) {
             this.sidebar.style.display = 'none';
+            if (this.isDocked) {
+              this.clearDockLayout();
+            }
           }
         }, { once: true });
       }
@@ -762,6 +883,10 @@ class CerebrSidebar {
     if (this.isFullscreen) {
       // 将侧边栏切换为全屏
       this.sidebar.classList.add('fullscreen');
+      if (this.isDocked) {
+        this.sidebar.classList.remove('docked');
+        this.clearDockLayout();
+      }
       
       // 清除位置相关的样式
       this.sidebar.style.left = '';
@@ -786,6 +911,12 @@ class CerebrSidebar {
       
       // 恢复侧边栏位置
       this.updatePosition(this.sidebarPosition);
+      if (this.isDocked) {
+        this.sidebar.classList.add('docked');
+        if (this.isVisible) {
+          this.applyDockLayout();
+        }
+      }
 
       // 恢复父文档滚动条
       document.documentElement.style.overflow = '';
