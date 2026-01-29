@@ -2101,160 +2101,75 @@ export function createChatHistoryUI(appContext) {
   }
 
   /**
-   * 纯函数：根据 parentConversationId 构建子树 ID 列表（包含根会话）。
-   * @param {string} rootConversationId
-   * @param {Array<Object>} metas
-   * @returns {string[]} 以根为首的 BFS 顺序
-   */
-  function buildConversationDescendantIdList(rootConversationId, metas) {
-    const rootId = (typeof rootConversationId === 'string') ? rootConversationId.trim() : '';
-    if (!rootId) return [];
-    const list = Array.isArray(metas) ? metas.filter(Boolean) : [];
-
-    const childrenMap = new Map();
-    for (const meta of list) {
-      const id = (typeof meta?.id === 'string') ? meta.id.trim() : '';
-      if (!id) continue;
-      const rawParent = (typeof meta?.parentConversationId === 'string') ? meta.parentConversationId.trim() : '';
-      const parentId = rawParent && rawParent !== id ? rawParent : '';
-      if (!parentId) continue;
-      if (!childrenMap.has(parentId)) childrenMap.set(parentId, []);
-      childrenMap.get(parentId).push(id);
-    }
-
-    const ordered = [];
-    const visited = new Set();
-    const queue = [rootId];
-    for (let i = 0; i < queue.length; i += 1) {
-      const currentId = queue[i];
-      if (!currentId || visited.has(currentId)) continue;
-      visited.add(currentId);
-      ordered.push(currentId);
-      const children = childrenMap.get(currentId) || [];
-      for (const childId of children) {
-        if (!visited.has(childId)) queue.push(childId);
-      }
-    }
-    return ordered;
-  }
-
-  /**
-   * 批量生成会话标题：包含指定会话 + 其所有未手动改名的分支。
+   * 自动生成指定会话的标题（不处理分支）。
    * @param {string} conversationId
    */
-  async function autoGenerateConversationTitlesForTree(conversationId) {
-    const rootId = (typeof conversationId === 'string') ? conversationId.trim() : '';
-    if (!rootId) return;
+  async function autoGenerateConversationTitleForConversation(conversationId) {
+    const targetId = (typeof conversationId === 'string') ? conversationId.trim() : '';
+    if (!targetId) return;
 
     const messageSender = services.messageSender;
     if (!messageSender?.generateConversationTitleForMessages) {
-      showNotification?.({ message: '当前版本不支持批量生成标题', type: 'warning', duration: 2200 });
+      showNotification?.({ message: '当前版本不支持自动生成标题', type: 'warning', duration: 2200 });
       return;
     }
 
-    let metas = [];
-    try {
-      metas = await getAllConversationMetadataWithCache(false);
-    } catch (_) {
-      metas = [];
+    const conversation = await getConversationById(targetId, true);
+    if (!conversation) {
+      showNotification?.({ message: '未找到该对话', type: 'warning', duration: 2000 });
+      return;
     }
-
-    let targetIds = buildConversationDescendantIdList(rootId, metas);
-    if (targetIds.length === 0) targetIds = [rootId];
 
     const promptsConfig = promptSettingsManager.getPrompts();
-    showNotification?.({ message: `开始生成标题（${targetIds.length} 条会话）`, duration: 1600 });
-
-    const conversations = await getConversationsByIds(targetIds, true);
-    const convMap = new Map();
-    conversations.forEach((conv) => {
-      if (conv?.id) convMap.set(conv.id, conv);
-    });
-
-    const stats = {
-      total: targetIds.length,
-      updated: 0,
-      skippedManual: 0,
-      skippedEmpty: 0,
-      skippedBusy: 0,
-      failed: 0
-    };
-    let configError = null;
-
-    for (const id of targetIds) {
-      const conversation = convMap.get(id) || await getConversationById(id, true);
-      if (!conversation) {
-        stats.failed += 1;
-        continue;
-      }
-
-      if (isConversationSummaryManuallyEdited(conversation, promptsConfig)) {
-        stats.skippedManual += 1;
-        continue;
-      }
-
-      const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
-      if (messages.length === 0) {
-        stats.skippedEmpty += 1;
-        continue;
-      }
-
-      const expectedSummary = (typeof conversation.summary === 'string') ? conversation.summary : '';
-      const result = await messageSender.generateConversationTitleForMessages({
-        conversationId: conversation.id,
-        messages
-      });
-
-      if (!result?.ok) {
-        if (result?.reason === 'missing_prompt' || result?.reason === 'missing_api' || result?.reason === 'missing_services') {
-          configError = result.reason;
-          break;
-        }
-        if (result?.reason === 'in_progress') {
-          stats.skippedBusy += 1;
-          continue;
-        }
-        stats.failed += 1;
-        continue;
-      }
-
-      const updateResult = await updateConversationSummary(conversation.id, result.title, {
-        expectedSummary,
-        summarySource: 'auto',
-        skipIfManual: true
-      });
-      if (updateResult.ok) {
-        stats.updated += 1;
-      } else if (updateResult.reason === 'summary_manual' || updateResult.reason === 'summary_changed') {
-        stats.skippedManual += 1;
-      } else {
-        stats.failed += 1;
-      }
+    if (isConversationSummaryManuallyEdited(conversation, promptsConfig)) {
+      showNotification?.({ message: '该对话已手动重命名，已跳过', duration: 2000 });
+      return;
     }
 
-    if (configError) {
+    const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+    if (messages.length === 0) {
+      showNotification?.({ message: '该对话没有消息，无法生成标题', type: 'warning', duration: 2000 });
+      return;
+    }
+
+    showNotification?.({ message: '开始生成标题...', duration: 1400 });
+    const expectedSummary = (typeof conversation.summary === 'string') ? conversation.summary : '';
+    const result = await messageSender.generateConversationTitleForMessages({
+      conversationId: conversation.id,
+      messages
+    });
+
+    if (!result?.ok) {
       const errorMap = {
         missing_prompt: '请先在设置中填写“对话标题提示词”',
         missing_api: '请先在设置中选择可用的标题生成 API',
         missing_services: '标题生成服务未就绪，请刷新后重试'
       };
+      const fallback = result?.reason === 'in_progress' ? '标题生成进行中，请稍后再试' : '生成标题失败';
       showNotification?.({
-        message: errorMap[configError] || '标题生成配置不完整',
+        message: errorMap[result?.reason] || fallback,
         type: 'warning',
-        duration: 2400
+        duration: 2200
       });
       return;
     }
 
-    const summaryParts = [];
-    summaryParts.push(`已更新 ${stats.updated} 条`);
-    if (stats.skippedManual) summaryParts.push(`跳过手动 ${stats.skippedManual} 条`);
-    if (stats.skippedEmpty) summaryParts.push(`空会话 ${stats.skippedEmpty} 条`);
-    if (stats.skippedBusy) summaryParts.push(`处理中 ${stats.skippedBusy} 条`);
-    if (stats.failed) summaryParts.push(`失败 ${stats.failed} 条`);
+    const updateResult = await updateConversationSummary(conversation.id, result.title, {
+      expectedSummary,
+      summarySource: 'auto',
+      skipIfManual: true
+    });
+    if (updateResult.ok) {
+      showNotification?.({ message: '标题已更新', duration: 1800 });
+      return;
+    }
 
-    const finalMessage = summaryParts.join('，');
-    showNotification?.({ message: finalMessage, duration: 2200 });
+    const reasonText = updateResult.reason === 'summary_manual'
+      ? '该对话已手动重命名，已跳过'
+      : updateResult.reason === 'summary_changed'
+        ? '标题已被修改，已跳过'
+        : '更新标题失败';
+    showNotification?.({ message: reasonText, type: 'warning', duration: 2200 });
   }
 
   /**
@@ -2859,15 +2774,15 @@ export function createChatHistoryUI(appContext) {
     });
     menu.appendChild(renameOption); // 添加重命名选项
 
-    // 自动生成标题（含分支）选项
+    // 自动生成标题选项
     const autoTitleOption = document.createElement('div');
-    autoTitleOption.textContent = '自动生成标题（含分支）';
+    autoTitleOption.textContent = '自动生成标题';
     autoTitleOption.classList.add('chat-history-context-menu-option');
     autoTitleOption.addEventListener('click', async (e) => {
       e.stopPropagation();
       menu.remove();
       try {
-        await autoGenerateConversationTitlesForTree(conversationId);
+        await autoGenerateConversationTitleForConversation(conversationId);
       } catch (error) {
         console.error('自动生成标题失败:', error);
         showNotification?.({ message: '自动生成标题失败，请重试', type: 'error', duration: 2200 });
