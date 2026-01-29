@@ -64,8 +64,8 @@ input, textarea, select {
     --cerebr-control-bg-active: color-mix(in srgb, var(--cerebr-bg-color) 45%, #ffffff 55%);
     --cerebr-control-border: color-mix(in srgb, var(--cerebr-text-color) 18%, transparent);
     --cerebr-control-border-hover: color-mix(in srgb, var(--cerebr-text-color) 28%, transparent);
-    --cerebr-control-radius: 10px;
-    --cerebr-control-padding: 8px 12px;
+    --cerebr-control-radius: 8px;
+    --cerebr-control-padding: 4px 8px;
     --cerebr-control-inset-shadow: inset 0 1px 2px rgba(15, 15, 15, 0.08);
     --cerebr-control-focus-ring: 0 0 0 3px color-mix(in srgb, var(--cerebr-highlight) 25%, transparent);
 
