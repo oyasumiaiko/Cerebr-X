@@ -79,6 +79,7 @@ export function createSidebarAppContext(isStandalone) {
     apiSettingsText: apiSettingsToggle?.querySelector('span') || null,
     apiSettingsBackButton: document.querySelector('#api-settings .back-button'),
     apiCardsContainer: document.querySelector('#api-settings .api-cards'),
+    apiSettingsAddButton: document.getElementById('api-add-config'),
     previewModal: document.querySelector('.image-preview-modal'),
     previewImage: document.querySelector('.image-preview-modal img'),
     previewCloseButton: document.querySelector('.image-preview-modal .image-preview-close'),

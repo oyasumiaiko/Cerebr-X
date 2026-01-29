@@ -1370,7 +1370,7 @@ input:checked + .slider::before {
 }
 
 .api-cards{
-    margin-bottom: 50vh;
+    margin-bottom: 0;
 }
 
 .settings-header {
@@ -1397,6 +1397,25 @@ input:checked + .slider::before {
     display: flex;
     flex-direction: column;
     gap: 15px;
+}
+
+.api-settings-actions {
+    margin-top: 12px;
+    margin-bottom: 50vh;
+    display: flex;
+    justify-content: center;
+}
+
+.api-add-button {
+    width: 100%;
+    background: color-mix(in srgb, var(--cerebr-message-ai-bg) 70%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--cerebr-border-color) 65%, transparent);
+    color: var(--cerebr-text-color);
+    min-height: 44px;
+}
+
+.api-add-button:hover {
+    background: color-mix(in srgb, var(--cerebr-message-ai-bg) 85%, transparent);
 }
 
 .api-card {
@@ -1580,6 +1599,45 @@ input:checked + .slider::before {
     height: 32px;
     border-radius: 4px;
     position: relative;
+}
+
+.card-button.drag-handle {
+    cursor: grab;
+    opacity: 0.6;
+}
+
+.card-button.drag-handle:active {
+    cursor: grabbing;
+}
+
+.drag-handle-icon {
+    width: 12px;
+    height: 16px;
+    display: inline-block;
+    background-image: radial-gradient(currentColor 1.1px, transparent 1.1px);
+    background-size: 4px 4px;
+    background-position: 0 0;
+    pointer-events: none;
+}
+
+.api-card.dragging {
+    opacity: 0.6;
+}
+
+.api-card.drag-over {
+    border-color: color-mix(in srgb, var(--cerebr-highlight) 55%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--cerebr-highlight) 55%, transparent);
+}
+
+.api-card.delete-confirming {
+    border-color: color-mix(in srgb, var(--cerebr-red) 55%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--cerebr-red) 55%, transparent);
+}
+
+.card-button.delete-btn.is-confirming {
+    opacity: 1;
+    color: var(--cerebr-red);
+    background-color: color-mix(in srgb, var(--cerebr-red) 18%, transparent);
 }
 
 .card-button:hover {
@@ -5257,6 +5315,10 @@ body.hide-references .reference-number.superscript {
 }
 
 #chat-history-panel #api-settings .api-cards {
+    margin-bottom: 0;
+}
+
+#chat-history-panel #api-settings .api-settings-actions {
     margin-bottom: 0;
 }
 

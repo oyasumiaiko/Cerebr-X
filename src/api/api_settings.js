@@ -53,6 +53,9 @@ export function createApiManager(appContext) {
   // 约定：429 时加入黑名单 24 小时；400/403 等不可恢复错误写入 -1 表示永久失效
   const BLACKLIST_STORAGE_KEY = 'apiKeyBlacklist';
   let apiKeyBlacklist = {};
+  // 拖动排序用的临时状态，避免在拖动过程中频繁写入。
+  let draggingCardIndex = null;
+  const DELETE_CONFIRM_TIMEOUT_MS = 2600;
 
   const {
     dom,
@@ -633,6 +636,40 @@ export function createApiManager(appContext) {
     return `${config.baseUrl}|${config.modelName}`;
   }
 
+  // 将卡片索引安全转为数字，非法值返回 null。
+  function parseCardIndex(value) {
+    const index = Number.parseInt(value, 10);
+    return Number.isFinite(index) ? index : null;
+  }
+
+  // 清理拖动高亮，避免残留样式干扰后续操作。
+  function clearDragOverStyles() {
+    if (!apiCardsContainer) return;
+    apiCardsContainer.querySelectorAll('.api-card.drag-over').forEach((card) => {
+      card.classList.remove('drag-over');
+    });
+  }
+
+  // 拖动排序：在数组内移动并同步选中索引，避免选中项错位。
+  function moveConfig(fromIndex, toIndex) {
+    if (fromIndex === toIndex) return false;
+    if (fromIndex < 0 || fromIndex >= apiConfigs.length) return false;
+
+    const [moved] = apiConfigs.splice(fromIndex, 1);
+    const insertIndex = Math.max(0, Math.min(toIndex, apiConfigs.length));
+    apiConfigs.splice(insertIndex, 0, moved);
+
+    if (selectedConfigIndex === fromIndex) {
+      selectedConfigIndex = insertIndex;
+    } else if (fromIndex < insertIndex && selectedConfigIndex > fromIndex && selectedConfigIndex <= insertIndex) {
+      selectedConfigIndex -= 1;
+    } else if (fromIndex > insertIndex && selectedConfigIndex >= insertIndex && selectedConfigIndex < fromIndex) {
+      selectedConfigIndex += 1;
+    }
+
+    return true;
+  }
+
   /**
    * 渲染 API 卡片
    */
@@ -680,6 +717,7 @@ export function createApiManager(appContext) {
     const template = templateCard.cloneNode(true);
     template.classList.remove('template');
     template.style.display = '';
+    template.dataset.index = String(index);
 
     if (index === selectedConfigIndex) {
       template.classList.add('selected');
@@ -954,6 +992,66 @@ export function createApiManager(appContext) {
     apiForm.addEventListener('click', stopPropagation);
     template.querySelector('.api-card-actions').addEventListener('click', stopPropagation);
 
+    // 拖动排序：仅允许通过拖动手柄触发，避免干扰表单输入。
+    const dragHandle = template.querySelector('.drag-handle');
+    if (dragHandle) {
+      dragHandle.setAttribute('draggable', 'true');
+      dragHandle.addEventListener('click', stopPropagation);
+      dragHandle.addEventListener('mousedown', stopPropagation);
+      dragHandle.addEventListener('dragstart', (e) => {
+        e.stopPropagation();
+        draggingCardIndex = index;
+        template.classList.add('dragging');
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(index));
+        }
+      });
+      dragHandle.addEventListener('dragend', () => {
+        draggingCardIndex = null;
+        template.classList.remove('dragging');
+        clearDragOverStyles();
+      });
+    }
+
+    template.addEventListener('dragover', (e) => {
+      const fromIndex = draggingCardIndex ?? parseCardIndex(e.dataTransfer?.getData('text/plain'));
+      const toIndex = parseCardIndex(template.dataset.index);
+      if (fromIndex == null || toIndex == null || fromIndex === toIndex) return;
+      e.preventDefault();
+      clearDragOverStyles();
+      template.classList.add('drag-over');
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'move';
+      }
+    });
+
+    template.addEventListener('dragleave', () => {
+      template.classList.remove('drag-over');
+    });
+
+    template.addEventListener('drop', (e) => {
+      e.preventDefault();
+      template.classList.remove('drag-over');
+
+      const fromIndex = draggingCardIndex ?? parseCardIndex(e.dataTransfer?.getData('text/plain'));
+      const toIndex = parseCardIndex(template.dataset.index);
+      if (fromIndex == null || toIndex == null || fromIndex === toIndex) return;
+
+      const rect = template.getBoundingClientRect();
+      const insertAfter = e.clientY > rect.top + rect.height / 2;
+      const rawIndex = toIndex + (insertAfter ? 1 : 0);
+      const insertIndex = (fromIndex < rawIndex) ? rawIndex - 1 : rawIndex;
+      if (insertIndex === fromIndex) return;
+
+      draggingCardIndex = null;
+      if (moveConfig(fromIndex, insertIndex)) {
+        saveAPIConfigs();
+        renderAPICards();
+        renderFavoriteApis();
+      }
+    });
+
     // --- 输入变化时保存 ---
     [baseUrlInput, displayNameInput, modelNameInput].forEach(input => {
       input.addEventListener('change', () => {
@@ -1105,32 +1203,61 @@ export function createApiManager(appContext) {
       renderAPICards();
     });
 
-    // 删除配置
-    template.querySelector('.delete-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (apiConfigs.length > 1) {
-        const deletedConfig = apiConfigs.splice(index, 1)[0];
-        // 删除对应的轮询状态
-        const deletedConfigId = getConfigIdentifier(deletedConfig);
-        delete apiKeyUsageIndex[deletedConfigId];
-
-        if (selectedConfigIndex >= apiConfigs.length) {
-          selectedConfigIndex = apiConfigs.length - 1;
-        }
-        // 如果删除的是当前选中的，需要更新选中项状态
-        if (index === selectedConfigIndex && apiConfigs.length > 0) {
-             // 默认选中第一个，或者最后一个如果索引超出
-             selectedConfigIndex = Math.max(0, Math.min(selectedConfigIndex, apiConfigs.length - 1));
-        } else if (index < selectedConfigIndex) {
-             // 如果删除的是选中项之前的，索引要减一
-             selectedConfigIndex--;
-        }
-
-        saveAPIConfigs();
-        renderAPICards();
-        renderFavoriteApis(); // 更新收藏列表状态
+    // 删除配置：需要二次确认，避免误触。
+    const deleteButton = template.querySelector('.delete-btn');
+    let deleteConfirmTimer = null;
+    const resetDeleteConfirm = () => {
+      if (!deleteButton) return;
+      deleteButton.dataset.confirming = 'false';
+      deleteButton.classList.remove('is-confirming');
+      template.classList.remove('delete-confirming');
+      deleteButton.title = '删除';
+      if (deleteConfirmTimer) {
+        clearTimeout(deleteConfirmTimer);
+        deleteConfirmTimer = null;
       }
-    });
+    };
+
+    if (deleteButton) {
+      deleteButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (apiConfigs.length <= 1) return;
+
+        if (deleteButton.dataset.confirming === 'true') {
+          resetDeleteConfirm();
+
+          const deletedConfig = apiConfigs.splice(index, 1)[0];
+          // 删除对应的轮询状态
+          const deletedConfigId = getConfigIdentifier(deletedConfig);
+          delete apiKeyUsageIndex[deletedConfigId];
+
+          if (selectedConfigIndex >= apiConfigs.length) {
+            selectedConfigIndex = apiConfigs.length - 1;
+          }
+          // 如果删除的是当前选中的，需要更新选中项状态
+          if (index === selectedConfigIndex && apiConfigs.length > 0) {
+               // 默认选中第一个，或者最后一个如果索引超出
+               selectedConfigIndex = Math.max(0, Math.min(selectedConfigIndex, apiConfigs.length - 1));
+          } else if (index < selectedConfigIndex) {
+               // 如果删除的是选中项之前的，索引要减一
+               selectedConfigIndex--;
+          }
+
+          saveAPIConfigs();
+          renderAPICards();
+          renderFavoriteApis(); // 更新收藏列表状态
+          return;
+        }
+
+        deleteButton.dataset.confirming = 'true';
+        deleteButton.classList.add('is-confirming');
+        template.classList.add('delete-confirming');
+        deleteButton.title = '再次点击确认删除';
+        deleteConfirmTimer = setTimeout(() => {
+          resetDeleteConfirm();
+        }, DELETE_CONFIRM_TIMEOUT_MS);
+      });
+    }
 
     return template;
   }
@@ -1894,6 +2021,7 @@ export function createApiManager(appContext) {
     const toggleButton = currentAppContext.dom.apiSettingsToggle;
     const panel = currentAppContext.dom.apiSettingsPanel;
     const backButtonElement = currentAppContext.dom.apiSettingsBackButton;
+    const addButton = currentAppContext.dom.apiSettingsAddButton;
 
     // 显示/隐藏 API 设置（已并入“聊天记录”面板的标签页）
     toggleButton.addEventListener('click', async (e) => {
@@ -1930,6 +2058,14 @@ export function createApiManager(appContext) {
         panel.classList.remove('visible');
       }
     });
+
+    // 新增按钮：创建空配置，避免依赖克隆。
+    if (addButton) {
+      addButton.addEventListener('click', (e) => {
+        e?.stopPropagation?.();
+        addConfig();
+      });
+    }
   }
 
   /**
@@ -2099,6 +2235,43 @@ export function createApiManager(appContext) {
     return null;
   }
 
+  // 新增配置入口：集中处理默认值与持久化，避免各处复制逻辑。
+  function addConfig(config = {}) {
+    // 确保新配置有必要的字段
+    const newConfig = {
+      id: generateUUID(),
+      apiKey: '',
+      baseUrl: 'https://api.openai.com/v1/chat/completions',
+      modelName: 'new-model',
+      displayName: '新配置',
+      temperature: 1,
+      useStreaming: true,
+      isFavorite: false,
+      customParams: '',
+      customSystemPrompt: '',
+      userMessagePreprocessorTemplate: '',
+      userMessagePreprocessorIncludeInHistory: false,
+      maxChatHistory: 500, // 旧字段：保留默认值
+      maxChatHistoryUser: 500,
+      maxChatHistoryAssistant: 500,
+      ...config // 允许传入部分或完整配置覆盖默认值
+    };
+    // 处理传入的 apiKey 格式
+    if (typeof newConfig.apiKey === 'string' && newConfig.apiKey.includes(',')) {
+      newConfig.apiKey = newConfig.apiKey.split(',').map(k => k.trim()).filter(Boolean);
+    }
+    // 初始化轮询状态
+    const newConfigId = getConfigIdentifier(newConfig);
+    if (Array.isArray(newConfig.apiKey) && newConfig.apiKey.length > 0) {
+      apiKeyUsageIndex[newConfigId] = 0;
+    }
+
+    apiConfigs.push(newConfig);
+    saveAPIConfigs();
+    renderAPICards();
+    renderFavoriteApis();
+  }
+
   /**
    * 公共API接口
    */
@@ -2139,40 +2312,7 @@ export function createApiManager(appContext) {
     },
 
     // 添加新配置
-    addConfig: (config) => {
-        // 确保新配置有必要的字段
-        const newConfig = {
-            apiKey: '',
-            baseUrl: 'https://api.openai.com/v1/chat/completions',
-            modelName: 'new-model',
-            displayName: '新配置',
-            temperature: 1,
-            useStreaming: true,
-            isFavorite: false,
-            customParams: '',
-            customSystemPrompt: '',
-            userMessagePreprocessorTemplate: '',
-            userMessagePreprocessorIncludeInHistory: false,
-            maxChatHistory: 500, // 旧字段：保留默认值
-            maxChatHistoryUser: 500,
-            maxChatHistoryAssistant: 500,
-            ...config // 允许传入部分或完整配置覆盖默认值
-        };
-        // 处理传入的 apiKey 格式
-        if (typeof newConfig.apiKey === 'string' && newConfig.apiKey.includes(',')) {
-            newConfig.apiKey = newConfig.apiKey.split(',').map(k => k.trim()).filter(Boolean);
-        }
-         // 初始化轮询状态
-        const newConfigId = getConfigIdentifier(newConfig);
-        if (Array.isArray(newConfig.apiKey) && newConfig.apiKey.length > 0) {
-            apiKeyUsageIndex[newConfigId] = 0;
-        }
-
-        apiConfigs.push(newConfig);
-        saveAPIConfigs();
-        renderAPICards();
-        renderFavoriteApis();
-    }
+    addConfig
   };
 
   // 启动跨标签页变更监听（在管理器创建时即注册）
