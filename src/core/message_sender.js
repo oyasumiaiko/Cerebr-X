@@ -457,6 +457,15 @@ export function createMessageSender(appContext) {
     return '';
   }
 
+  function truncateTextForTitle(text) {
+    const input = (typeof text === 'string') ? text.trim() : '';
+    if (!input) return '';
+    if (input.length <= 600) return input;
+    const head = input.slice(0, 300);
+    const tail = input.slice(-300);
+    return `[${head}...${tail}]`;
+  }
+
   function formatMessageForTitle(message) {
     if (!message || typeof message.role !== 'string') return '';
     const roleRaw = String(message.role || '').trim().toLowerCase();
@@ -466,9 +475,29 @@ export function createMessageSender(appContext) {
     else if (roleRaw === 'system') roleLabel = '系统消息';
     else roleLabel = `${message.role}消息`;
     const text = extractPlainTextFromContent(message.content, { imagePlaceholder: '[图片]' });
-    const trimmed = (text || '').trim();
+    const trimmed = truncateTextForTitle(text);
     if (!trimmed) return '';
     return `${roleLabel}：\n${trimmed}`;
+  }
+
+  function buildConversationTextForTitle(messages) {
+    if (!Array.isArray(messages) || messages.length === 0) return '';
+    const formattedMessages = messages
+      .map(formatMessageForTitle)
+      .filter(Boolean);
+    return formattedMessages.join('\n\n').trim();
+  }
+
+  function resolvePromptTypeFromMessages(messages) {
+    if (!Array.isArray(messages)) return 'none';
+    const firstUserMessage = messages.find(m => (m?.role || '').toLowerCase() === 'user') || null;
+    return typeof firstUserMessage?.promptType === 'string' ? firstUserMessage.promptType : 'none';
+  }
+
+  function resolveTitlePrefixByPromptType(promptType) {
+    if (promptType === 'summary') return '[总结]';
+    if (promptType === 'selection' || promptType === 'query') return '[划词解释]';
+    return '';
   }
 
   async function requestConversationTitle({ apiConfig, prompt, conversationText }) {
@@ -555,19 +584,15 @@ export function createMessageSender(appContext) {
     const messages = (Array.isArray(chain) && chain.length > 0) ? chain : historyMessages;
     if (!Array.isArray(messages) || messages.length === 0) return;
 
-    const firstUserMessage = messages.find(m => (m?.role || '').toLowerCase() === 'user') || null;
-    const promptType = typeof firstUserMessage?.promptType === 'string' ? firstUserMessage.promptType : 'none';
+    const promptType = resolvePromptTypeFromMessages(messages);
     if (promptType === 'summary' && !settingsManager.getSetting('autoGenerateTitleForSummary')) return;
     if ((promptType === 'selection' || promptType === 'query') && !settingsManager.getSetting('autoGenerateTitleForSelection')) return;
 
     const assistantMessages = messages.filter(m => (m?.role || '').toLowerCase() === 'assistant');
     if (assistantMessages.length !== 1) return;
 
-    const formattedMessages = messages
-      .map(formatMessageForTitle)
-      .filter(Boolean);
-    if (formattedMessages.length === 0) return;
-    const conversationText = formattedMessages.join('\n\n');
+    const conversationText = buildConversationTextForTitle(messages);
+    if (!conversationText) return;
 
     const expectedSummary = chatHistoryUI?.getActiveConversationSummary?.() || '';
     conversationTitleRequests.add(conversationId);
@@ -579,20 +604,89 @@ export function createMessageSender(appContext) {
       });
       if (!title) return;
       let finalTitle = title;
-      const prefixTag =
-        promptType === 'summary'
-          ? '[总结]'
-          : (promptType === 'selection' || promptType === 'query')
-            ? '[划词解释]'
-            : '';
+      const prefixTag = resolveTitlePrefixByPromptType(promptType);
       if (prefixTag && !finalTitle.startsWith(prefixTag)) {
         finalTitle = `${prefixTag} ${finalTitle}`.trim();
       }
-      await chatHistoryUI?.updateConversationSummary?.(conversationId, finalTitle, { expectedSummary });
+      await chatHistoryUI?.updateConversationSummary?.(conversationId, finalTitle, {
+        expectedSummary,
+        summarySource: 'auto',
+        skipIfManual: true
+      });
     } catch (error) {
       console.warn('生成对话标题失败:', error);
     } finally {
       conversationTitleRequests.delete(conversationId);
+    }
+  }
+
+  /**
+   * 生成指定会话消息列表的标题（供历史右键批量生成复用）
+   * @param {{messages?: Array<Object>, conversationId?: string}} options
+   * @returns {Promise<{ok: boolean, title?: string, reason?: string, promptType?: string, prefixTag?: string, error?: Error}>}
+   */
+  async function generateConversationTitleForMessages(options = {}) {
+    const normalizedOptions = (options && typeof options === 'object') ? options : {};
+    const messages = Array.isArray(normalizedOptions.messages) ? normalizedOptions.messages : [];
+    const conversationId = (typeof normalizedOptions.conversationId === 'string')
+      ? normalizedOptions.conversationId.trim()
+      : '';
+    if (!settingsManager?.getSetting || !apiManager) {
+      return { ok: false, reason: 'missing_services' };
+    }
+    if (messages.length === 0) {
+      return { ok: false, reason: 'empty_messages' };
+    }
+
+    const prompt = (settingsManager.getSetting('conversationTitlePrompt') || '').trim();
+    if (!prompt) {
+      return { ok: false, reason: 'missing_prompt' };
+    }
+
+    const apiPref = settingsManager.getSetting('conversationTitleApi');
+    const resolvedApi = (typeof apiManager.resolveApiParam === 'function')
+      ? apiManager.resolveApiParam(apiPref)
+      : apiManager.getSelectedConfig();
+    if (!resolvedApi?.baseUrl || !resolvedApi?.apiKey) {
+      return { ok: false, reason: 'missing_api' };
+    }
+
+    const conversationText = buildConversationTextForTitle(messages);
+    if (!conversationText) {
+      return { ok: false, reason: 'empty_messages' };
+    }
+
+    const promptType = resolvePromptTypeFromMessages(messages);
+    const prefixTag = resolveTitlePrefixByPromptType(promptType);
+
+    if (conversationId && conversationTitleRequests.has(conversationId)) {
+      return { ok: false, reason: 'in_progress' };
+    }
+    if (conversationId) conversationTitleRequests.add(conversationId);
+
+    try {
+      const title = await requestConversationTitleWithRetry({
+        apiConfig: resolvedApi,
+        prompt,
+        conversationText
+      });
+      if (!title) {
+        return { ok: false, reason: 'empty_title' };
+      }
+      let finalTitle = title;
+      if (prefixTag && !finalTitle.startsWith(prefixTag)) {
+        finalTitle = `${prefixTag} ${finalTitle}`.trim();
+      }
+      return {
+        ok: true,
+        title: finalTitle,
+        promptType,
+        prefixTag
+      };
+    } catch (error) {
+      return { ok: false, reason: 'error', error };
+    } finally {
+      if (conversationId) conversationTitleRequests.delete(conversationId);
     }
   }
 
@@ -3782,6 +3876,7 @@ export function createMessageSender(appContext) {
     sendMessage,
     sendWithApiConfig,
     performQuickSummary,
+    generateConversationTitleForMessages,
     abortCurrentRequest,
     enterTemporaryMode,
     exitTemporaryMode,

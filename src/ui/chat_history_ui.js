@@ -1844,6 +1844,7 @@ export function createChatHistoryUI(appContext) {
     let urlToSave = '';
     let titleToSave = '';
     let summaryToSave = summary;
+    let summarySourceToSave = isUpdate ? null : 'default';
     // 分支元信息：仅在更新已有会话时需要“继承”下来，避免分支关系被覆盖丢失
     let parentConversationIdToSave = null;
     let forkedFromMessageIdToSave = null;
@@ -1860,6 +1861,9 @@ export function createChatHistoryUI(appContext) {
         if (existingConversation) {
           urlToSave = existingConversation.url || '';
           titleToSave = existingConversation.title || '';
+          summarySourceToSave = (typeof existingConversation.summarySource === 'string' && existingConversation.summarySource.trim())
+            ? existingConversation.summarySource.trim()
+            : null;
 
           // 继承分支关系字段（如果存在）
           if (typeof existingConversation.parentConversationId === 'string' && existingConversation.parentConversationId.trim()) {
@@ -1906,6 +1910,9 @@ export function createChatHistoryUI(appContext) {
       threadMessageCount: messageStats.threadMessageCount,
       threadCount: messageStats.threadCount
     };
+    if (summarySourceToSave) {
+      conversation.summarySource = summarySourceToSave;
+    }
     if (parentConversationIdToSave) {
       conversation.parentConversationId = parentConversationIdToSave;
     }
@@ -1993,11 +2000,12 @@ export function createChatHistoryUI(appContext) {
   /**
    * 更新会话摘要（对话列表标题），并尽量避免覆盖用户手动重命名的结果。
    * - 如果提供 expectedSummary，则仅在“当前摘要一致”时才写入；
-   * - 便于异步生成标题时安全落盘。
+   * - 如果提供 summarySource，则同步更新摘要来源标记；
+   * - 支持 skipIfManual：遇到手动命名时直接跳过。
    *
    * @param {string} conversationId
    * @param {string} summary
-   * @param {{expectedSummary?: string|null}} [options]
+   * @param {{expectedSummary?: string|null, summarySource?: string|null, skipIfManual?: boolean}} [options]
    * @returns {Promise<{ok: boolean, reason?: string, summary?: string}>}
    */
   async function updateConversationSummary(conversationId, summary, options = {}) {
@@ -2013,16 +2021,240 @@ export function createChatHistoryUI(appContext) {
     const expectedSummary = (typeof options.expectedSummary === 'string')
       ? options.expectedSummary
       : null;
+    const summarySource = (typeof options.summarySource === 'string' && options.summarySource.trim())
+      ? options.summarySource.trim()
+      : null;
+    const skipIfManual = !!options.skipIfManual;
+    const currentSummarySource = (typeof conversation.summarySource === 'string')
+      ? conversation.summarySource
+      : '';
+    if (skipIfManual && currentSummarySource === 'manual') {
+      return { ok: false, reason: 'summary_manual' };
+    }
     if (expectedSummary !== null && expectedSummary !== currentSummary) {
       return { ok: false, reason: 'summary_changed' };
     }
 
     conversation.summary = nextSummary;
+    if (summarySource) {
+      conversation.summarySource = summarySource;
+    }
+    if (activeConversation?.id === normalizedId) {
+      activeConversation.summary = nextSummary;
+      if (summarySource) {
+        activeConversation.summarySource = summarySource;
+      }
+    }
     await putConversation(conversation);
     updateConversationInCache(conversation);
     invalidateMetadataCache();
     refreshChatHistory();
     return { ok: true, summary: nextSummary };
+  }
+
+  /**
+   * 纯函数：根据会话内容恢复“默认摘要”（与首次保存/分支创建规则保持一致）。
+   * @param {Object} conversation
+   * @param {Object|null} promptsConfig
+   * @returns {string}
+   */
+  function resolveConversationDefaultSummary(conversation, promptsConfig) {
+    if (!conversation || !Array.isArray(conversation.messages)) return '';
+    const pageTitle = (typeof conversation.title === 'string') ? conversation.title : '';
+    const baseSummary = buildConversationSummaryFromMessages(conversation.messages, {
+      promptsConfig,
+      pageTitle,
+      maxLength: 160
+    });
+    const hasParent = typeof conversation.parentConversationId === 'string'
+      && conversation.parentConversationId.trim();
+    if (hasParent) {
+      return baseSummary ? `${baseSummary} (分支)` : '分支对话';
+    }
+    return baseSummary;
+  }
+
+  /**
+   * 纯函数：判断会话摘要是否“手动改名”（用于批量生成时跳过）。
+   *
+   * 判定规则：
+   * - summarySource === 'manual' -> 手动改名；
+   * - summarySource === 'auto' / 'default' -> 非手动；
+   * - 其他情况：对比当前摘要与“默认摘要”，不一致视为手动。
+   *
+   * @param {Object} conversation
+   * @param {Object|null} promptsConfig
+   * @returns {boolean}
+   */
+  function isConversationSummaryManuallyEdited(conversation, promptsConfig) {
+    if (!conversation) return false;
+    const source = (typeof conversation.summarySource === 'string')
+      ? conversation.summarySource.trim()
+      : '';
+    if (source === 'manual') return true;
+    if (source === 'auto' || source === 'default') return false;
+    const currentSummary = (typeof conversation.summary === 'string') ? conversation.summary.trim() : '';
+    if (!currentSummary) return false;
+    const expectedSummary = resolveConversationDefaultSummary(conversation, promptsConfig).trim();
+    if (!expectedSummary) return false;
+    return currentSummary !== expectedSummary;
+  }
+
+  /**
+   * 纯函数：根据 parentConversationId 构建子树 ID 列表（包含根会话）。
+   * @param {string} rootConversationId
+   * @param {Array<Object>} metas
+   * @returns {string[]} 以根为首的 BFS 顺序
+   */
+  function buildConversationDescendantIdList(rootConversationId, metas) {
+    const rootId = (typeof rootConversationId === 'string') ? rootConversationId.trim() : '';
+    if (!rootId) return [];
+    const list = Array.isArray(metas) ? metas.filter(Boolean) : [];
+
+    const childrenMap = new Map();
+    for (const meta of list) {
+      const id = (typeof meta?.id === 'string') ? meta.id.trim() : '';
+      if (!id) continue;
+      const rawParent = (typeof meta?.parentConversationId === 'string') ? meta.parentConversationId.trim() : '';
+      const parentId = rawParent && rawParent !== id ? rawParent : '';
+      if (!parentId) continue;
+      if (!childrenMap.has(parentId)) childrenMap.set(parentId, []);
+      childrenMap.get(parentId).push(id);
+    }
+
+    const ordered = [];
+    const visited = new Set();
+    const queue = [rootId];
+    for (let i = 0; i < queue.length; i += 1) {
+      const currentId = queue[i];
+      if (!currentId || visited.has(currentId)) continue;
+      visited.add(currentId);
+      ordered.push(currentId);
+      const children = childrenMap.get(currentId) || [];
+      for (const childId of children) {
+        if (!visited.has(childId)) queue.push(childId);
+      }
+    }
+    return ordered;
+  }
+
+  /**
+   * 批量生成会话标题：包含指定会话 + 其所有未手动改名的分支。
+   * @param {string} conversationId
+   */
+  async function autoGenerateConversationTitlesForTree(conversationId) {
+    const rootId = (typeof conversationId === 'string') ? conversationId.trim() : '';
+    if (!rootId) return;
+
+    const messageSender = services.messageSender;
+    if (!messageSender?.generateConversationTitleForMessages) {
+      showNotification?.({ message: '当前版本不支持批量生成标题', type: 'warning', duration: 2200 });
+      return;
+    }
+
+    let metas = [];
+    try {
+      metas = await getAllConversationMetadataWithCache(false);
+    } catch (_) {
+      metas = [];
+    }
+
+    let targetIds = buildConversationDescendantIdList(rootId, metas);
+    if (targetIds.length === 0) targetIds = [rootId];
+
+    const promptsConfig = promptSettingsManager.getPrompts();
+    showNotification?.({ message: `开始生成标题（${targetIds.length} 条会话）`, duration: 1600 });
+
+    const conversations = await getConversationsByIds(targetIds, true);
+    const convMap = new Map();
+    conversations.forEach((conv) => {
+      if (conv?.id) convMap.set(conv.id, conv);
+    });
+
+    const stats = {
+      total: targetIds.length,
+      updated: 0,
+      skippedManual: 0,
+      skippedEmpty: 0,
+      skippedBusy: 0,
+      failed: 0
+    };
+    let configError = null;
+
+    for (const id of targetIds) {
+      const conversation = convMap.get(id) || await getConversationById(id, true);
+      if (!conversation) {
+        stats.failed += 1;
+        continue;
+      }
+
+      if (isConversationSummaryManuallyEdited(conversation, promptsConfig)) {
+        stats.skippedManual += 1;
+        continue;
+      }
+
+      const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+      if (messages.length === 0) {
+        stats.skippedEmpty += 1;
+        continue;
+      }
+
+      const expectedSummary = (typeof conversation.summary === 'string') ? conversation.summary : '';
+      const result = await messageSender.generateConversationTitleForMessages({
+        conversationId: conversation.id,
+        messages
+      });
+
+      if (!result?.ok) {
+        if (result?.reason === 'missing_prompt' || result?.reason === 'missing_api' || result?.reason === 'missing_services') {
+          configError = result.reason;
+          break;
+        }
+        if (result?.reason === 'in_progress') {
+          stats.skippedBusy += 1;
+          continue;
+        }
+        stats.failed += 1;
+        continue;
+      }
+
+      const updateResult = await updateConversationSummary(conversation.id, result.title, {
+        expectedSummary,
+        summarySource: 'auto',
+        skipIfManual: true
+      });
+      if (updateResult.ok) {
+        stats.updated += 1;
+      } else if (updateResult.reason === 'summary_manual' || updateResult.reason === 'summary_changed') {
+        stats.skippedManual += 1;
+      } else {
+        stats.failed += 1;
+      }
+    }
+
+    if (configError) {
+      const errorMap = {
+        missing_prompt: '请先在设置中填写“对话标题提示词”',
+        missing_api: '请先在设置中选择可用的标题生成 API',
+        missing_services: '标题生成服务未就绪，请刷新后重试'
+      };
+      showNotification?.({
+        message: errorMap[configError] || '标题生成配置不完整',
+        type: 'warning',
+        duration: 2400
+      });
+      return;
+    }
+
+    const summaryParts = [];
+    summaryParts.push(`已更新 ${stats.updated} 条`);
+    if (stats.skippedManual) summaryParts.push(`跳过手动 ${stats.skippedManual} 条`);
+    if (stats.skippedEmpty) summaryParts.push(`空会话 ${stats.skippedEmpty} 条`);
+    if (stats.skippedBusy) summaryParts.push(`处理中 ${stats.skippedBusy} 条`);
+    if (stats.failed) summaryParts.push(`失败 ${stats.failed} 条`);
+
+    const finalMessage = summaryParts.join('，');
+    showNotification?.({ message: finalMessage, duration: 2200 });
   }
 
   /**
@@ -2609,13 +2841,14 @@ export function createChatHistoryUI(appContext) {
         if (conversation) {
           const newName = window.prompt('请输入新的对话名称:', conversation.summary || '');
           if (newName !== null && newName.trim() !== '') { // 确保用户输入了内容且没有取消
-            conversation.summary = newName.trim();
-            await putConversation(conversation); // 保存更新
-            updateConversationInCache(conversation); // 更新缓存
-            invalidateMetadataCache();
-            refreshChatHistory(); // 刷新列表显示新名称
-            
-            showNotification({ message: '对话已重命名', duration: 1800 });
+            const result = await updateConversationSummary(conversation.id, newName.trim(), {
+              summarySource: 'manual'
+            });
+            if (result.ok) {
+              showNotification({ message: '对话已重命名', duration: 1800 });
+            } else {
+              showNotification({ message: '重命名失败，请重试', type: 'error', duration: 2200 });
+            }
           }
         }
       } catch (error) {
@@ -2625,6 +2858,22 @@ export function createChatHistoryUI(appContext) {
       }
     });
     menu.appendChild(renameOption); // 添加重命名选项
+
+    // 自动生成标题（含分支）选项
+    const autoTitleOption = document.createElement('div');
+    autoTitleOption.textContent = '自动生成标题（含分支）';
+    autoTitleOption.classList.add('chat-history-context-menu-option');
+    autoTitleOption.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      menu.remove();
+      try {
+        await autoGenerateConversationTitlesForTree(conversationId);
+      } catch (error) {
+        console.error('自动生成标题失败:', error);
+        showNotification?.({ message: '自动生成标题失败，请重试', type: 'error', duration: 2200 });
+      }
+    });
+    menu.appendChild(autoTitleOption);
 
     // 打开对话页面（会话关联 URL）选项
     const openUrlOption = document.createElement('div');
@@ -10635,6 +10884,7 @@ export function createChatHistoryUI(appContext) {
         id: newConversationId,
         messages: newChatHistory.messages,
         summary: summary,
+        summarySource: 'default',
         startTime: startTime,
         endTime: endTime,
         title: pageInfo?.title || '',
