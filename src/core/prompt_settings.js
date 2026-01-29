@@ -266,10 +266,9 @@ class PromptSettings {
             const resetButton = document.createElement('button');
             resetButton.className = 'reset-single-prompt';
             resetButton.title = '恢复默认';
+            resetButton.setAttribute('aria-label', '恢复默认');
             resetButton.innerHTML = `
-                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M13 3L3 13M3 3l10 10"/>
-                </svg>
+                <i class="fas fa-undo" aria-hidden="true"></i>
             `;
 
             // 添加点击事件
@@ -333,13 +332,15 @@ class PromptSettings {
         });
 
         // 重置所有按钮
-        this.resetPromptsButton.addEventListener('click', () => {
-            if (confirm('确定要恢复所有默认提示词和模型设置吗？这将覆盖当前的所有自定义设置。')) {
-                this.resetPrompts();
-                // 自动保存重置后的设置
-                this.autoSavePromptSettings();
-            }
-        });
+        if (this.resetPromptsButton) {
+            this.resetPromptsButton.addEventListener('click', () => {
+                if (confirm('确定要恢复所有默认提示词和模型设置吗？这将覆盖当前的所有自定义设置。')) {
+                    this.resetPrompts();
+                    // 自动保存重置后的设置
+                    this.autoSavePromptSettings();
+                }
+            });
+        }
 
         // 保存按钮
         this.savePromptsButton.addEventListener('click', () => this.savePromptSettings(true));

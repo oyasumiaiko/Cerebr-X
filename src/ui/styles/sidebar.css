@@ -4165,16 +4165,6 @@ body.hide-references .reference-number.superscript {
     transition: all 0.2s ease;
 }
 
-#reset-prompts {
-    background: none;
-    border: 1px solid var(--cerebr-border-color);
-    color: var(--cerebr-text-color);
-}
-
-#reset-prompts:hover {
-    background: var(--cerebr-message-user-bg);
-}
-
 #save-prompts {
     background: transparent;
     border: 1px solid var(--cerebr-border-color);
@@ -4193,13 +4183,6 @@ body.hide-references .reference-number.superscript {
     border-color: var(--cerebr-border-color);
 }
 
-:root.dark-theme #reset-prompts {
-    border-color: var(--cerebr-border-color);
-}
-
-:root.dark-theme #reset-prompts:hover {
-    background: var(--cerebr-message-user-bg);
-}
 
 /* 提示词设置样式 */
 .prompt-header-container {
@@ -4226,27 +4209,27 @@ body.hide-references .reference-number.superscript {
     min-height: 0;
     min-width: 0;
     padding: 0;
-    border: none;
+    border: 1px solid transparent;
     background: transparent;
     cursor: pointer;
     border-radius: 4px;
-    transition: background-color 0.2s ease;
+    color: color-mix(in srgb, var(--cerebr-text-color) 55%, transparent);
+    transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .reset-single-prompt:hover {
-    background-color: var(--cerebr-hover-color);
+    background-color: color-mix(in srgb, var(--cerebr-bg-color) 92%, var(--cerebr-border-color));
+    color: color-mix(in srgb, var(--cerebr-text-color) 70%, transparent);
 }
 
-.reset-single-prompt svg {
-    width: 14px;
-    height: 14px;
-    stroke: var(--cerebr-icon-color);
-    opacity: 0.6;
+.reset-single-prompt i {
+    font-size: 12px;
+    opacity: 0.7;
     transition: opacity 0.2s ease;
 }
 
-.reset-single-prompt:hover svg {
-    opacity: 1;
+.reset-single-prompt:hover i {
+    opacity: 0.9;
 }
 
 /* 模型选择器样式（由 JS 动态插入的 .model-select-container） */
@@ -4370,6 +4353,7 @@ body.hide-references .reference-number.superscript {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    min-height: 0;
     border: 1px solid var(--cerebr-border-color);
     background: var(--cerebr-message-user-bg);
     color: var(--cerebr-text-color);
