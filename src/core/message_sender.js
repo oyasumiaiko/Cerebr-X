@@ -8,6 +8,7 @@ import { composeMessages } from './message_composer.js';
 import { renderUserMessageTemplateWithInjection, applyRenderedTextToMessageContent } from './message_preprocessor.js';
 import { extractThinkingFromText, mergeStreamingThoughts, mergeThoughts } from '../utils/thoughts_parser.js';
 import { createAdaptiveUpdateThrottler } from '../utils/adaptive_update_throttler.js';
+import { extractPlainTextFromContent } from '../utils/conversation_title.js';
 
 /**
  * 创建消息发送器
@@ -395,6 +396,144 @@ export function createMessageSender(appContext) {
       ...normalized,
       ...messages.slice(lastUserIndex + 1)
     ];
+  }
+
+  // 对话标题生成：避免重复触发同一会话的标题请求
+  const conversationTitleRequests = new Set();
+
+  function normalizeConversationTitleText(rawText) {
+    const input = (typeof rawText === 'string') ? rawText.trim() : '';
+    if (!input) return '';
+    let text = input;
+
+    // 兼容模型返回 JSON：优先读取 title 字段
+    if (text.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed.title === 'string') {
+          text = parsed.title;
+        }
+      } catch (_) {}
+    }
+
+    const firstLine = text.split(/\r?\n/).find(line => line.trim()) || '';
+    let cleaned = firstLine.trim();
+    cleaned = cleaned.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '');
+    cleaned = cleaned.replace(/^(标题|Title)[:：]\s*/i, '');
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    const maxLength = 160;
+    if (cleaned.length > maxLength) cleaned = cleaned.slice(0, maxLength);
+    return cleaned;
+  }
+
+  async function extractConversationTitleFromResponse(response, apiConfig) {
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch (e) {
+      const fallbackText = await response.text().catch(() => '');
+      return fallbackText || '';
+    }
+
+    if (payload && payload.error) {
+      const msg = payload.error.message || 'API 返回错误';
+      throw new Error(msg);
+    }
+
+    const isGeminiApi = response.url.includes('generativelanguage.googleapis.com')
+      || apiConfig?.baseUrl === 'genai';
+    if (isGeminiApi) {
+      const parts = payload?.candidates?.[0]?.content?.parts || [];
+      const textParts = parts
+        .filter(part => typeof part?.text === 'string' && !part?.thought)
+        .map(part => part.text);
+      return textParts.join('');
+    }
+
+    const choice = Array.isArray(payload?.choices) ? payload.choices[0] : null;
+    if (typeof choice?.message?.content === 'string') return choice.message.content;
+    if (typeof choice?.text === 'string') return choice.text;
+    if (typeof payload?.content === 'string') return payload.content;
+    return '';
+  }
+
+  async function requestConversationTitle({ apiConfig, prompt, userText, assistantText }) {
+    const messages = [
+      { role: 'system', content: prompt },
+      { role: 'user', content: userText },
+      { role: 'assistant', content: assistantText }
+    ];
+    const configForTitle = { ...apiConfig, useStreaming: false };
+    const requestBody = await apiManager.buildRequest({
+      messages,
+      config: configForTitle,
+      overrides: { stream: false }
+    });
+    if (requestBody && typeof requestBody === 'object' && 'stream' in requestBody) {
+      requestBody.stream = false;
+    }
+
+    const response = await apiManager.sendRequest({
+      requestBody,
+      config: configForTitle
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(errorText || `API错误 (${response.status})`);
+    }
+
+    const rawTitle = await extractConversationTitleFromResponse(response, configForTitle);
+    return normalizeConversationTitleText(rawTitle);
+  }
+
+  // 触发条件：
+  // - 仅首条 AI 回复完成后触发（避免多轮对话重复生成）；
+  // - 跳过划词线程与重新生成场景；
+  // - 写入前校验 expectedSummary，避免覆盖用户手动重命名。
+  async function maybeGenerateConversationTitle({ conversationId, attemptState, regenerateMode }) {
+    if (!conversationId) return;
+    if (regenerateMode) return;
+    if (attemptState?.threadContext) return;
+    if (!settingsManager?.getSetting || !apiManager) return;
+    if (conversationTitleRequests.has(conversationId)) return;
+
+    const enabled = !!settingsManager.getSetting('autoGenerateConversationTitle');
+    if (!enabled) return;
+
+    const prompt = (settingsManager.getSetting('conversationTitlePrompt') || '').trim();
+    if (!prompt) return;
+
+    const apiPref = settingsManager.getSetting('conversationTitleApi');
+    const resolvedApi = (typeof apiManager.resolveApiParam === 'function')
+      ? apiManager.resolveApiParam(apiPref)
+      : apiManager.getSelectedConfig();
+    if (!resolvedApi?.baseUrl || !resolvedApi?.apiKey) return;
+
+    const historyMessages = chatHistoryManager?.chatHistory?.messages || [];
+    const userMessages = historyMessages.filter(m => (m?.role || '').toLowerCase() === 'user');
+    const assistantMessages = historyMessages.filter(m => (m?.role || '').toLowerCase() === 'assistant');
+    if (userMessages.length !== 1 || assistantMessages.length !== 1) return;
+
+    const userText = extractPlainTextFromContent(userMessages[0]?.content, { imagePlaceholder: '[图片]' });
+    const assistantText = extractPlainTextFromContent(assistantMessages[0]?.content, { imagePlaceholder: '[图片]' });
+    if (!userText || !assistantText) return;
+
+    const expectedSummary = chatHistoryUI?.getActiveConversationSummary?.() || '';
+    conversationTitleRequests.add(conversationId);
+    try {
+      const title = await requestConversationTitle({
+        apiConfig: resolvedApi,
+        prompt,
+        userText,
+        assistantText
+      });
+      if (!title) return;
+      await chatHistoryUI?.updateConversationSummary?.(conversationId, title, { expectedSummary });
+    } catch (error) {
+      console.warn('生成对话标题失败:', error);
+    } finally {
+      conversationTitleRequests.delete(conversationId);
+    }
   }
 
   /**
@@ -1723,6 +1862,16 @@ export function createMessageSender(appContext) {
         await chatHistoryUI.saveCurrentConversation(false); // 新会话，生成新的 conversation id
         // 获取新创建的会话ID并更新本地变量
         currentConversationId = chatHistoryUI.getCurrentConversationId();
+      }
+
+      // 首条 AI 回复后尝试生成对话标题（异步，不阻塞主流程）
+      const titleConversationId = currentConversationId || chatHistoryUI.getCurrentConversationId();
+      if (titleConversationId) {
+        void maybeGenerateConversationTitle({
+          conversationId: titleConversationId,
+          attemptState: attempt,
+          regenerateMode
+        });
       }
 
     } catch (error) {

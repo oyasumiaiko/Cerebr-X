@@ -1195,6 +1195,13 @@ body.thread-resize-active * {
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--cerebr-highlight) 20%, transparent);
 }
 
+.settings-textarea {
+    min-height: 88px;
+    resize: vertical;
+    line-height: 1.4;
+    font-family: inherit;
+}
+
 .settings-input-actions {
     display: flex;
     justify-content: flex-end;

@@ -13,18 +13,32 @@ const DEFAULT_MAX_LENGTH = 160;
 /**
  * 提取消息的纯文本（兼容历史的多模态数组结构）
  * @param {any} content
+ * @param {{imagePlaceholder?: string}} [options]
  * @returns {string}
  */
-function extractPlainText(content) {
+function extractPlainText(content, options = {}) {
+  const imagePlaceholder = (typeof options.imagePlaceholder === 'string')
+    ? options.imagePlaceholder
+    : '[图片]';
   if (typeof content === 'string') return content.trim();
   if (Array.isArray(content)) {
     return content
-      .map(part => (part?.type === 'image_url' ? '[图片]' : (part?.text || '').trim()))
+      .map(part => (part?.type === 'image_url' ? imagePlaceholder : (part?.text || '').trim()))
       .filter(Boolean)
       .join(' ')
       .trim();
   }
   return '';
+}
+
+/**
+ * 对外导出：提取消息的纯文本（兼容历史的多模态数组结构）
+ * @param {any} content
+ * @param {{imagePlaceholder?: string}} [options]
+ * @returns {string}
+ */
+export function extractPlainTextFromContent(content, options = {}) {
+  return extractPlainText(content, options);
 }
 
 /**

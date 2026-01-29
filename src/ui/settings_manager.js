@@ -98,6 +98,12 @@ export function createSettingsManager(appContext) {
     autoScroll: true,
     clearOnSearch: true, // This might be specific to a search feature, not a general setting
     shouldSendChatHistory: true,
+    // 对话标题生成：默认关闭，避免未配置时触发额外请求
+    autoGenerateConversationTitle: false,
+    // 对话标题生成：默认跟随当前 API
+    conversationTitleApi: 'follow_current',
+    // 对话标题生成：默认提示词（用户可在设置中修改）
+    conversationTitlePrompt: '请根据以下对话生成一个简短标题，尽量在20字以内，仅输出标题本身，不要任何前缀或引号。',
     // 是否在发送请求时回传 thoughtSignature 等签名字段（用于部分代理的推理校验/连续性）。
     // 说明：即使关闭该开关，Cerebr 仍会在接收响应时照常把 signature 存入历史，便于用户随时重新开启。
     shouldSendSignature: true,
@@ -116,6 +122,48 @@ export function createSettingsManager(appContext) {
   // 当前设置
   let currentSettings = {...DEFAULT_SETTINGS};
   let backgroundImageLoadToken = 0;
+
+  const getConversationTitleApiOptions = () => {
+    const options = [{ label: '跟随当前 API', value: 'follow_current' }];
+    const apiConfigs = services.apiManager?.getAllConfigs?.() || [];
+    if (!Array.isArray(apiConfigs) || apiConfigs.length === 0) return options;
+
+    apiConfigs.forEach((config) => {
+      if (!config) return;
+      const fallbackValue = `${config.baseUrl || ''}|${config.modelName || ''}`;
+      const value = config.id || fallbackValue;
+      const label = (config.displayName && String(config.displayName).trim())
+        || (config.modelName && String(config.modelName).trim())
+        || (config.baseUrl && String(config.baseUrl).trim())
+        || value;
+      options.push({ label, value });
+    });
+
+    return options;
+  };
+
+  function refreshConversationTitleApiOptions() {
+    const select = dynamicElements.get('conversationTitleApi');
+    if (!select) return;
+    const currentValue = select.value
+      || currentSettings.conversationTitleApi
+      || DEFAULT_SETTINGS.conversationTitleApi;
+    const options = getConversationTitleApiOptions();
+    select.textContent = '';
+    options.forEach((opt) => {
+      const option = document.createElement('option');
+      option.value = opt.value;
+      option.textContent = opt.label;
+      select.appendChild(option);
+    });
+    if (currentValue && !options.some(opt => opt.value === currentValue)) {
+      const extra = document.createElement('option');
+      extra.value = currentValue;
+      extra.textContent = currentValue;
+      select.appendChild(extra);
+    }
+    select.value = currentValue || DEFAULT_SETTINGS.conversationTitleApi;
+  }
 
   // 动态设置注册表：新增设置仅需在此处登记即可自动渲染与持久化
   // type: 'toggle' | 'range' | 'select'
@@ -209,6 +257,32 @@ export function createSettingsManager(appContext) {
       label: '发送聊天历史',
       defaultValue: DEFAULT_SETTINGS.shouldSendChatHistory,
       apply: (v) => applySendChatHistory(v)
+    },
+    {
+      key: 'autoGenerateConversationTitle',
+      type: 'toggle',
+      id: 'auto-generate-conversation-title',
+      label: '自动生成对话标题',
+      defaultValue: DEFAULT_SETTINGS.autoGenerateConversationTitle
+    },
+    {
+      key: 'conversationTitleApi',
+      type: 'select',
+      id: 'conversation-title-api',
+      label: '对话标题生成 API',
+      options: () => getConversationTitleApiOptions(),
+      defaultValue: DEFAULT_SETTINGS.conversationTitleApi
+    },
+    {
+      key: 'conversationTitlePrompt',
+      type: 'textarea',
+      id: 'conversation-title-prompt',
+      label: '对话标题提示词',
+      placeholder: '输入用于生成对话标题的提示词（系统提示词）',
+      rows: 4,
+      defaultValue: DEFAULT_SETTINGS.conversationTitlePrompt,
+      readFromUI: (el) => (el?.value || '').trim(),
+      writeToUI: (el, value) => { if (el) el.value = value || ''; }
     },
     // 发送 signature（推理签名透传）
     {
@@ -581,8 +655,8 @@ export function createSettingsManager(appContext) {
         item.appendChild(valueSpan);
         targetSection.appendChild(item);
         dynamicElements.set(def.key, input);
-      } else if (def.type === 'text') {
-        if (def.id === 'background-image-url') {
+      } else if (def.type === 'text' || def.type === 'textarea') {
+        if (def.type === 'text' && def.id === 'background-image-url') {
           item.classList.add('background-image-setting');
           labelSpan.classList.add('background-image-label');
 
@@ -656,11 +730,20 @@ export function createSettingsManager(appContext) {
 
         } else {
           item.classList.add('menu-item--stack');
-          const input = document.createElement('input');
-          input.type = 'text';
+          const input = (def.type === 'textarea')
+            ? document.createElement('textarea')
+            : document.createElement('input');
+          if (def.type !== 'textarea') {
+            input.type = 'text';
+          }
           input.id = def.id || `setting-${def.key}`;
           input.placeholder = def.placeholder || '';
-          input.className = 'settings-text-input';
+          input.className = def.type === 'textarea'
+            ? 'settings-text-input settings-textarea'
+            : 'settings-text-input';
+          if (def.type === 'textarea' && def.rows) {
+            input.rows = Number(def.rows) || 3;
+          }
           item.appendChild(input);
 
           const actionBar = document.createElement('div');
@@ -1441,6 +1524,12 @@ export function createSettingsManager(appContext) {
     
     // 通用绑定（保存+应用+广播）
     bindSettingsFromSchema();
+
+    // API 配置更新后刷新“对话标题生成 API”的下拉选项
+    refreshConversationTitleApiOptions();
+    window.addEventListener('apiConfigsUpdated', () => {
+      refreshConversationTitleApiOptions();
+    });
   }
   
   // 填充主题选项

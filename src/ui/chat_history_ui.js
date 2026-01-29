@@ -1986,6 +1986,45 @@ export function createChatHistoryUI(appContext) {
     return cached;
   }
 
+  function getActiveConversationSummary() {
+    return (typeof activeConversation?.summary === 'string') ? activeConversation.summary : '';
+  }
+
+  /**
+   * 更新会话摘要（对话列表标题），并尽量避免覆盖用户手动重命名的结果。
+   * - 如果提供 expectedSummary，则仅在“当前摘要一致”时才写入；
+   * - 便于异步生成标题时安全落盘。
+   *
+   * @param {string} conversationId
+   * @param {string} summary
+   * @param {{expectedSummary?: string|null}} [options]
+   * @returns {Promise<{ok: boolean, reason?: string, summary?: string}>}
+   */
+  async function updateConversationSummary(conversationId, summary, options = {}) {
+    const normalizedId = (typeof conversationId === 'string') ? conversationId.trim() : '';
+    const nextSummary = (typeof summary === 'string') ? summary.trim() : '';
+    if (!normalizedId) return { ok: false, reason: 'missing_id' };
+    if (!nextSummary) return { ok: false, reason: 'empty_summary' };
+
+    const conversation = await getConversationFromCacheOrLoad(normalizedId);
+    if (!conversation) return { ok: false, reason: 'not_found' };
+
+    const currentSummary = (typeof conversation.summary === 'string') ? conversation.summary : '';
+    const expectedSummary = (typeof options.expectedSummary === 'string')
+      ? options.expectedSummary
+      : null;
+    if (expectedSummary !== null && expectedSummary !== currentSummary) {
+      return { ok: false, reason: 'summary_changed' };
+    }
+
+    conversation.summary = nextSummary;
+    await putConversation(conversation);
+    updateConversationInCache(conversation);
+    invalidateMetadataCache();
+    refreshChatHistory();
+    return { ok: true, summary: nextSummary };
+  }
+
   /**
    * 加载选中的对话记录到当前聊天窗口
    * @param {Object} conversation - 对话记录对象
@@ -10662,6 +10701,8 @@ export function createChatHistoryUI(appContext) {
     refreshChatHistory,
     updatePageInfo,
     getCurrentConversationId: () => currentConversationId,
+    getActiveConversationSummary,
+    updateConversationSummary,
     clearMemoryCache,
     createForkConversation,
     restartAutoBackupScheduler,
