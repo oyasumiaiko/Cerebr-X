@@ -342,10 +342,16 @@
                     <div class="prompt-group">
                         <label>系统提示词</label>
                         <textarea id="system-prompt" placeholder="输入系统提示词..."></textarea>
+                        <div class="prompt-help">
+                            提示：系统提示词会与网页内容、截图提示、以及用户提示词中的 <code>{{system}}...{{end_system}}</code> 注入块合并为 system 消息；若 API 配置有“自定义系统提示词”，会置顶合并。支持 <code>{{datetime}}</code>/<code>{{date}}</code>/<code>{{time}}</code>。
+                        </div>
                     </div>
                     <div class="prompt-group">
                         <label>快速总结提示词</label>
                         <textarea id="summary-prompt" placeholder="输入页面总结时使用的提示词..."></textarea>
+                        <div class="prompt-help">
+                            支持在提示词中写 <code>{{system}}...{{end_system}}</code> 追加系统指令（发送时会被抽出并合并到 system 消息）；支持 <code>{{datetime}}</code>/<code>{{date}}</code>/<code>{{time}}</code>。
+                        </div>
                     </div>
                 </div>
             </section>
@@ -358,10 +364,16 @@
                     <div class="prompt-group">
                         <label>划词方式1</label>
                         <textarea id="query-prompt" placeholder="输入划词方式1使用的提示词..."></textarea>
+                        <div class="prompt-help">
+                            使用 <code>&lt;SELECTION&gt;</code> 代表选中文本；支持 <code>{{system}}...{{end_system}}</code> 注入系统指令；支持 <code>{{datetime}}</code>/<code>{{date}}</code>/<code>{{time}}</code>。
+                        </div>
                     </div>
                     <div class="prompt-group">
                         <label>划词方式2</label>
                         <textarea id="selection-prompt" placeholder="输入划词方式2使用的提示词..."></textarea>
+                        <div class="prompt-help">
+                            使用 <code>&lt;SELECTION&gt;</code> 代表选中文本；支持 <code>{{system}}...{{end_system}}</code> 注入系统指令；支持 <code>{{datetime}}</code>/<code>{{date}}</code>/<code>{{time}}</code>。
+                        </div>
                     </div>
                 </div>
             </section>

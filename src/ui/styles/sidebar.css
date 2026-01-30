@@ -4119,6 +4119,22 @@ body.hide-references .reference-number.superscript {
     /* 滚动条样式统一至全局 */
 }
 
+.prompt-help {
+    /* 提示词设置：帮助说明文案 */
+    grid-column: 1 / -1;
+    font-size: 11px;
+    line-height: 1.5;
+    color: color-mix(in srgb, var(--cerebr-text-color) 70%, transparent);
+}
+
+.prompt-help code {
+    font-size: 11px;
+    padding: 0 3px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--cerebr-input-bg) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+}
+
 .prompt-group .url-rules-panel {
     grid-column: 1 / -1;
 }
