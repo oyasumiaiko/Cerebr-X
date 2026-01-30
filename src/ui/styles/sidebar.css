@@ -5229,9 +5229,9 @@ body.hide-references .reference-number.superscript {
 #chat-history-panel .settings-tab-content {
     padding: 12px;
     gap: 10px;
-    background: color-mix(in srgb, var(--cerebr-bg-color) 92%, var(--cerebr-message-ai-bg));
-    border: 1px solid var(--cerebr-border-color);
-    border-radius: 12px;
+    background: color-mix(in srgb, var(--cerebr-bg-color) 94%, var(--cerebr-message-ai-bg));
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 85%, transparent);
+    border-radius: 10px;
 }
 
 #chat-history-panel .settings-tab-content .esc-settings-menu {
@@ -5243,49 +5243,107 @@ body.hide-references .reference-number.superscript {
 }
 
 #chat-history-panel .settings-tab-content .settings-group {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 12px;
-    padding: 10px 12px;
-    border-radius: 10px;
-    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 80%, transparent);
-    background: color-mix(in srgb, var(--cerebr-message-ai-bg) 80%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 0 10px;
+}
+
+#chat-history-panel .settings-tab-content .settings-group + .settings-group {
+    border-top: 1px solid color-mix(in srgb, var(--cerebr-border-color) 85%, transparent);
+    padding-top: 12px;
 }
 
 #chat-history-panel .settings-tab-content .settings-group-title {
-    grid-column: 1 / -1;
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.08em;
     color: color-mix(in srgb, var(--cerebr-text-color) 65%, transparent);
+    margin: 2px 0 2px;
 }
 
-#chat-history-panel .settings-tab-content .settings-group .menu-item {
+#chat-history-panel .settings-tab-content .menu-item {
     width: 100%;
+    margin: 0;
+    padding: 6px 0;
+    border-radius: 0;
+    background: transparent;
+    display: grid;
+    grid-template-columns: minmax(140px, 1fr) minmax(180px, 2fr) auto;
+    align-items: center;
+    column-gap: 12px;
 }
 
-#chat-history-panel .settings-tab-content .settings-group .background-image-setting,
-#chat-history-panel .settings-tab-content .settings-group .menu-item--stack {
-    grid-column: 1 / -1;
+#chat-history-panel .settings-tab-content .menu-item:hover {
+    background: transparent;
 }
 
 #chat-history-panel .settings-tab-content .menu-item > span:first-child {
-    flex: 0 1 45%;
-    min-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-width: 0;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.35;
 }
 
 #chat-history-panel .settings-tab-content .menu-item input[type="range"] {
-    width: auto;
+    width: 100%;
     max-width: 100%;
-    flex: 1 1 160px;
     min-width: 140px;
+    margin: 0;
 }
 
 #chat-history-panel .settings-tab-content .menu-item span:last-child {
     min-width: 48px;
+    text-align: right;
+    justify-self: end;
+}
+
+#chat-history-panel .settings-tab-content .menu-item select,
+#chat-history-panel .settings-tab-content .menu-item input[type="text"],
+#chat-history-panel .settings-tab-content .menu-item input[type="number"],
+#chat-history-panel .settings-tab-content .menu-item input[type="url"],
+#chat-history-panel .settings-tab-content .menu-item input[type="search"],
+#chat-history-panel .settings-tab-content .menu-item input[type="password"],
+#chat-history-panel .settings-tab-content .menu-item input[type="email"] {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+#chat-history-panel .settings-tab-content .menu-item .switch {
+    justify-self: end;
+}
+
+#chat-history-panel .settings-tab-content .menu-item--stack {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+}
+
+#chat-history-panel .settings-tab-content .menu-item--stack > span {
+    grid-column: 1 / -1;
+}
+
+#chat-history-panel .settings-tab-content .menu-item--stack .settings-text-input,
+#chat-history-panel .settings-tab-content .menu-item--stack textarea {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+#chat-history-panel .settings-tab-content .menu-item--stack .settings-input-actions {
+    justify-content: flex-end;
+}
+
+#chat-history-panel .settings-tab-content .background-image-setting {
+    align-items: center;
+}
+
+#chat-history-panel .settings-tab-content .background-image-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 100%;
 }
 
 /* 滚动条样式统一至全局 */

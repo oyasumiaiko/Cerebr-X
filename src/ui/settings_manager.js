@@ -395,6 +395,7 @@ export function createSettingsManager(appContext) {
     {
       key: 'fullscreenWidth',
       type: 'range',
+      menu: 'quick',
       id: 'fullscreen-width',
       label: '全屏宽度',
       group: 'layout',
@@ -826,20 +827,22 @@ export function createSettingsManager(appContext) {
           }
           item.appendChild(input);
 
-          const actionBar = document.createElement('div');
-          actionBar.className = 'settings-input-actions';
-          const clearBtn = document.createElement('button');
-          clearBtn.type = 'button';
-          clearBtn.className = 'settings-input-clear';
-          clearBtn.textContent = '清除';
-          clearBtn.addEventListener('click', (evt) => {
-            evt.preventDefault();
-            evt.stopPropagation();
-            input.value = '';
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-          });
-          actionBar.appendChild(clearBtn);
-          item.appendChild(actionBar);
+          if (def.key !== 'conversationTitlePrompt') {
+            const actionBar = document.createElement('div');
+            actionBar.className = 'settings-input-actions';
+            const clearBtn = document.createElement('button');
+            clearBtn.type = 'button';
+            clearBtn.className = 'settings-input-clear';
+            clearBtn.textContent = '清除';
+            clearBtn.addEventListener('click', (evt) => {
+              evt.preventDefault();
+              evt.stopPropagation();
+              input.value = '';
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+            actionBar.appendChild(clearBtn);
+            item.appendChild(actionBar);
+          }
 
           targetSection.appendChild(item);
           dynamicElements.set(def.key, input);
