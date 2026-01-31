@@ -125,10 +125,13 @@ export function createSettingsManager(appContext) {
     // 是否在输入框 placeholder 中显示当前模型名
     showModelNameInPlaceholder: true
   };
+  // 不需要持久化到 sync 的设置（大文本/临时值）
+  const NON_SYNC_SETTINGS_KEYS = new Set(['backgroundImageUrl']);
 
   // 当前设置
   let currentSettings = {...DEFAULT_SETTINGS};
   let backgroundImageLoadToken = 0;
+  let backgroundImageQueueState = { signature: '', pool: [], index: 0 };
 
   const getConversationTitleApiOptions = () => {
     const options = [{ label: '跟随当前 API', value: 'follow_current' }];
@@ -192,16 +195,16 @@ export function createSettingsManager(appContext) {
       id: 'background-image-url',
       label: '背景图片',
       group: 'background',
-      placeholder: '输入图片 URL、data URI 或 txt 文件路径',
+      placeholder: '可粘贴多行，每行一个 URL/本机路径',
       defaultValue: DEFAULT_SETTINGS.backgroundImageUrl,
       apply: (v) => applyBackgroundImage(v),
-      readFromUI: (el) => (el.value || '').trim(),
+      readFromUI: (el) => (el?.value ?? ''),
       writeToUI: (el, value) => {
-        const val = (value || '').trim();
+        const val = (value ?? '');
         el.value = val;
         const container = el.closest('.background-image-setting');
         if (container) {
-          container.classList.toggle('has-background-image', !!val);
+          container.classList.toggle('has-background-image', !!String(val).trim());
         }
       }
     },
@@ -768,11 +771,11 @@ export function createSettingsManager(appContext) {
           const popover = document.createElement('div');
           popover.className = 'background-image-popover';
 
-          const input = document.createElement('input');
-          input.type = 'text';
+          const input = document.createElement('textarea');
           input.id = def.id || `setting-${def.key}`;
           input.placeholder = def.placeholder || '';
           input.className = 'background-image-input';
+          input.rows = 6;
           popover.appendChild(input);
           setWrapper.appendChild(popover);
 
@@ -946,10 +949,20 @@ export function createSettingsManager(appContext) {
   async function initSettings() {
     try {
       console.log('初始化设置...');
-      const result = await chrome.storage.sync.get(Object.keys(DEFAULT_SETTINGS));
+      const syncKeys = Object.keys(DEFAULT_SETTINGS).filter((key) => !NON_SYNC_SETTINGS_KEYS.has(key));
+      const result = await chrome.storage.sync.get(syncKeys);
       
       // 合并默认设置和已保存的设置
       currentSettings = {...DEFAULT_SETTINGS, ...result};
+
+      // 清理不应存入 sync 的大字段，避免占用同步配额
+      if (NON_SYNC_SETTINGS_KEYS.size) {
+        try {
+          await chrome.storage.sync.remove([...NON_SYNC_SETTINGS_KEYS]);
+        } catch (e) {
+          console.warn('清理非同步设置失败（忽略）:', e);
+        }
+      }
 
       // 兼容旧版本：首次引入 fullscreenWidth 时，用已有的 sidebarWidth 作为初始值。
       // 这样升级后不会出现“全屏宽度突然变窄/变宽”的跳变体验。
@@ -978,6 +991,7 @@ export function createSettingsManager(appContext) {
         let mutated = false;
         Object.keys(changes).forEach((key) => {
           if (!(key in DEFAULT_SETTINGS)) return;
+          if (NON_SYNC_SETTINGS_KEYS.has(key)) return;
           const { newValue } = changes[key] || {};
           // 仅在值确实变化时应用
           if (typeof newValue === 'undefined') return;
@@ -1009,6 +1023,9 @@ export function createSettingsManager(appContext) {
   async function saveSetting(key, value) {
     try {
       currentSettings[key] = value;
+      if (NON_SYNC_SETTINGS_KEYS.has(key)) {
+        return;
+      }
       await chrome.storage.sync.set({ [key]: value });
     } catch (error) {
       console.error(`保存设置${key}失败:`, error);
@@ -1194,6 +1211,11 @@ export function createSettingsManager(appContext) {
       return;
     }
 
+    if (normalizedSource.kind === 'inline_list') {
+      loadBackgroundImageFromInlineList(normalizedSource.list, token);
+      return;
+    }
+
     if (normalizedSource.kind === 'direct') {
       const targetUrl = maybeAppendCacheBuster(normalizedSource.url, cacheBustToken);
       const cssValue = createCssUrlValue(targetUrl);
@@ -1205,11 +1227,20 @@ export function createSettingsManager(appContext) {
   }
 
   function normalizeBackgroundSource(input) {
-    const converted = convertPotentialWindowsPath(input);
+    const rawInput = typeof input === 'string' ? input : '';
+    if (isInlineListSource(rawInput)) {
+      return { kind: 'inline_list', list: parseBackgroundList(rawInput) };
+    }
+    const converted = convertPotentialWindowsPath(rawInput);
     if (isTxtListSource(converted)) {
       return { kind: 'list', url: converted };
     }
     return { kind: 'direct', url: converted };
+  }
+
+  function isInlineListSource(value) {
+    if (!value || typeof value !== 'string') return false;
+    return value.includes('\n');
   }
 
   function convertPotentialWindowsPath(input) {
@@ -1258,14 +1289,16 @@ export function createSettingsManager(appContext) {
       const text = await response.text();
       if (token !== backgroundImageLoadToken) return;
 
-      const candidates = parseBackgroundList(text).map((c) => resolveAgainstBase(c, listUrl));
+      const rawCandidates = parseBackgroundList(text);
+      const candidates = normalizeListCandidates(rawCandidates, listUrl);
       if (!candidates.length) {
         console.warn('背景图片列表为空:', listUrl);
         updateBackgroundImageCss('none', false, token);
         return;
       }
 
-      await tryLoadRandomBackground(candidates, token);
+      const signature = computeListSignature(candidates, listUrl);
+      await tryLoadQueuedBackground(candidates, signature, token);
     } catch (error) {
       if (token !== backgroundImageLoadToken) return;
       console.error('加载背景图片列表失败:', listUrl, error);
@@ -1273,18 +1306,31 @@ export function createSettingsManager(appContext) {
     }
   }
 
-  async function tryLoadRandomBackground(candidates, token) {
-    const pool = [...candidates];
-    while (pool.length && token === backgroundImageLoadToken) {
-      const index = Math.floor(Math.random() * pool.length);
-      const candidate = pool.splice(index, 1)[0];
-      const normalized = convertPotentialWindowsPath(candidate);
-      if (!normalized) continue;
+  async function loadBackgroundImageFromInlineList(list, token) {
+    if (token !== backgroundImageLoadToken) return;
+    const candidates = normalizeListCandidates(list);
+    if (!candidates.length) {
+      console.warn('背景图片列表为空');
+      updateBackgroundImageCss('none', false, token);
+      return;
+    }
+    const signature = computeListSignature(candidates, 'inline');
+    await tryLoadQueuedBackground(candidates, signature, token);
+  }
+
+  async function tryLoadQueuedBackground(candidates, signature, token) {
+    if (!Array.isArray(candidates) || !candidates.length) return;
+    const total = candidates.length;
+    let attempts = 0;
+    while (attempts < total && token === backgroundImageLoadToken) {
+      const candidate = getNextBackgroundCandidate(signature, candidates);
+      attempts += 1;
+      if (!candidate) continue;
       try {
-        await ensureImageLoad(normalized);
+        await ensureImageLoad(candidate);
         if (token !== backgroundImageLoadToken) return;
-        const cssValue = createCssUrlValue(normalized);
-        updateBackgroundImageCss(cssValue, true, token, normalized);
+        const cssValue = createCssUrlValue(candidate);
+        updateBackgroundImageCss(cssValue, true, token, candidate);
         return;
       } catch (error) {
         console.warn('背景图片加载失败，尝试下一张:', candidate, error);
@@ -1305,6 +1351,54 @@ export function createSettingsManager(appContext) {
       .filter(line => line && !/^\s*(#|\/\/)/.test(line))
       .map(entry => sanitizeListEntry(entry))
       .filter(Boolean);
+  }
+
+  function normalizeListCandidates(list, baseUrl = null) {
+    if (!Array.isArray(list)) return [];
+    return list
+      .map((entry) => (baseUrl ? resolveAgainstBase(entry, baseUrl) : entry))
+      .map((entry) => convertPotentialWindowsPath(entry))
+      .filter(Boolean);
+  }
+
+  function computeListSignature(list, sourceKey) {
+    const seed = String(sourceKey || 'inline');
+    let hash = 0;
+    const push = (str) => {
+      for (let i = 0; i < str.length; i += 1) {
+        hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+      }
+    };
+    push(seed);
+    push('|');
+    list.forEach((entry) => {
+      push(String(entry));
+      push('|');
+    });
+    return `${seed}:${list.length}:${hash.toString(16)}`;
+  }
+
+  function shuffleArray(list) {
+    const arr = Array.isArray(list) ? [...list] : [];
+    for (let i = arr.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  function getNextBackgroundCandidate(signature, candidates) {
+    if (backgroundImageQueueState.signature !== signature || backgroundImageQueueState.pool.length === 0) {
+      backgroundImageQueueState.signature = signature;
+      backgroundImageQueueState.pool = shuffleArray(candidates);
+      backgroundImageQueueState.index = 0;
+    } else if (backgroundImageQueueState.index >= backgroundImageQueueState.pool.length) {
+      backgroundImageQueueState.pool = shuffleArray(candidates);
+      backgroundImageQueueState.index = 0;
+    }
+    const candidate = backgroundImageQueueState.pool[backgroundImageQueueState.index];
+    backgroundImageQueueState.index += 1;
+    return candidate;
   }
 
   function sanitizeListEntry(entry) {
@@ -1399,9 +1493,10 @@ export function createSettingsManager(appContext) {
 
   function refreshBackgroundImage(options = {}) {
     const { silent = false } = options || {};
-    const source = (currentSettings.backgroundImageUrl || '').trim();
+    const source = currentSettings.backgroundImageUrl || '';
+    const trimmedSource = String(source).trim();
 
-    if (!source) {
+    if (!trimmedSource) {
       if (!silent && typeof showNotification === 'function') {
         showNotification({
           message: '请先在设置中配置背景图片来源',
@@ -1412,14 +1507,19 @@ export function createSettingsManager(appContext) {
       return;
     }
 
-    const normalizedForCheck = convertPotentialWindowsPath(source);
-    if (isTxtListSource(normalizedForCheck)) {
+    if (isInlineListSource(source)) {
       applyBackgroundImage(source);
       return;
     }
 
+    const normalizedForCheck = convertPotentialWindowsPath(trimmedSource);
+    if (isTxtListSource(normalizedForCheck)) {
+      applyBackgroundImage(trimmedSource);
+      return;
+    }
+
     const cacheBustToken = Date.now().toString(36);
-    applyBackgroundImage(source, { cacheBustToken });
+    applyBackgroundImage(trimmedSource, { cacheBustToken });
   }
 
   function clamp01(input, fallback = 0) {

@@ -1173,6 +1173,9 @@ body.thread-resize-active * {
     background-color: color-mix(in srgb, var(--cerebr-input-bg) 92%, transparent);
     color: inherit;
     font-size: 0.9em;
+    line-height: 1.45;
+    min-height: 120px;
+    resize: vertical;
 }
 
 .background-image-input:focus {
@@ -5350,11 +5353,12 @@ body.hide-references .reference-number.superscript {
 }
 
 #chat-history-panel .settings-tab-content .background-image-setting {
+    grid-template-columns: minmax(160px, 1fr) auto;
     align-items: center;
 }
 
 #chat-history-panel .settings-tab-content .background-image-actions {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-end;
     max-width: 100%;
 }
