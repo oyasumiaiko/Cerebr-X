@@ -951,9 +951,13 @@ export function createSettingsManager(appContext) {
       console.log('初始化设置...');
       const syncKeys = Object.keys(DEFAULT_SETTINGS).filter((key) => !NON_SYNC_SETTINGS_KEYS.has(key));
       const result = await chrome.storage.sync.get(syncKeys);
+      let localResult = {};
+      if (NON_SYNC_SETTINGS_KEYS.size) {
+        localResult = await chrome.storage.local.get([...NON_SYNC_SETTINGS_KEYS]);
+      }
       
       // 合并默认设置和已保存的设置
-      currentSettings = {...DEFAULT_SETTINGS, ...result};
+      currentSettings = {...DEFAULT_SETTINGS, ...result, ...localResult};
 
       // 清理不应存入 sync 的大字段，避免占用同步配额
       if (NON_SYNC_SETTINGS_KEYS.size) {
@@ -987,11 +991,12 @@ export function createSettingsManager(appContext) {
     try {
       if (!chrome?.storage?.onChanged) return;
       chrome.storage.onChanged.addListener((changes, areaName) => {
-        if (areaName !== 'sync') return;
+        if (areaName !== 'sync' && areaName !== 'local') return;
         let mutated = false;
         Object.keys(changes).forEach((key) => {
           if (!(key in DEFAULT_SETTINGS)) return;
-          if (NON_SYNC_SETTINGS_KEYS.has(key)) return;
+          if (areaName === 'sync' && NON_SYNC_SETTINGS_KEYS.has(key)) return;
+          if (areaName === 'local' && !NON_SYNC_SETTINGS_KEYS.has(key)) return;
           const { newValue } = changes[key] || {};
           // 仅在值确实变化时应用
           if (typeof newValue === 'undefined') return;
@@ -1024,6 +1029,7 @@ export function createSettingsManager(appContext) {
     try {
       currentSettings[key] = value;
       if (NON_SYNC_SETTINGS_KEYS.has(key)) {
+        await chrome.storage.local.set({ [key]: value });
         return;
       }
       await chrome.storage.sync.set({ [key]: value });
