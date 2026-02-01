@@ -3,24 +3,7 @@ import { findMostRecentConversationMetadataByUrlCandidates } from '../../storage
 import { packRemoteRepoViaApiExtension } from '../../utils/repomix.js';
 import { generateCandidateUrls } from '../../utils/url_candidates.js';
 
-const FULLSCREEN_SESSION_KEY = 'cerebr.sidebar.fullscreen';
-
-// 使用 sessionStorage 在“当前标签页会话”内记住全屏/侧栏布局，避免 iframe 重新加载后提示文案与布局脱节
-function readFullscreenSessionState() {
-  try {
-    const raw = window.sessionStorage?.getItem(FULLSCREEN_SESSION_KEY);
-    if (raw === null) return null;
-    return raw === '1';
-  } catch (_) {
-    return null;
-  }
-}
-
-function persistFullscreenSessionState(isFullscreen) {
-  try {
-    window.sessionStorage?.setItem(FULLSCREEN_SESSION_KEY, isFullscreen ? '1' : '0');
-  } catch (_) {}
-}
+// 全屏状态不再写入 sessionStorage，改由父页面在内存里同步，避免 F5 刷新仍保留旧布局。
 
 /**
  * 注册侧边栏所需的事件绑定与交互逻辑。
@@ -749,8 +732,24 @@ function applyFullscreenMode(appContext, isFullscreen) {
   appContext.state.isFullscreen = !!isFullscreen;
   document.documentElement.classList.toggle('fullscreen-mode', appContext.state.isFullscreen);
   updateFullscreenToggleHints(appContext);
-  if (!appContext.state.isStandalone) {
-    persistFullscreenSessionState(appContext.state.isFullscreen);
+}
+
+/**
+ * 将父页面同步的临时模式状态应用到 iframe 内部。
+ * 说明：临时模式仅在父页面内存中保存，用于 iframe 右键重载时恢复，但 F5 刷新应回到默认状态。
+ * @param {ReturnType<import('./sidebar_app_context.js').createSidebarAppContext>} appContext
+ * @param {boolean} isOn
+ */
+function applyTemporaryModeState(appContext, isOn) {
+  const sender = appContext?.services?.messageSender;
+  if (!sender || typeof sender.getTemporaryModeState !== 'function') return;
+  const nextState = !!isOn;
+  const currentState = sender.getTemporaryModeState() === true;
+  if (currentState === nextState) return;
+  if (nextState) {
+    sender.enterTemporaryMode?.();
+  } else {
+    sender.exitTemporaryMode?.();
   }
 }
 
@@ -806,17 +805,11 @@ function requestToggleDockMode(appContext) {
 }
 
 function setupFullscreenToggle(appContext) {
-  // 初始化时用 DOM class 做一次兜底同步，避免 iframe 刷新导致提示文案与实际布局不一致
+  // 初始化时仅用 DOM class 兜底，真实状态由父页面同步，避免 F5 刷新误继承旧状态。
   if (!appContext.state.isStandalone) {
-    const storedFullscreen = readFullscreenSessionState();
-    if (typeof storedFullscreen === 'boolean') {
-      applyFullscreenMode(appContext, storedFullscreen);
-    } else {
-      appContext.state.isFullscreen = document.documentElement.classList.contains('fullscreen-mode');
-      updateFullscreenToggleHints(appContext);
-    }
-  }
-  if (appContext.state.isStandalone) {
+    appContext.state.isFullscreen = document.documentElement.classList.contains('fullscreen-mode');
+    updateFullscreenToggleHints(appContext);
+  } else {
     updateFullscreenToggleHints(appContext);
   }
 
@@ -954,6 +947,15 @@ function setupWindowMessageHandlers(appContext) {
         }
         applyFullscreenMode(appContext, data.isFullscreen);
         break;
+      case 'TEMP_MODE_STATE_SYNC':
+        if (appContext.state.isStandalone) {
+          break;
+        }
+        if (!Object.prototype.hasOwnProperty.call(data, 'isOn')) {
+          break;
+        }
+        applyTemporaryModeState(appContext, data.isOn);
+        break;
       default:
         break;
     }
@@ -966,6 +968,12 @@ function setupTempModeIndicator(appContext) {
     if (appContext?.dom?.modeIndicator) {
       appContext.dom.modeIndicator.style.display = isOn ? 'inline-flex' : 'none';
       appContext.dom.modeIndicator.title = isOn ? '仅对话模式中，点击退出' : '点击进入仅对话模式';
+    }
+    // 将临时模式变更同步给父页面，由父页面在内存里缓存，供 iframe 右键重载时恢复。
+    if (!appContext.state.isStandalone) {
+      try {
+        window.parent.postMessage({ type: 'TEMP_MODE_STATE_CHANGED', isOn }, '*');
+      } catch (_) {}
     }
   });
 }
@@ -1265,6 +1273,7 @@ function scheduleInitialRequests(appContext) {
     if (!appContext.state.isStandalone) {
       window.parent.postMessage({ type: 'REQUEST_PAGE_INFO' }, '*');
       window.parent.postMessage({ type: 'REQUEST_FULLSCREEN_STATE' }, '*');
+      window.parent.postMessage({ type: 'REQUEST_TEMP_MODE_STATE' }, '*');
     }
 
     if (appContext.state.isFullscreen) {

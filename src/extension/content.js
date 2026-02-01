@@ -253,6 +253,8 @@ class CerebrSidebar {
     this.initialized = false;
     this.lastUrl = window.location.href;
     this.isFullscreen = false;
+    // 临时模式状态由父页面内存维护，用于 iframe 右键重载恢复，F5 刷新时自动重置。
+    this.isTemporaryMode = false;
     this.isDocked = false;
     this.sidebarPosition = 'right'; // 默认侧边栏位置为右侧
     this.dockStyleElement = null;
@@ -621,13 +623,18 @@ class CerebrSidebar {
       iframe.allow = 'clipboard-write';
 
       // 重要：当用户在 DevTools 中对 iframe 执行「重新加载框架」时，iframe 内部状态会被重置；
-      // 但父页面的全屏状态（this.isFullscreen 与 .cerebr-sidebar.fullscreen）仍然存在。
-      // 因此需要在 iframe 每次 load 完成后，把“当前全屏状态”重新同步给 iframe，避免其误判为侧栏模式。
+      // 但父页面仍持有全屏/临时模式状态，因此需要在 iframe 每次 load 完成后同步一次，
+      // 以便右键重载时保留状态，同时在 F5 刷新页面时由父页面自动回到默认值。
       iframe.addEventListener('load', () => {
         try {
           this.notifyIframeFullscreenState(this.isFullscreen);
         } catch (e) {
           console.warn('同步 iframe 全屏状态失败（忽略）:', e);
+        }
+        try {
+          this.notifyIframeTempModeState(this.isTemporaryMode);
+        } catch (e) {
+          console.warn('同步 iframe 临时模式状态失败（忽略）:', e);
         }
       });
 
@@ -807,6 +814,12 @@ class CerebrSidebar {
           break;
         case 'REQUEST_FULLSCREEN_STATE':
           this.notifyIframeFullscreenState(this.isFullscreen);
+          break;
+        case 'REQUEST_TEMP_MODE_STATE':
+          this.notifyIframeTempModeState(this.isTemporaryMode);
+          break;
+        case 'TEMP_MODE_STATE_CHANGED':
+          this.isTemporaryMode = !!event.data?.isOn;
           break;
       }
     });
@@ -1097,6 +1110,21 @@ class CerebrSidebar {
         }, '*');
       } catch (error) {
         console.log('通知iframe全屏状态失败:', error);
+      }
+    }
+  }
+
+  // 通知 iframe 临时模式状态变化
+  notifyIframeTempModeState(isOn) {
+    const iframe = this.sidebar.querySelector('.cerebr-sidebar__iframe');
+    if (iframe && iframe.contentWindow) {
+      try {
+        iframe.contentWindow.postMessage({
+          type: 'TEMP_MODE_STATE_SYNC',
+          isOn: !!isOn
+        }, '*');
+      } catch (error) {
+        console.log('通知iframe临时模式状态失败:', error);
       }
     }
   }
