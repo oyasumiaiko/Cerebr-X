@@ -1168,6 +1168,202 @@ export function createMessageSender(appContext) {
     }
   }
 
+  /**
+   * 解析用户输入中的斜杠命令。
+   *
+   * 设计约定：
+   * - 仅当首个非空字符为 "/" 时，才视为斜杠命令；
+   * - 以 "//" 开头表示转义（发送普通文本，保留一个 "/"）；
+   * - 输入 "/" 或 "/?" 视为帮助命令。
+   *
+   * @param {string} rawText
+   * @returns {{ type: 'command', name: string, args: string[], raw: string, argsText: string } | { type: 'escape', text: string } | null}
+   */
+  function parseSlashCommand(rawText) {
+    if (typeof rawText !== 'string') return null;
+    const trimmed = rawText.trimStart();
+    if (!trimmed.startsWith('/')) return null;
+
+    if (trimmed.startsWith('//')) {
+      // 双斜杠转义：保留一个 "/"，其余交由正常发送流程处理
+      return { type: 'escape', text: trimmed.slice(1) };
+    }
+
+    const body = trimmed.slice(1).trim();
+    if (!body) {
+      return { type: 'command', name: 'help', args: [], raw: trimmed, argsText: '' };
+    }
+
+    const parts = body.split(/\s+/);
+    const name = (parts.shift() || '').toLowerCase();
+    const args = parts;
+    return {
+      type: 'command',
+      name: name || 'help',
+      args,
+      raw: trimmed,
+      argsText: args.join(' ')
+    };
+  }
+
+  /**
+   * 构建斜杠命令帮助文本（Markdown）。
+   * @param {Array<Object>} commandList
+   * @returns {string}
+   */
+  function buildSlashCommandHelpText(commandList) {
+    const lines = ['可用斜杠命令：', ''];
+    commandList.forEach((cmd) => {
+      const aliases = Array.isArray(cmd.aliases)
+        ? cmd.aliases.filter(Boolean).map(alias => `/${alias}`)
+        : [];
+      const aliasText = aliases.length > 0 ? `（别名：${aliases.join('、')}）` : '';
+      lines.push(`- ${cmd.usage}：${cmd.description}${aliasText}`);
+    });
+    lines.push('', '提示：输入 `//` 可发送以 `/` 开头的普通文本。');
+    return lines.join('\n');
+  }
+
+  // 斜杠命令定义（基础版）
+  const slashCommandRegistry = [
+    {
+      name: 'help',
+      aliases: ['?','commands'],
+      usage: '/help',
+      description: '显示可用斜杠命令',
+      handler: async () => {
+        const helpText = buildSlashCommandHelpText(slashCommandRegistry);
+        messageProcessor.appendMessage(helpText, 'ai', true);
+      }
+    },
+    {
+      name: 'clear',
+      aliases: ['cls'],
+      usage: '/clear',
+      description: '清空当前对话',
+      handler: async () => {
+        await chatHistoryUI?.clearChatHistory?.();
+        if (typeof showNotification === 'function') {
+          showNotification('已清空当前对话');
+        }
+      }
+    },
+    {
+      name: 'stop',
+      aliases: ['abort'],
+      usage: '/stop',
+      description: '停止当前生成',
+      handler: async () => {
+        const stopped = abortCurrentRequest();
+        if (typeof showNotification === 'function') {
+          showNotification(stopped ? '已停止生成' : '当前没有进行中的请求');
+        }
+      }
+    },
+    {
+      name: 'temp',
+      aliases: ['tmp'],
+      usage: '/temp [on|off|toggle]',
+      description: '切换/设置纯对话模式',
+      handler: async ({ args }) => {
+        const mode = (args[0] || '').toLowerCase();
+        if (!mode || mode === 'toggle') {
+          toggleTemporaryMode();
+        } else if (mode === 'on') {
+          enterTemporaryMode();
+        } else if (mode === 'off') {
+          exitTemporaryMode();
+        } else {
+          if (typeof showNotification === 'function') {
+            showNotification('用法：/temp [on|off|toggle]');
+          }
+          return { ok: false, keepInput: true };
+        }
+        if (typeof showNotification === 'function') {
+          const status = getTemporaryModeState() ? '已进入纯对话模式' : '已退出纯对话模式';
+          showNotification(status);
+        }
+        return { ok: true };
+      }
+    },
+    {
+      name: 'summary',
+      aliases: ['sum'],
+      usage: '/summary',
+      description: '快速总结当前页面',
+      handler: async () => {
+        if (state?.isStandalone) {
+          if (typeof showNotification === 'function') {
+            showNotification({ message: '独立聊天页面不支持网页总结', type: 'warning' });
+          }
+          return { ok: false, keepInput: true };
+        }
+        await performQuickSummary();
+        return { ok: true };
+      }
+    },
+    {
+      name: 'history',
+      aliases: ['hist'],
+      usage: '/history',
+      description: '打开聊天记录面板',
+      handler: async () => {
+        try {
+          services.uiManager?.closeExclusivePanels?.();
+          await chatHistoryUI?.showChatHistoryPanel?.('history');
+        } catch (_) {}
+      }
+    }
+  ];
+
+  /**
+   * 解析并执行斜杠命令（仅在用户直接输入时调用）。
+   * @param {string} rawText
+   * @param {{ hasImages: boolean }} options
+   * @returns {Promise<{ handled: boolean, overrideText?: string, keepInput?: boolean }>}
+   */
+  async function runSlashCommandIfMatched(rawText, options = {}) {
+    const parsed = parseSlashCommand(rawText);
+    if (!parsed) return { handled: false };
+
+    if (parsed.type === 'escape') {
+      return { handled: false, overrideText: parsed.text };
+    }
+
+    if (options.hasImages) {
+      if (typeof showNotification === 'function') {
+        showNotification({ message: '斜杠命令暂不支持图片，请先移除图片', type: 'warning' });
+      }
+      return { handled: true, keepInput: true };
+    }
+
+    const normalized = parsed.name || '';
+    const command = slashCommandRegistry.find((item) => {
+      if (!item || !item.name) return false;
+      if (item.name === normalized) return true;
+      return Array.isArray(item.aliases) && item.aliases.includes(normalized);
+    });
+
+    if (!command) {
+      if (typeof showNotification === 'function') {
+        showNotification({ message: `未知命令：/${normalized}，输入 /help 查看`, type: 'warning' });
+      }
+      return { handled: true, keepInput: true };
+    }
+
+    const result = await command.handler({
+      args: parsed.args || [],
+      raw: parsed.raw,
+      argsText: parsed.argsText || ''
+    });
+
+    if (result && result.keepInput) {
+      return { handled: true, keepInput: true };
+    }
+
+    return { handled: true };
+  }
+
   function escapeMessageIdForSelector(id) {
     const raw = (id == null) ? '' : String(id);
     if (!raw) return '';
@@ -2330,6 +2526,31 @@ export function createMessageSender(appContext) {
       }
     }
 
+    const hasImagesInInput = inputController
+      ? inputController.hasImages()
+      : !!imageContainer.querySelector('.image-tag');
+
+    // 斜杠命令只对“用户直接输入”的文本生效，避免影响重试/重生成等内部流程
+    const hasExplicitOriginalText = opts.originalMessageText !== null && opts.originalMessageText !== undefined;
+    const shouldCheckSlashCommand = !opts.regenerateMode
+      && !opts.forceSendFullHistory
+      && !hasExplicitOriginalText
+      && opts.__skipSlashCommand !== true;
+
+    if (shouldCheckSlashCommand) {
+      const slashResult = await runSlashCommandIfMatched(rawText, { hasImages: hasImagesInInput });
+      if (typeof slashResult?.overrideText === 'string') {
+        rawText = slashResult.overrideText;
+      }
+      if (slashResult?.handled) {
+        if (!slashResult.keepInput) {
+          clearInputs();
+          inputController?.focusToEnd?.();
+        }
+        return { ok: true, type: 'slash_command' };
+      }
+    }
+
     let { baseText, parallelCount, aspectRatio } = parseParallelMultiplier(rawText);
 
     // “原地替换指定 AI 消息”不支持并行生成：
@@ -2361,10 +2582,6 @@ export function createMessageSender(appContext) {
         console.warn('从最后一条用户消息解析并行标记失败:', e);
       }
     }
-    const hasImagesInInput = inputController
-      ? inputController.hasImages()
-      : !!imageContainer.querySelector('.image-tag');
-
     // 无并行标记或空消息场景：直接走单路核心逻辑（这里仍会沿用去掉 [xN] 后的 baseText）
     const isEmptyMessage = !baseText && !hasImagesInInput && !opts.forceSendFullHistory && !opts.regenerateMode;
     if (parallelCount <= 1 || isEmptyMessage) {
