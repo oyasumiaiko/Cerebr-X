@@ -138,6 +138,98 @@ export function createChatHistoryUI(appContext) {
     fileUrlFailures: 0
   };
 
+  // --- 会话固定 API（用于“对话级别”的模型锁定）---
+  let activeConversationApiLock = null;
+
+  function normalizeConversationApiLock(rawLock) {
+    if (!rawLock || typeof rawLock !== 'object') return null;
+    const id = typeof rawLock.id === 'string' ? rawLock.id.trim() : '';
+    const displayName = typeof rawLock.displayName === 'string' ? rawLock.displayName.trim() : '';
+    const modelName = typeof rawLock.modelName === 'string' ? rawLock.modelName.trim() : '';
+    const baseUrl = typeof rawLock.baseUrl === 'string' ? rawLock.baseUrl.trim() : '';
+    if (!id && !displayName && !modelName && !baseUrl) return null;
+    return { id, displayName, modelName, baseUrl };
+  }
+
+  function buildConversationApiLockFromConfig(config) {
+    if (!config || typeof config !== 'object') return null;
+    const id = typeof config.id === 'string' ? config.id.trim() : '';
+    const displayName = typeof config.displayName === 'string' ? config.displayName.trim() : '';
+    const modelName = typeof config.modelName === 'string' ? config.modelName.trim() : '';
+    const baseUrl = typeof config.baseUrl === 'string' ? config.baseUrl.trim() : '';
+    if (!id && !displayName && !modelName && !baseUrl) return null;
+    return { id, displayName, modelName, baseUrl };
+  }
+
+  function isSameConversationApiLock(a, b) {
+    if (!a && !b) return true;
+    if (!a || !b) return false;
+    return a.id === b.id
+      && a.displayName === b.displayName
+      && a.modelName === b.modelName
+      && a.baseUrl === b.baseUrl;
+  }
+
+  function hasValidApiKey(apiKey) {
+    if (Array.isArray(apiKey)) {
+      return apiKey.some(key => typeof key === 'string' && key.trim());
+    }
+    if (typeof apiKey === 'string') return apiKey.trim().length > 0;
+    return false;
+  }
+
+  function resolveApiConfigFromLock(lock) {
+    if (!lock || !services.apiManager?.resolveApiParam) return null;
+    // 若锁定信息包含 id，则必须按 id 命中配置，避免误用其它同名/同基址配置
+    if (lock.id) {
+      const resolvedById = services.apiManager.resolveApiParam({ id: lock.id });
+      if (resolvedById?.baseUrl && hasValidApiKey(resolvedById.apiKey)) {
+        return resolvedById;
+      }
+      return null;
+    }
+
+    let resolved = null;
+    if (!resolved && lock.displayName) {
+      resolved = services.apiManager.resolveApiParam(lock.displayName);
+    }
+    if (!resolved && lock.modelName) {
+      resolved = services.apiManager.resolveApiParam(lock.modelName);
+    }
+    if (!resolved && lock.baseUrl && lock.modelName) {
+      resolved = services.apiManager.resolveApiParam({
+        baseUrl: lock.baseUrl,
+        modelName: lock.modelName
+      });
+    }
+    if (!resolved?.baseUrl || !hasValidApiKey(resolved.apiKey)) return null;
+    return resolved;
+  }
+
+  // 返回当前会话的“固定 API + 实际显示配置”，供输入框/发送逻辑复用
+  function resolveActiveConversationApiConfig() {
+    const lock = normalizeConversationApiLock(activeConversationApiLock || activeConversation?.apiLock);
+    const hasLock = !!lock;
+    const lockConfig = hasLock ? resolveApiConfigFromLock(lock) : null;
+    const isLockValid = !!lockConfig;
+    const selectedConfig = services.apiManager?.getSelectedConfig?.() || null;
+    const displayConfig = isLockValid ? lockConfig : selectedConfig;
+    return {
+      lock,
+      hasLock,
+      lockConfig,
+      isLockValid,
+      selectedConfig,
+      displayConfig
+    };
+  }
+
+  function emitConversationApiContextChanged() {
+    try {
+      document.dispatchEvent(new CustomEvent('CONVERSATION_API_CONTEXT_CHANGED'));
+    } catch (_) {}
+  }
+
   function createEmptySearchCache() {
     return {
       query: '',
@@ -1290,6 +1382,7 @@ export function createChatHistoryUI(appContext) {
     }
     if (activeConversation?.id === conversationId) {
       activeConversation = null;
+      activeConversationApiLock = null;
     }
 
     if (currentConversationId === conversationId) {
@@ -1298,6 +1391,7 @@ export function createChatHistoryUI(appContext) {
       services.selectionThreadManager?.resetForClearChat?.();
       services.chatHistoryManager.clearHistory();
       chatContainer.innerHTML = '';
+      emitConversationApiContextChanged();
     }
 
     invalidateMetadataCache();
@@ -1841,6 +1935,8 @@ export function createChatHistoryUI(appContext) {
     // 分支元信息：仅在更新已有会话时需要“继承”下来，避免分支关系被覆盖丢失
     let parentConversationIdToSave = null;
     let forkedFromMessageIdToSave = null;
+    // 会话固定 API：尽量继承现有锁定，避免保存时丢失
+    let apiLockToSave = normalizeConversationApiLock(activeConversationApiLock || activeConversation?.apiLock);
     
     // 默认使用“会话起始页”的页面元数据（首条用户消息冻结的 pageMeta）
     urlToSave = startPageMeta.url || '';
@@ -1864,6 +1960,10 @@ export function createChatHistoryUI(appContext) {
           }
           if (typeof existingConversation.forkedFromMessageId === 'string' && existingConversation.forkedFromMessageId.trim()) {
             forkedFromMessageIdToSave = existingConversation.forkedFromMessageId.trim();
+          }
+
+          if (!apiLockToSave) {
+            apiLockToSave = normalizeConversationApiLock(existingConversation.apiLock);
           }
           
           // 如果原有摘要存在，则保留原有摘要，避免覆盖用户手动重命名的摘要
@@ -1912,6 +2012,9 @@ export function createChatHistoryUI(appContext) {
     if (forkedFromMessageIdToSave) {
       conversation.forkedFromMessageId = forkedFromMessageIdToSave;
     }
+    if (apiLockToSave) {
+      conversation.apiLock = apiLockToSave;
+    }
 
     // 使用 IndexedDB 存储对话记录
     await putConversation(conversation);
@@ -1920,6 +2023,7 @@ export function createChatHistoryUI(appContext) {
     // 更新当前会话ID和活动会话
     currentConversationId = conversation.id;
     activeConversation = conversation;
+    activeConversationApiLock = apiLockToSave;
     
     // 更新内存缓存
     updateConversationInCache(conversation);
@@ -2093,6 +2197,85 @@ export function createChatHistoryUI(appContext) {
       summaryDiv.textContent = displaySummary;
     }
     return true;
+  }
+
+  function getActiveConversationApiLock() {
+    return normalizeConversationApiLock(activeConversationApiLock || activeConversation?.apiLock);
+  }
+
+  async function setConversationApiLock(conversationId, apiConfig) {
+    const normalizedId = (typeof conversationId === 'string') ? conversationId.trim() : '';
+    const targetId = normalizedId || currentConversationId || activeConversation?.id || '';
+    if (!targetId) {
+      showNotification?.({ message: '当前没有可固定的对话', type: 'warning', duration: 2000 });
+      return { ok: false, reason: 'no_active_conversation' };
+    }
+
+    let resolvedConfig = null;
+    if (apiConfig && typeof apiConfig === 'object') {
+      resolvedConfig = apiConfig;
+    } else if (typeof apiConfig === 'string' && services.apiManager?.resolveApiParam) {
+      const key = apiConfig.trim();
+      if (key && key.toLowerCase() !== 'follow_current' && key.toLowerCase() !== 'selected') {
+        resolvedConfig = services.apiManager.resolveApiParam(key);
+      }
+    }
+
+    const hasInputConfig = !!resolvedConfig;
+    const nextLock = hasInputConfig ? buildConversationApiLockFromConfig(resolvedConfig) : null;
+    const shouldClear = !nextLock;
+
+    if (hasInputConfig && !nextLock) {
+      showNotification?.({ message: '未找到可用的 API 配置', type: 'warning', duration: 2000 });
+      return { ok: false, reason: 'invalid_api_config' };
+    }
+
+    const isActiveTarget = (activeConversation?.id === targetId) || (currentConversationId === targetId);
+    if (isActiveTarget && Array.isArray(services.chatHistoryManager?.chatHistory?.messages)
+      && services.chatHistoryManager.chatHistory.messages.length > 0) {
+      activeConversationApiLock = nextLock;
+      if (activeConversation) {
+        if (shouldClear) delete activeConversation.apiLock;
+        else activeConversation.apiLock = nextLock;
+      }
+      await saveCurrentConversation(true);
+    } else {
+      const conversation = await getConversationFromCacheOrLoad(targetId);
+      if (!conversation) {
+        showNotification?.({ message: '找不到对应的对话记录', type: 'warning', duration: 2000 });
+        return { ok: false, reason: 'not_found' };
+      }
+
+      const prevLock = normalizeConversationApiLock(conversation.apiLock);
+      if (isSameConversationApiLock(prevLock, nextLock)) {
+        return { ok: true, lock: prevLock, unchanged: true };
+      }
+
+      if (shouldClear) {
+        delete conversation.apiLock;
+      } else {
+        conversation.apiLock = nextLock;
+      }
+
+      await putConversation(conversation);
+      invalidateMetadataCache();
+      updateConversationInCache(conversation);
+    }
+
+    if (isChatHistoryPanelOpen()) {
+      refreshChatHistory(getHistoryListScrollRestoreOptions());
+    }
+
+    emitConversationApiContextChanged();
+
+    const label = resolvedConfig?.displayName || resolvedConfig?.modelName || resolvedConfig?.baseUrl || 'API';
+    if (shouldClear) {
+      showNotification?.({ message: '已取消固定，跟随当前 API', duration: 1800 });
+    } else {
+      showNotification?.({ message: `已固定该对话：${label}`, duration: 1800 });
+    }
+
+    return { ok: true, lock: nextLock };
   }
 
   /**
@@ -2325,6 +2508,7 @@ export function createChatHistoryUI(appContext) {
     
     // 设置为当前活动会话
     activeConversation = fullConversation;
+    activeConversationApiLock = normalizeConversationApiLock(fullConversation?.apiLock);
     
     // 清空当前聊天容器
     chatContainer.innerHTML = '';
@@ -2470,6 +2654,7 @@ export function createChatHistoryUI(appContext) {
     
     // 通知消息发送器当前会话ID已更新
     services.messageSender.setCurrentConversationId(currentConversationId);
+    emitConversationApiContextChanged();
 
     if (!skipScrollToBottom) {
       // 滚动到底部
@@ -2633,9 +2818,11 @@ export function createChatHistoryUI(appContext) {
     // 重置当前会话ID，确保下次发送新消息创建新会话
     currentConversationId = null;
     activeConversation = null;
+    activeConversationApiLock = null;
     
     // 通知消息发送器当前会话ID已重置
     services.messageSender.setCurrentConversationId(null);
+    emitConversationApiContextChanged();
   }
 
   /**
@@ -2931,6 +3118,40 @@ export function createChatHistoryUI(appContext) {
       }
     });
     menu.appendChild(renameOption); // 添加重命名选项
+
+    // 固定 API / 取消固定
+    let apiLockSnapshot = null;
+    try {
+      const displayItem = Array.isArray(currentDisplayItems)
+        ? currentDisplayItems.find(item => item?.id === conversationId)
+        : null;
+      apiLockSnapshot = normalizeConversationApiLock(displayItem?.apiLock);
+      if (!apiLockSnapshot) {
+        const convForLock = await getConversationFromCacheOrLoad(conversationId);
+        apiLockSnapshot = normalizeConversationApiLock(convForLock?.apiLock);
+      }
+    } catch (_) {
+      apiLockSnapshot = null;
+    }
+    const hasApiLock = !!apiLockSnapshot;
+    const apiLockOption = document.createElement('div');
+    apiLockOption.textContent = hasApiLock ? '取消固定 API' : '固定当前 API';
+    apiLockOption.classList.add('chat-history-context-menu-option');
+    apiLockOption.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      menu.remove();
+      if (hasApiLock) {
+        await setConversationApiLock(conversationId, null);
+        return;
+      }
+      const currentConfig = services.apiManager?.getSelectedConfig?.() || null;
+      if (!currentConfig) {
+        showNotification?.({ message: '当前没有可用的 API 配置', type: 'warning', duration: 2000 });
+        return;
+      }
+      await setConversationApiLock(conversationId, currentConfig);
+    });
+    menu.appendChild(apiLockOption);
 
     // 自动生成标题选项
     const autoTitleOption = document.createElement('div');
@@ -5133,6 +5354,38 @@ export function createChatHistoryUI(appContext) {
     });
   }
 
+  function resolveConversationApiLockInfo(rawLock) {
+    const lock = normalizeConversationApiLock(rawLock);
+    if (!lock) return null;
+    const configs = services.apiManager?.getAllConfigs?.() || [];
+    let matched = null;
+    if (lock.id) {
+      matched = configs.find(c => c.id === lock.id) || null;
+    } else {
+      if (!matched && lock.displayName) {
+        matched = configs.find(c => (c.displayName || '').trim() === lock.displayName) || null;
+      }
+      if (!matched && lock.modelName) {
+        matched = configs.find(c => (c.modelName || '').trim() === lock.modelName) || null;
+      }
+      if (!matched && lock.baseUrl && lock.modelName) {
+        matched = configs.find(c => c.baseUrl === lock.baseUrl && c.modelName === lock.modelName) || null;
+      }
+    }
+
+    const label = matched?.displayName
+      || matched?.modelName
+      || lock.displayName
+      || lock.modelName
+      || lock.baseUrl
+      || '已固定';
+    const isValid = !!matched;
+    const title = isValid
+      ? `固定 API: ${label}`
+      : `固定 API: ${label}\n（配置已失效，发送时将回退到当前 API）`;
+    return { label, isValid, title };
+  }
+
   function createConversationItemElement(conv, highlightPlan, isPinned) {
     const item = document.createElement('div');
     item.className = 'chat-history-item';
@@ -5203,6 +5456,7 @@ export function createChatHistoryUI(appContext) {
       : Math.max(0, totalCount - mainCount);
     const threadCount = Number.isFinite(Number(conv?.threadCount)) ? Number(conv.threadCount) : 0;
     const hasThreads = threadCount !== 0 || threadMessageCount !== 0;
+    const apiLockInfo = resolveConversationApiLockInfo(conv?.apiLock);
     const statsMetaParts = [`消息 ${totalCount}`];
     if (hasThreads) {
       const threadMetaParts = [];
@@ -5275,6 +5529,23 @@ export function createChatHistoryUI(appContext) {
     infoContent.appendChild(createInfoSpan('info-time', chatTimeSpan));
     infoContent.appendChild(createSeparator());
     infoContent.appendChild(statsWrap);
+    if (apiLockInfo) {
+      const apiLockSpan = document.createElement('span');
+      apiLockSpan.className = 'info-api-lock';
+      if (!apiLockInfo.isValid) {
+        apiLockSpan.classList.add('info-api-lock--invalid');
+      }
+      const lockIcon = document.createElement('i');
+      lockIcon.className = 'fa-solid fa-lock';
+      lockIcon.setAttribute('aria-hidden', 'true');
+      const lockText = document.createElement('span');
+      lockText.textContent = apiLockInfo.label;
+      apiLockSpan.appendChild(lockIcon);
+      apiLockSpan.appendChild(lockText);
+      apiLockSpan.title = apiLockInfo.title;
+      infoContent.appendChild(createSeparator());
+      infoContent.appendChild(apiLockSpan);
+    }
     infoContent.appendChild(createSeparator());
     infoContent.appendChild(createInfoSpan('info-domain', domain));
     // URL 快速筛选模式下，为每条会话标注“匹配等级”，便于用户理解来源范围
@@ -10951,6 +11222,7 @@ export function createChatHistoryUI(appContext) {
         maxLength: 160
       });
       const summary = baseSummary ? `${baseSummary} (分支)` : '分支对话';
+      const apiLockToSave = normalizeConversationApiLock(activeConversationApiLock || activeConversation?.apiLock);
       
       // 创建新的会话对象
       const newConversation = {
@@ -10972,6 +11244,9 @@ export function createChatHistoryUI(appContext) {
         currentNode: newChatHistory.currentNode,
         root: newChatHistory.root
       };
+      if (apiLockToSave) {
+        newConversation.apiLock = apiLockToSave;
+      }
       
       // 保存新会话到数据库
       await putConversation(newConversation);
@@ -11024,6 +11299,9 @@ export function createChatHistoryUI(appContext) {
     refreshChatHistory,
     updatePageInfo,
     getCurrentConversationId: () => currentConversationId,
+    getActiveConversationApiLock,
+    resolveActiveConversationApiConfig,
+    setConversationApiLock,
     getActiveConversationSummary,
     updateConversationSummary,
     clearMemoryCache,

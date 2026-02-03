@@ -158,7 +158,8 @@ export function registerSidebarUtilities(appContext) {
   appContext.utils.updateMessageInputPlaceholder = () => {
     const input = appContext.dom?.messageInput;
     if (!input) return;
-    const currentConfig = appContext.services.apiManager?.getSelectedConfig?.() || null;
+    const apiInfo = appContext.services.chatHistoryUI?.resolveActiveConversationApiConfig?.();
+    const currentConfig = apiInfo?.displayConfig || appContext.services.apiManager?.getSelectedConfig?.() || null;
     const isTemporaryMode = appContext.services.messageSender?.getTemporaryModeState?.() === true;
     const placeholder = appContext.utils.buildMessageInputPlaceholder
       ? appContext.utils.buildMessageInputPlaceholder(currentConfig, { isTemporaryMode })

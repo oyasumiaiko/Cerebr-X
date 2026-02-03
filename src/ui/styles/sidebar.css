@@ -840,6 +840,9 @@ body.thread-resize-active * {
 }
 
 #input-api-switcher .input-api-current {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     max-width: 240px;
     padding: 6px 12px;
     font-size: calc(var(--cerebr-font-size, 14px) * 0.8);
@@ -855,6 +858,29 @@ body.thread-resize-active * {
     box-shadow:
       0 6px 14px rgba(0, 0, 0, 0.12),
       inset 0 0 0 1px color-mix(in srgb, #fff 18%, transparent);
+}
+
+#input-api-switcher.locked .input-api-current {
+    border-color: color-mix(in srgb, var(--cerebr-highlight) 55%, transparent);
+}
+
+#input-api-switcher.lock-invalid .input-api-current {
+    border-color: color-mix(in srgb, #ff6b6b 60%, transparent);
+    box-shadow:
+      0 6px 14px rgba(0, 0, 0, 0.12),
+      inset 0 0 0 1px color-mix(in srgb, #ff6b6b 30%, transparent);
+}
+
+.input-api-lock-icon {
+    font-size: 0.9em;
+    opacity: 0.75;
+}
+
+.input-api-current-text {
+    display: inline-block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #input-api-switcher .input-api-list {
@@ -924,6 +950,27 @@ body.thread-resize-active * {
     border-color: color-mix(in srgb, var(--cerebr-highlight) 60%, transparent);
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--cerebr-highlight) 60%, transparent),
                 0 0 8px 0 color-mix(in srgb, var(--cerebr-highlight) 35%, transparent);
+}
+
+.input-api-option--hint {
+    cursor: default;
+    opacity: 0.65;
+    font-size: calc(var(--cerebr-font-size, 14px) * 0.72);
+    border: 1px solid transparent;
+}
+
+.input-api-option--hint:hover {
+    background: transparent;
+}
+
+.input-api-option--action {
+    font-weight: 600;
+}
+
+.input-api-divider {
+    height: 1px;
+    margin: 4px 6px;
+    background: color-mix(in srgb, var(--cerebr-border-color) 55%, transparent);
 }
 
 /* 新增：设置 #message-row 横向排列 */
@@ -4868,6 +4915,28 @@ body.hide-references .reference-number.superscript {
 
 .chat-history-item .conversation-stat-thread {
     gap: 3px;
+}
+
+.chat-history-item .info .info-api-lock {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--cerebr-border-color) 22%, transparent);
+    color: color-mix(in srgb, var(--cerebr-text-color) 85%, transparent);
+    white-space: nowrap;
+}
+
+.chat-history-item .info .info-api-lock i {
+    font-size: 0.85em;
+    opacity: 0.75;
+}
+
+.chat-history-item .info .info-api-lock--invalid {
+    color: color-mix(in srgb, var(--cerebr-text-color) 70%, #ff6b6b);
+    background: color-mix(in srgb, #ff6b6b 18%, transparent);
 }
 
 /* URL 快速筛选：匹配等级徽标 */

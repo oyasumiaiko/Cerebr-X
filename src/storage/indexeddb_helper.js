@@ -126,8 +126,18 @@ function computeConversationMessageStats(messages) {
  * - 这不会减少数据库读取成本，但能显著减少 JS 堆里长期保留的数据量。
  *
  * @param {Object} conv
- * @returns {{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number, parentConversationId:string|null, forkedFromMessageId:string|null}}
+ * @returns {{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number, parentConversationId:string|null, forkedFromMessageId:string|null, apiLock:Object|null}}
  */
+function compactConversationApiLock(rawLock) {
+  if (!rawLock || typeof rawLock !== 'object') return null;
+  const id = typeof rawLock.id === 'string' ? rawLock.id.trim() : '';
+  const displayName = typeof rawLock.displayName === 'string' ? rawLock.displayName.trim() : '';
+  const modelName = typeof rawLock.modelName === 'string' ? rawLock.modelName.trim() : '';
+  const baseUrl = typeof rawLock.baseUrl === 'string' ? rawLock.baseUrl.trim() : '';
+  if (!id && !displayName && !modelName && !baseUrl) return null;
+  return { id, displayName, modelName, baseUrl };
+}
+
 function compactConversationToMetadata(conv) {
   const id = conv?.id || '';
   const url = typeof conv?.url === 'string' ? conv.url : '';
@@ -175,7 +185,8 @@ function compactConversationToMetadata(conv) {
     threadMessageCount,
     threadCount,
     parentConversationId,
-    forkedFromMessageId
+    forkedFromMessageId,
+    apiLock: compactConversationApiLock(conv?.apiLock)
   };
 }
 
@@ -186,7 +197,7 @@ function compactConversationToMetadata(conv) {
  * - 由于 conversations 记录本身包含 messages 大数组，IndexedDB 在读取时仍会结构化克隆整条记录；
  * - 这里的“轻量化”主要是为了减少上层长期保留的 JS 对象体积（避免把 messages/messageIds 留在内存里）。
  *
- * @returns {Promise<Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number, parentConversationId:string|null, forkedFromMessageId:string|null}>>}
+ * @returns {Promise<Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number, parentConversationId:string|null, forkedFromMessageId:string|null, apiLock:Object|null}>>}
  */
 export async function getAllConversationMetadata() {
   const db = await openChatHistoryDB();
@@ -219,7 +230,7 @@ export async function getAllConversationMetadata() {
 /**
  * 批量按 id 读取会话“轻量元数据”。
  * @param {string[]} ids
- * @returns {Promise<Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number, parentConversationId:string|null, forkedFromMessageId:string|null}>>}
+ * @returns {Promise<Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number, parentConversationId:string|null, forkedFromMessageId:string|null, apiLock:Object|null}>>}
  */
 export async function getConversationMetadataByIds(ids) {
   const idList = Array.isArray(ids) ? ids.filter(Boolean) : [];
@@ -254,7 +265,7 @@ export async function getConversationMetadataByIds(ids) {
  * @param {number} [options.limit=50]
  * @param {{endTime:number, seenIds:string[]}|null} [options.cursor=null]
  * @param {string[]|Set<string>} [options.excludeIds=[]] - 需要跳过的会话 id（例如置顶会话）
- * @returns {Promise<{items: Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number, parentConversationId:string|null, forkedFromMessageId:string|null}>, cursor: {endTime:number, seenIds:string[]} | null, hasMore: boolean}>}
+ * @returns {Promise<{items: Array<{id:string, url:string, title:string, summary:string, startTime:number, endTime:number, messageCount:number, mainMessageCount:number, threadMessageCount:number, threadCount:number, parentConversationId:string|null, forkedFromMessageId:string|null, apiLock:Object|null}>, cursor: {endTime:number, seenIds:string[]} | null, hasMore: boolean}>}
  */
 export async function getConversationMetadataPageByEndTimeDesc(options = {}) {
   const limit = Math.max(0, Number(options.limit) || 50);

@@ -191,6 +191,8 @@ export function createMessageSender(appContext) {
   let pageContent = null;
   let shouldSendChatHistory = true;
   let autoRetryEnabled = false;
+  // 固定 API 失效提示的去重窗口，避免连续发送刷屏
+  let lastInvalidApiLockNotice = { conversationId: '', at: 0 };
   // 流式标记：若当前数据流进入 <think> 段落，则持续写入思考块直到遇到 </think>
   let isInStreamingThoughtBlock = false;
   // 自动重试配置：指数退避，最多 5 次
@@ -1544,13 +1546,35 @@ export function createMessageSender(appContext) {
    * @private
    * @returns {boolean} 配置是否有效
    */
-  function validateApiConfig() {
-    const config = apiManager.getSelectedConfig();
-    if (!config?.baseUrl || !config?.apiKey) {
+  function hasValidApiKey(apiKey) {
+    if (Array.isArray(apiKey)) {
+      return apiKey.some(key => typeof key === 'string' && key.trim());
+    }
+    if (typeof apiKey === 'string') return apiKey.trim().length > 0;
+    return false;
+  }
+
+  function validateApiConfig(config) {
+    const target = config || apiManager.getSelectedConfig();
+    if (!target?.baseUrl || !hasValidApiKey(target.apiKey)) {
       messageProcessor.appendMessage('请在设置中完善 API 配置', 'ai', true);
       return false;
     }
     return true;
+  }
+
+  // 解析外部 api 参数：对 'follow_current' / 'selected' 视作“无显式覆盖”，让会话锁定继续生效
+  function resolveApiParamForSend(apiParam) {
+    if (apiParam == null || typeof apiManager?.resolveApiParam !== 'function') return null;
+    if (typeof apiParam === 'string') {
+      const key = apiParam.trim().toLowerCase();
+      if (key === 'follow_current' || key === 'selected') return null;
+    }
+    try {
+      return apiManager.resolveApiParam(apiParam);
+    } catch (_) {
+      return null;
+    }
   }
 
   /**
@@ -1581,7 +1605,10 @@ export function createMessageSender(appContext) {
   // 根据当前 API 与模式刷新输入框 placeholder，避免被模式切换覆盖成固定文案。
   function updateMessageInputPlaceholder() {
     if (!messageInput) return;
-    const currentConfig = apiManager?.getSelectedConfig?.() || null;
+    const apiInfo = (typeof chatHistoryUI?.resolveActiveConversationApiConfig === 'function')
+      ? chatHistoryUI.resolveActiveConversationApiConfig()
+      : null;
+    const currentConfig = apiInfo?.displayConfig || apiManager?.getSelectedConfig?.() || null;
     const buildPlaceholder = utils?.buildMessageInputPlaceholder;
     const placeholder = (typeof buildPlaceholder === 'function')
       ? buildPlaceholder(currentConfig, { isTemporaryMode })
@@ -1641,9 +1668,6 @@ export function createMessageSender(appContext) {
    * @returns {Promise<{ ok: true, apiConfig: Object } | { ok: false, error: Error, apiConfig: Object, retryHint: Object, retry: (delayMs?: number, override?: Object) => Promise<any> }>} 结果对象（供外部无状态重试）
    */
   async function sendMessageCore(options = {}) {
-    // 验证API配置
-    if (!validateApiConfig()) return;
-
     // 从options中提取重新生成所需的变量
     const {
       injectedSystemMessages: existingInjectedSystemMessages = [],
@@ -1660,6 +1684,39 @@ export function createMessageSender(appContext) {
       conversationSnapshot = null,
       aspectRatioOverride: externalAspectRatioOverride = null
     } = options;
+
+    const conversationApiInfo = (typeof chatHistoryUI?.resolveActiveConversationApiConfig === 'function')
+      ? chatHistoryUI.resolveActiveConversationApiConfig()
+      : null;
+    const lockConfig = conversationApiInfo?.lockConfig || null;
+    const hasConversationLock = !!conversationApiInfo?.hasLock;
+    const isConversationLockValid = !!conversationApiInfo?.isLockValid;
+
+    let preferredApiConfig = null;
+    if (api != null) {
+      preferredApiConfig = resolveApiParamForSend(api);
+    }
+
+    const effectiveConfigCandidate = resolvedApiConfig
+      || preferredApiConfig
+      || lockConfig
+      || apiManager.getSelectedConfig();
+
+    // 验证API配置（优先使用本次有效配置）
+    if (!validateApiConfig(effectiveConfigCandidate)) return;
+
+    // 若会话固定 API 已失效且未显式覆盖，提示一次并回退到当前选中配置
+    if (hasConversationLock && !isConversationLockValid && !resolvedApiConfig && !preferredApiConfig) {
+      const now = Date.now();
+      const convId = currentConversationId || chatHistoryUI?.getCurrentConversationId?.() || '';
+      const shouldNotify = !lastInvalidApiLockNotice.at
+        || lastInvalidApiLockNotice.conversationId !== convId
+        || (now - lastInvalidApiLockNotice.at) > 60 * 1000;
+      if (shouldNotify && typeof showNotification === 'function') {
+        showNotification({ message: '该对话固定的 API 已失效，已改用当前 API', type: 'warning', duration: 2200 });
+        lastInvalidApiLockNotice = { conversationId: convId, at: now };
+      }
+    }
 
     const autoRetrySetting = settingsManager?.getSetting?.('autoRetry');
     if (typeof autoRetrySetting === 'boolean') {
@@ -1689,7 +1746,8 @@ export function createMessageSender(appContext) {
     const currentPromptType = specificPromptType || messageProcessor.getPromptTypeFromContent(messageText, promptsConfig);
 
     const preprocessorConfig = resolvedApiConfig
-      || (api != null && typeof apiManager.resolveApiParam === 'function' ? apiManager.resolveApiParam(api) : null)
+      || preferredApiConfig
+      || lockConfig
       || apiManager.getSelectedConfig();
     const skipUserMessagePreprocess = options.__skipUserMessagePreprocess === true;
     let messageTextForHistory = messageText;
@@ -1770,7 +1828,6 @@ export function createMessageSender(appContext) {
     let pageContentResponse = null;
     let pageContentLength = 0;
     let conversationChain = null;
-    let preferredApiConfig = null;
     let effectiveApiConfig = null;
 
     const beginAttempt = () => {
@@ -2076,12 +2133,10 @@ export function createMessageSender(appContext) {
       } else {
         conversationChain = getCurrentConversationChain();
       }
-      // 解析 api 参数（若提供）。发送层不再做任何策略推断
-      if (api != null && typeof apiManager.resolveApiParam === 'function') {
-        try { preferredApiConfig = apiManager.resolveApiParam(api); } catch (_) { preferredApiConfig = null; }
-      }
-
-      const configForMaxHistory = preferredApiConfig || apiManager.getSelectedConfig();
+      const configForMaxHistory = resolvedApiConfig
+        || preferredApiConfig
+        || lockConfig
+        || apiManager.getSelectedConfig();
       const sendChatHistoryFlag = shouldSendChatHistory || forceSendFullHistory;
       const messages = composeMessages({
         prompts: promptsConfig,
@@ -2124,6 +2179,8 @@ export function createMessageSender(appContext) {
         config = resolvedApiConfig;
       } else if (preferredApiConfig) {
         config = preferredApiConfig;
+      } else if (lockConfig) {
+        config = lockConfig;
       } else {
         config = apiManager.getSelectedConfig();
       }
@@ -2322,7 +2379,7 @@ export function createMessageSender(appContext) {
           // 错误：重试达到上限
           showNotification({ message: '自动重试失败，已达到最大尝试次数', type: 'error' });
         }
-        return { ok: false, error, apiConfig: (resolvedApiConfig || preferredApiConfig || apiManager.getSelectedConfig()), retryHint, retry };
+        return { ok: false, error, apiConfig: (effectiveApiConfig || resolvedApiConfig || preferredApiConfig || lockConfig || apiManager.getSelectedConfig()), retryHint, retry };
       }
 
       let messageElement = null;
@@ -2354,12 +2411,12 @@ export function createMessageSender(appContext) {
         showNotification({ message: '自动重试失败，已达到最大尝试次数', type: 'error' });
       }
 
-      return { ok: false, error, apiConfig: (resolvedApiConfig || preferredApiConfig || apiManager.getSelectedConfig()), retryHint, retry };
+      return { ok: false, error, apiConfig: (effectiveApiConfig || resolvedApiConfig || preferredApiConfig || lockConfig || apiManager.getSelectedConfig()), retryHint, retry };
     } finally {
       finalizeAttempt(attempt);
     }
     // 成功：返回 ok 与实际使用的 api 配置（供外部记录/重试）
-    return { ok: true, apiConfig: (resolvedApiConfig || preferredApiConfig || apiManager.getSelectedConfig()) };
+    return { ok: true, apiConfig: (effectiveApiConfig || resolvedApiConfig || preferredApiConfig || lockConfig || apiManager.getSelectedConfig()) };
   }
 
   /**

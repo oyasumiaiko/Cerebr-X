@@ -123,62 +123,158 @@ function applyMessageInputPlaceholder(appContext, currentConfig) {
 
 function setupApiMenuWatcher(appContext) {
   const apiManager = appContext.services.apiManager;
+  const chatHistoryUI = appContext.services.chatHistoryUI;
+  const showNotification = appContext.utils?.showNotification;
 
-  const updateApiMenuText = (currentConfig) => {
-    if (currentConfig) {
-      appContext.dom.apiSettingsText.textContent = currentConfig.displayName || currentConfig.modelName || 'API 设置';
+  const resolveConversationApiUiInfo = () => {
+    const apiInfo = (typeof chatHistoryUI?.resolveActiveConversationApiConfig === 'function')
+      ? chatHistoryUI.resolveActiveConversationApiConfig()
+      : null;
+    const selectedConfig = apiInfo?.selectedConfig || apiManager.getSelectedConfig?.() || null;
+    const displayConfig = apiInfo?.displayConfig || selectedConfig;
+    return {
+      apiInfo,
+      selectedConfig,
+      displayConfig
+    };
+  };
+
+  const updateApiMenuText = (currentConfig, apiInfo = null) => {
+    if (!currentConfig) return;
+    const label = currentConfig.displayName || currentConfig.modelName || 'API 设置';
+    appContext.dom.apiSettingsText.textContent = label;
+    if (apiInfo?.hasLock) {
+      appContext.dom.apiSettingsText.title = `该对话已固定：${label}`;
+    } else {
+      appContext.dom.apiSettingsText.title = label;
     }
   };
 
-  const updateInputApiSwitcher = (currentConfig) => {
+  const updateInputApiSwitcher = (apiContext) => {
     const switcher = appContext.dom.inputApiSwitcher;
     const currentEl = appContext.dom.inputApiCurrent;
     const listEl = appContext.dom.inputApiList;
     if (!switcher || !currentEl || !listEl) return;
 
+    const apiInfo = apiContext?.apiInfo || null;
+    const selectedConfig = apiContext?.selectedConfig || apiManager.getSelectedConfig?.() || null;
+    const displayConfig = apiContext?.displayConfig || selectedConfig;
+    const hasLock = !!apiInfo?.hasLock;
+    const isLockValid = !!apiInfo?.isLockValid;
+
     const configs = apiManager.getAllConfigs?.() || [];
-    const currentName = currentConfig?.displayName || currentConfig?.modelName || currentConfig?.baseUrl || 'API';
-    currentEl.textContent = currentName;
-    currentEl.title = currentName;
+    const currentName = displayConfig?.displayName || displayConfig?.modelName || displayConfig?.baseUrl || 'API';
+    currentEl.textContent = '';
+    const textSpan = document.createElement('span');
+    textSpan.className = 'input-api-current-text';
+    textSpan.textContent = currentName;
+    if (hasLock) {
+      const lockIcon = document.createElement('i');
+      lockIcon.className = 'fa-solid fa-lock input-api-lock-icon';
+      lockIcon.setAttribute('aria-hidden', 'true');
+      currentEl.appendChild(lockIcon);
+    }
+    currentEl.appendChild(textSpan);
+    currentEl.title = hasLock
+      ? (isLockValid ? `已固定：${currentName}` : `已固定：${currentName}（已失效）`)
+      : currentName;
+
+    switcher.classList.toggle('locked', hasLock);
+    switcher.classList.toggle('lock-invalid', hasLock && !isLockValid);
 
     listEl.innerHTML = '';
     const favorites = configs
       .map((config, index) => ({ config, index }))
       .filter(item => item.config && item.config.isFavorite);
 
-    if (favorites.length === 0) {
-      switcher.classList.add('no-favorites');
-      return;
+    const createOption = (label, onClick, options = {}) => {
+      const entry = document.createElement('div');
+      entry.className = 'input-api-option';
+      if (options.variant) entry.classList.add(`input-api-option--${options.variant}`);
+      entry.textContent = label;
+      entry.title = options.title || label;
+      if (typeof onClick === 'function') {
+        entry.addEventListener('click', (e) => {
+          e.stopPropagation();
+          onClick();
+        });
+      } else {
+        entry.classList.add('input-api-option--hint');
+      }
+      return entry;
+    };
+
+    const createDivider = () => {
+      const divider = document.createElement('div');
+      divider.className = 'input-api-divider';
+      return divider;
+    };
+
+    if (hasLock) {
+      listEl.appendChild(createOption('取消固定（跟随当前）', () => {
+        chatHistoryUI?.setConversationApiLock?.(null, null);
+      }, { variant: 'action' }));
+
+      if (!isLockValid) {
+        listEl.appendChild(createOption('固定配置已失效，发送将回退', null, { variant: 'hint' }));
+      }
+
+      if (favorites.length > 0) {
+        listEl.appendChild(createDivider());
+        listEl.appendChild(createOption('固定到以下收藏', null, { variant: 'hint' }));
+      }
+    } else {
+      listEl.appendChild(createOption('固定到当前对话', () => {
+        if (!selectedConfig) {
+          showNotification?.({ message: '当前没有可用的 API 配置', type: 'warning', duration: 2000 });
+          return;
+        }
+        chatHistoryUI?.setConversationApiLock?.(null, selectedConfig);
+      }, { variant: 'action' }));
+      if (favorites.length > 0) {
+        listEl.appendChild(createDivider());
+      }
     }
 
-    switcher.classList.remove('no-favorites');
+    const currentId = hasLock
+      ? (apiInfo?.lockConfig?.id || apiInfo?.lock?.id || '')
+      : (selectedConfig?.id || '');
+
     favorites.forEach((item) => {
       const entry = document.createElement('div');
       entry.className = 'input-api-option';
       entry.textContent = item.config.displayName || item.config.modelName || item.config.baseUrl || '未命名 API';
       entry.title = entry.textContent;
-      if (currentConfig?.id && item.config.id && currentConfig.id === item.config.id) {
+      if (currentId && item.config.id && currentId === item.config.id) {
         entry.classList.add('current');
       }
       entry.addEventListener('click', (e) => {
         e.stopPropagation();
+        if (hasLock) {
+          chatHistoryUI?.setConversationApiLock?.(null, item.config);
+          return;
+        }
         const currentIndex = apiManager.getSelectedIndex?.();
         if (typeof currentIndex === 'number' && currentIndex === item.index) return;
         apiManager.setSelectedIndex(item.index);
       });
       listEl.appendChild(entry);
     });
+
+    const hasOptions = listEl.childElementCount > 0;
+    switcher.classList.toggle('no-favorites', !hasOptions);
   };
 
   const updateAll = () => {
-    const currentConfig = apiManager.getSelectedConfig?.() || null;
-    updateApiMenuText(currentConfig);
-    updateInputApiSwitcher(currentConfig);
-    applyMessageInputPlaceholder(appContext, currentConfig);
+    const { apiInfo, selectedConfig, displayConfig } = resolveConversationApiUiInfo();
+    updateApiMenuText(displayConfig, apiInfo);
+    updateInputApiSwitcher({ apiInfo, selectedConfig, displayConfig });
+    applyMessageInputPlaceholder(appContext, displayConfig);
   };
 
   updateAll();
   window.addEventListener('apiConfigsUpdated', updateAll);
+  document.addEventListener('CONVERSATION_API_CONTEXT_CHANGED', updateAll);
 }
 
 /**
@@ -910,7 +1006,9 @@ function setupWindowMessageHandlers(appContext) {
           appContext.dom.messageInput.setAttribute('placeholder', data.placeholder);
           if (data.timeout) {
             setTimeout(() => {
-              applyMessageInputPlaceholder(appContext, appContext.services.apiManager?.getSelectedConfig?.() || null);
+              const apiInfo = appContext.services.chatHistoryUI?.resolveActiveConversationApiConfig?.();
+              const displayConfig = apiInfo?.displayConfig || appContext.services.apiManager?.getSelectedConfig?.() || null;
+              applyMessageInputPlaceholder(appContext, displayConfig);
             }, data.timeout);
           }
         }
