@@ -11214,14 +11214,38 @@ export function createChatHistoryUI(appContext) {
       const startTime = Math.min(...timestamps);
       const endTime = Math.max(...timestamps);
       
-      // 分支对话摘要：复用同一套“指令类型驱动”的标题逻辑，并保持旧行为（先截断再追加分支后缀）
-      const promptsConfig = promptSettingsManager.getPrompts();
-      const baseSummary = buildConversationSummaryFromMessages(newChatHistory.messages, {
-        promptsConfig,
-        pageTitle: pageInfo?.title || '',
-        maxLength: 160
-      });
-      const summary = baseSummary ? `${baseSummary} (分支)` : '分支对话';
+      // 分支对话摘要：
+      // - 优先使用父对话“现有标题 + (分支)”；
+      // - 若父对话没有标题，再回退到“指令类型驱动”的摘要规则；
+      // - 避免重复追加分支后缀。
+      const branchSuffix = ' (分支)';
+      const normalizeBranchSummary = (raw) => {
+        const text = (typeof raw === 'string') ? raw.trim() : '';
+        if (!text) return '';
+        return text.endsWith(branchSuffix) ? text : `${text}${branchSuffix}`;
+      };
+      let parentSummary = '';
+      if (parentConversationId && activeConversation?.id === parentConversationId) {
+        parentSummary = (typeof activeConversation.summary === 'string') ? activeConversation.summary.trim() : '';
+      }
+      if (!parentSummary && parentConversationId) {
+        try {
+          const parentConversation = await getConversationFromCacheOrLoad(parentConversationId, false);
+          parentSummary = (typeof parentConversation?.summary === 'string') ? parentConversation.summary.trim() : '';
+        } catch (_) {
+          parentSummary = '';
+        }
+      }
+      let summary = normalizeBranchSummary(parentSummary);
+      if (!summary) {
+        const promptsConfig = promptSettingsManager.getPrompts();
+        const baseSummary = buildConversationSummaryFromMessages(newChatHistory.messages, {
+          promptsConfig,
+          pageTitle: pageInfo?.title || '',
+          maxLength: 160
+        });
+        summary = baseSummary ? `${baseSummary}${branchSuffix}` : '分支对话';
+      }
       const apiLockToSave = normalizeConversationApiLock(activeConversationApiLock || activeConversation?.apiLock);
       
       // 创建新的会话对象
