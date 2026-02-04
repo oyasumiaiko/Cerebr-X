@@ -132,6 +132,28 @@ export function createSettingsManager(appContext) {
   let currentSettings = {...DEFAULT_SETTINGS};
   let backgroundImageLoadToken = 0;
   let backgroundImageQueueState = { signature: '', pool: [], index: 0 };
+  // 记录最近一次已持久化的设置快照，用于去重写入
+  let lastPersistedSettings = {...currentSettings};
+  // 按存储区域（sync/local）合并写入，避免高频触发配额限制
+  const STORAGE_WRITE_POLICY = {
+    sync: {
+      debounceMs: 400,
+      minIntervalMs: 1500,
+      retryBaseMs: 15000,
+      retryMaxMs: 120000
+    },
+    local: {
+      debounceMs: 200,
+      retryBaseMs: 2000,
+      retryMaxMs: 10000
+    }
+  };
+  const pendingStorageWrites = { sync: {}, local: {} };
+  const storageFlushTimers = { sync: null, local: null };
+  let lastSyncWriteAt = 0;
+  let syncRetryBackoffMs = 0;
+  let nextSyncRetryAt = 0;
+  let lastStorageErrorLogAt = 0;
 
   const getConversationTitleApiOptions = () => {
     const options = [{ label: '跟随当前 API', value: 'follow_current' }];
@@ -978,6 +1000,9 @@ export function createSettingsManager(appContext) {
           console.warn('写入 fullscreenWidth 默认值失败（忽略）:', e);
         }
       }
+
+      // 同步已持久化快照，后续保存只写入真正变化的字段
+      lastPersistedSettings = { ...currentSettings };
       
       // 应用所有设置到UI
       applyAllSettings();
@@ -1002,6 +1027,7 @@ export function createSettingsManager(appContext) {
           if (typeof newValue === 'undefined') return;
           if (currentSettings[key] === newValue) return;
           currentSettings[key] = newValue;
+          lastPersistedSettings[key] = newValue;
           // 按注册项 apply 与 UI 同步
           const def = getActiveRegistry().find(d => d.key === key);
           if (def) {
@@ -1024,15 +1050,118 @@ export function createSettingsManager(appContext) {
     }
   }
   
-  // 保存单个设置
-  async function saveSetting(key, value) {
-    try {
-      currentSettings[key] = value;
-      if (NON_SYNC_SETTINGS_KEYS.has(key)) {
-        await chrome.storage.local.set({ [key]: value });
+  // 合并并节流设置写入，避免触发 sync 配额限制
+  const storageFlushInFlight = { sync: false, local: false };
+
+  function scheduleStorageFlush(area, delayMs) {
+    const policy = STORAGE_WRITE_POLICY[area];
+    let delay = Math.max(0, Number(delayMs ?? policy?.debounceMs ?? 0));
+    if (area === 'sync' && nextSyncRetryAt) {
+      const waitForRetry = nextSyncRetryAt - Date.now();
+      if (waitForRetry > 0) {
+        delay = Math.max(delay, waitForRetry);
+      }
+    }
+    if (storageFlushTimers[area]) {
+      clearTimeout(storageFlushTimers[area]);
+    }
+    storageFlushTimers[area] = setTimeout(() => {
+      void flushStorageWrites(area);
+    }, delay);
+  }
+
+  function getStorageRetryDelay(area, error) {
+    const policy = STORAGE_WRITE_POLICY[area];
+    if (area !== 'sync') return policy.retryBaseMs;
+    const message = error?.message || '';
+    const hitQuota = /MAX_WRITE_OPERATIONS_PER_MINUTE/i.test(message);
+    // sync 配额不足时做指数退避，避免持续触发配额错误
+    if (!hitQuota) return policy.retryBaseMs;
+    syncRetryBackoffMs = syncRetryBackoffMs
+      ? Math.min(syncRetryBackoffMs * 2, policy.retryMaxMs)
+      : policy.retryBaseMs;
+    return syncRetryBackoffMs;
+  }
+
+  function logStorageWriteError(area, keys, error) {
+    const now = Date.now();
+    if (now - lastStorageErrorLogAt < 5000) return;
+    lastStorageErrorLogAt = now;
+    console.warn('设置写入失败，将稍后重试：', { area, keys }, error);
+  }
+
+  async function flushStorageWrites(area) {
+    storageFlushTimers[area] = null;
+    // 同一存储区域只允许一个 flush 在飞，避免并发写入导致状态错乱
+    if (storageFlushInFlight[area]) {
+      scheduleStorageFlush(area);
+      return;
+    }
+    const pending = pendingStorageWrites[area];
+    const keys = Object.keys(pending);
+    if (keys.length === 0) return;
+
+    if (area === 'sync') {
+      const now = Date.now();
+      const elapsed = now - lastSyncWriteAt;
+      const minInterval = STORAGE_WRITE_POLICY.sync.minIntervalMs;
+      // sync 有写入频率配额，确保最小间隔后再写
+      if (elapsed < minInterval) {
+        scheduleStorageFlush(area, minInterval - elapsed);
         return;
       }
-      await chrome.storage.sync.set({ [key]: value });
+    }
+
+    const payload = { ...pending };
+    pendingStorageWrites[area] = {};
+    storageFlushInFlight[area] = true;
+    try {
+      if (area === 'local') {
+        await chrome.storage.local.set(payload);
+      } else {
+        await chrome.storage.sync.set(payload);
+        lastSyncWriteAt = Date.now();
+        syncRetryBackoffMs = 0;
+        nextSyncRetryAt = 0;
+      }
+      Object.keys(payload).forEach((key) => {
+        lastPersistedSettings[key] = payload[key];
+      });
+    } catch (error) {
+      pendingStorageWrites[area] = { ...payload, ...pendingStorageWrites[area] };
+      logStorageWriteError(area, Object.keys(payload), error);
+      const retryDelay = getStorageRetryDelay(area, error);
+      if (area === 'sync') {
+        nextSyncRetryAt = Date.now() + retryDelay;
+      }
+      scheduleStorageFlush(area, retryDelay);
+    } finally {
+      storageFlushInFlight[area] = false;
+    }
+  }
+
+  function queueSettingWrite(key, value) {
+    const area = NON_SYNC_SETTINGS_KEYS.has(key) ? 'local' : 'sync';
+    const pending = pendingStorageWrites[area];
+    const hasPending = Object.prototype.hasOwnProperty.call(pending, key);
+
+    if (lastPersistedSettings[key] === value) {
+      // 值回到已持久化状态时，撤销挂起写入，避免无意义写操作
+      if (hasPending) delete pending[key];
+      return;
+    }
+
+    // 连续修改同一设置时仅保留最新值
+    if (hasPending && pending[key] === value) return;
+    pending[key] = value;
+    scheduleStorageFlush(area);
+  }
+
+  // 保存单个设置
+  function saveSetting(key, value) {
+    try {
+      currentSettings[key] = value;
+      queueSettingWrite(key, value);
     } catch (error) {
       console.error(`保存设置${key}失败:`, error);
     }
