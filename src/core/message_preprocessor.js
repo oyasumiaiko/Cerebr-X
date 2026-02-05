@@ -102,13 +102,13 @@ export function renderUserMessageTemplate({ template, inputText }) {
 }
 
 /**
- * 渲染用户消息模板，并解析“仅发送给 API 的注入消息”块。
+ * 渲染用户消息模板，并解析“角色块 + 普通文本”为 API 注入消息。
  *
- * 注入语法：
- * - 使用 {{#inject}} ... {{/inject}} 包裹；
- * - 块内支持 {{#assistant}}...{{/assistant}} / {{#user}}...{{/user}} / {{#system}}...{{/system}}
- *   或 {{#message role="assistant"}}...{{/message}} 的写法；
- * - 注入块内也会应用 {{input}} / {{date}} / {{time}} 等占位符替换。
+ * 语法与规则：
+ * - 模板中直接写 {{#assistant}}/{{#user}}/{{#system}} 或 {{#message role="assistant"}}；
+ * - 角色块外的文本 trim 后作为 user 消息插入（空白忽略）；
+ * - 只要存在任意角色块，就由模板完全控制发送结构（不会再追加空白 user）。
+ * - 所有内容都会应用 {{input}} / {{date}} / {{time}} 等占位符替换。
  *
  * @param {Object} args
  * @param {string} args.template
