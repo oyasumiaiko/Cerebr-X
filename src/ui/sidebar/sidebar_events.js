@@ -125,6 +125,7 @@ function applyMessageInputPlaceholder(appContext, currentConfig) {
 function setupApiMenuWatcher(appContext) {
   const apiManager = appContext.services.apiManager;
   const chatHistoryUI = appContext.services.chatHistoryUI;
+  const settingsManager = appContext.services.settingsManager;
   const showNotification = appContext.utils?.showNotification;
 
   const resolveConversationApiUiInfo = () => {
@@ -162,6 +163,9 @@ function setupApiMenuWatcher(appContext) {
     const displayConfig = apiContext?.displayConfig || selectedConfig;
     const hasLock = !!apiInfo?.hasLock;
     const isLockValid = !!apiInfo?.isLockValid;
+    const multiApiEnabled = settingsManager?.getSetting?.('multiApiMode') === true;
+    const multiPlan = apiManager?.getMultiAnswerPlan?.() || null;
+    const multiTotal = Number(multiPlan?.total) || 0;
 
     const configs = apiManager.getAllConfigs?.() || [];
     const currentName = displayConfig?.displayName || displayConfig?.modelName || displayConfig?.baseUrl || 'API';
@@ -176,12 +180,19 @@ function setupApiMenuWatcher(appContext) {
       currentEl.appendChild(lockIcon);
     }
     currentEl.appendChild(textSpan);
+    if (multiApiEnabled) {
+      const badge = document.createElement('span');
+      badge.className = 'input-api-multi-badge';
+      badge.textContent = multiTotal > 0 ? `多答×${multiTotal}` : '多答';
+      currentEl.appendChild(badge);
+    }
     currentEl.title = hasLock
       ? (isLockValid ? `已固定：${currentName}` : `已固定：${currentName}（已失效）`)
       : currentName;
 
     switcher.classList.toggle('locked', hasLock);
     switcher.classList.toggle('lock-invalid', hasLock && !isLockValid);
+    switcher.classList.toggle('multi-api-mode', multiApiEnabled);
 
     listEl.innerHTML = '';
     const favorites = configs
@@ -210,6 +221,24 @@ function setupApiMenuWatcher(appContext) {
       divider.className = 'input-api-divider';
       return divider;
     };
+
+    const multiLabel = multiApiEnabled ? '多 API 回答：已开启' : '多 API 回答：已关闭';
+    const multiTitle = multiApiEnabled
+      ? (multiTotal > 0 ? `当前队列 ${multiTotal} 项` : '尚未配置多答 API')
+      : '开启后按顺序发送到多答队列';
+    listEl.appendChild(createOption(multiLabel, () => {
+      if (!settingsManager?.setMultiApiMode) return;
+      settingsManager.setMultiApiMode(!multiApiEnabled);
+    }, { variant: 'action', title: multiTitle }));
+
+    if (multiApiEnabled && multiTotal === 0) {
+      listEl.appendChild(createOption('未配置多答 API', null, { variant: 'hint' }));
+    }
+    if (multiApiEnabled && multiPlan?.truncated) {
+      listEl.appendChild(createOption(`多答队列已截断（最多 ${multiPlan.maxTotal} 项）`, null, { variant: 'hint' }));
+    }
+
+    listEl.appendChild(createDivider());
 
     if (hasLock) {
       listEl.appendChild(createOption('取消固定（跟随当前）', () => {
@@ -276,6 +305,7 @@ function setupApiMenuWatcher(appContext) {
   updateAll();
   window.addEventListener('apiConfigsUpdated', updateAll);
   document.addEventListener('CONVERSATION_API_CONTEXT_CHANGED', updateAll);
+  settingsManager?.subscribe?.('multiApiMode', updateAll);
 }
 
 /**

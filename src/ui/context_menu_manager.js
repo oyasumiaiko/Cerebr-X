@@ -50,6 +50,7 @@ export function createContextMenuManager(appContext) {
   const regenerateSubmenu = regenerateButton?.querySelector('.context-menu-submenu');
   const regenerateSubmenuList = regenerateSubmenu?.querySelector('.context-menu-submenu-list');
   const regenerateApiHint = document.getElementById('regenerate-message-api-hint');
+  const lockApiFromMessageButton = document.getElementById('lock-api-from-message');
 
   // Services from appContext.services
   const messageSender = services.messageSender;
@@ -333,6 +334,27 @@ export function createContextMenuManager(appContext) {
     return 'API';
   }
 
+  function resolveApiConfigFromMessage(messageElement) {
+    if (!messageElement || !chatHistoryManager?.chatHistory?.messages) return null;
+    const messageId = messageElement.getAttribute('data-message-id') || '';
+    if (!messageId) return null;
+    const node = chatHistoryManager.chatHistory.messages.find(m => m.id === messageId) || null;
+    if (!node || node.role !== 'assistant') return null;
+    if (node.apiUuid && apiManager?.resolveApiParam) {
+      const resolved = apiManager.resolveApiParam({ id: node.apiUuid });
+      if (resolved) return resolved;
+    }
+    if (node.apiDisplayName && apiManager?.resolveApiParam) {
+      const resolved = apiManager.resolveApiParam(node.apiDisplayName);
+      if (resolved) return resolved;
+    }
+    if (node.apiModelId && apiManager?.resolveApiParam) {
+      const resolved = apiManager.resolveApiParam(node.apiModelId);
+      if (resolved) return resolved;
+    }
+    return null;
+  }
+
   /**
    * 统一解析“重新生成”的 API 参数，确保展示与实际发送一致。
    * - 若传入 apiOverride（如收藏 API/指定 ID），直接使用；
@@ -504,6 +526,18 @@ export function createContextMenuManager(appContext) {
       if (regenerateApiHint) {
         regenerateApiHint.textContent = '';
         regenerateApiHint.removeAttribute('title');
+      }
+    }
+
+    if (lockApiFromMessageButton) {
+      const apiConfig = resolveApiConfigFromMessage(messageElement);
+      if (apiConfig) {
+        const label = getApiDisplayName(apiConfig);
+        lockApiFromMessageButton.style.display = 'flex';
+        lockApiFromMessageButton.title = `固定该对话到：${label}`;
+      } else {
+        lockApiFromMessageButton.style.display = 'none';
+        lockApiFromMessageButton.removeAttribute('title');
       }
     }
 
@@ -981,6 +1015,18 @@ export function createContextMenuManager(appContext) {
       if (target && target.closest('.context-menu-submenu')) return;
       regenerateMessage(event);
     });
+    if (lockApiFromMessageButton) {
+      lockApiFromMessageButton.addEventListener('click', async () => {
+        const apiConfig = resolveApiConfigFromMessage(currentMessageElement);
+        if (!apiConfig) {
+          utils?.showNotification?.({ message: '该消息未记录可用的 API 信息', type: 'warning', duration: 1800 });
+          hideContextMenu();
+          return;
+        }
+        await chatHistoryUI?.setConversationApiLock?.(null, apiConfig);
+        hideContextMenu();
+      });
+    }
     if (regenerateSubmenuList) {
       regenerateSubmenuList.addEventListener('click', (event) => {
         const target = event?.target instanceof Element ? event.target : null;

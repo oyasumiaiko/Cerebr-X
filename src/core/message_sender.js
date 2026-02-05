@@ -2809,6 +2809,25 @@ export function createMessageSender(appContext) {
     };
   }
 
+  function resolveLatestUserMessageId() {
+    try {
+      const history = chatHistoryManager.chatHistory;
+      const currentId = history?.currentNode;
+      const currentNode = history?.messages?.find(m => m.id === currentId);
+      if (currentNode && currentNode.role === 'user') {
+        return currentNode.id;
+      }
+      if (Array.isArray(history?.messages)) {
+        const reversed = history.messages.slice().reverse();
+        const lastUser = reversed.find(m => m.role === 'user');
+        return lastUser ? lastUser.id : null;
+      }
+    } catch (e) {
+      console.warn('解析最新用户消息失败:', e);
+    }
+    return null;
+  }
+
   /**
    * 对外暴露的发送接口：
    * - 负责解析用户输入中的 [xN] 并行生成语法；
@@ -2893,6 +2912,87 @@ export function createMessageSender(appContext) {
 
     let { baseText, parallelCount, aspectRatio } = parseParallelMultiplier(rawText);
 
+    const isFollowCurrentApiParam = (apiParam) => {
+      if (typeof apiParam !== 'string') return false;
+      const key = apiParam.trim().toLowerCase();
+      return key === 'follow_current' || key === 'selected';
+    };
+
+    const hasExplicitApiOverride = !!opts.resolvedApiConfig
+      || (opts.api != null && !isFollowCurrentApiParam(opts.api));
+
+    const allowMultiApi = !opts.regenerateMode
+      && !opts.forceSendFullHistory
+      && !hasExplicitApiOverride
+      && !(typeof opts.targetAiMessageId === 'string' && opts.targetAiMessageId.trim());
+
+    const multiPlan = allowMultiApi && settingsManager?.getSetting?.('multiApiMode') === true
+      ? (apiManager?.getMultiAnswerPlan?.() || null)
+      : null;
+
+    let multiTargets = Array.isArray(multiPlan?.expanded) ? multiPlan.expanded.slice() : [];
+    if (allowMultiApi && multiTargets.length > 0) {
+      const validTargets = multiTargets.filter(config => config?.baseUrl && hasValidApiKey(config.apiKey));
+      if (validTargets.length !== multiTargets.length && typeof showNotification === 'function') {
+        showNotification({ message: '已跳过未配置的多答 API', type: 'warning', duration: 1800 });
+      }
+      multiTargets = validTargets;
+    }
+
+    if (allowMultiApi && multiTargets.length > 0) {
+      if (multiPlan?.truncated && typeof showNotification === 'function') {
+        showNotification({
+          message: `多答队列超过上限，仅发送前 ${multiPlan.maxTotal} 项`,
+          type: 'info',
+          duration: 2000
+        });
+      }
+
+      const firstOptions = {
+        ...opts,
+        originalMessageText: baseText,
+        resolvedApiConfig: multiTargets[0],
+        aspectRatioOverride: aspectRatio || undefined
+      };
+
+      if (multiTargets.length === 1) {
+        return sendMessageCore(firstOptions);
+      }
+
+      const settle = async (promise) => {
+        try {
+          const value = await promise;
+          return { status: 'fulfilled', value };
+        } catch (error) {
+          return { status: 'rejected', reason: error };
+        }
+      };
+
+      const results = [];
+      const baseUserMessageBefore = resolveLatestUserMessageId();
+      const firstPromise = sendMessageCore(firstOptions);
+      const baseUserMessageId = resolveLatestUserMessageId();
+      results.push(await settle(firstPromise));
+
+      if (!baseUserMessageId || baseUserMessageId === baseUserMessageBefore) {
+        return results;
+      }
+
+      for (let i = 1; i < multiTargets.length; i += 1) {
+        const extraOptions = {
+          ...opts,
+          originalMessageText: baseText,
+          regenerateMode: true,
+          messageId: baseUserMessageId,
+          resolvedApiConfig: multiTargets[i],
+          aspectRatioOverride: aspectRatio || undefined
+        };
+        results.push(await settle(sendMessageCore(extraOptions)));
+      }
+
+      return results;
+    }
+
     // “原地替换指定 AI 消息”不支持并行生成：
     // - 并行会导致多路流式更新互相覆盖同一条消息，结果不可控；
     // - 因此一旦指定 targetAiMessageId，强制退回为单路执行。
@@ -2967,23 +3067,7 @@ export function createMessageSender(appContext) {
 
     // 由于 sendMessageCore 在首次 await 之前会同步插入用户消息，
     // 此处可以立即通过 chatHistoryManager 获取“当前最后一条用户消息”的 ID。
-    let baseUserMessageId = null;
-    try {
-      const history = chatHistoryManager.chatHistory;
-      const currentId = history?.currentNode;
-      const currentNode = history?.messages?.find(m => m.id === currentId);
-      if (currentNode && currentNode.role === 'user') {
-        baseUserMessageId = currentNode.id;
-      } else if (Array.isArray(history?.messages)) {
-        // 回退：从末尾向前查找最后一条用户消息
-        const reversed = history.messages.slice().reverse();
-        const lastUser = reversed.find(m => m.role === 'user');
-        baseUserMessageId = lastUser ? lastUser.id : null;
-      }
-    } catch (e) {
-      console.warn('解析并行生成的基准用户消息失败，将退回为单路生成:', e);
-      baseUserMessageId = null;
-    }
+    const baseUserMessageId = resolveLatestUserMessageId();
 
     if (!baseUserMessageId) {
       // 找不到基准用户消息时，保守地只保留第一路请求，避免插入多条重复用户消息

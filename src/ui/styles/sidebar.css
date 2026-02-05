@@ -883,6 +883,19 @@ body.thread-resize-active * {
     text-overflow: ellipsis;
 }
 
+.input-api-multi-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    border-radius: 999px;
+    font-size: 0.72em;
+    line-height: 1;
+    color: var(--cerebr-text-color);
+    background: color-mix(in srgb, var(--cerebr-highlight) 28%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cerebr-highlight) 45%, transparent);
+    opacity: 0.9;
+}
+
 #input-api-switcher .input-api-list {
     display: none;
     position: absolute;

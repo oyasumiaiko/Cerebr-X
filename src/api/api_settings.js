@@ -56,6 +56,9 @@ export function createApiManager(appContext) {
   // 拖动排序用的临时状态，避免在拖动过程中频繁写入。
   let draggingCardIndex = null;
   const DELETE_CONFIRM_TIMEOUT_MS = 2600;
+  // 多 API 回答：单配置最多次数与总次数上限
+  const MULTI_ANSWER_MAX_PER_CONFIG = 5;
+  const MULTI_ANSWER_MAX_TOTAL = 10;
 
   const {
     dom,
@@ -97,6 +100,49 @@ export function createApiManager(appContext) {
     }
   }
 
+  function normalizeMultiAnswerCount(raw) {
+    const num = Math.floor(Number(raw) || 0);
+    if (!Number.isFinite(num)) return 0;
+    return Math.max(0, Math.min(MULTI_ANSWER_MAX_PER_CONFIG, num));
+  }
+
+  function buildMultiAnswerPlan(options = {}) {
+    const maxTotal = Number.isFinite(options.maxTotal)
+      ? Math.max(1, Math.floor(options.maxTotal))
+      : MULTI_ANSWER_MAX_TOTAL;
+    const expanded = [];
+    const entries = [];
+    let truncated = false;
+    const configs = Array.isArray(apiConfigs) ? apiConfigs : [];
+
+    for (let i = 0; i < configs.length; i += 1) {
+      const config = configs[i];
+      if (!config) continue;
+      const count = normalizeMultiAnswerCount(config.multiAnswerCount);
+      if (count <= 0) continue;
+      entries.push({ config, count, index: i });
+      for (let j = 0; j < count; j += 1) {
+        if (expanded.length >= maxTotal) {
+          truncated = true;
+          break;
+        }
+        expanded.push(config);
+      }
+      if (expanded.length >= maxTotal) {
+        truncated = true;
+        break;
+      }
+    }
+
+    return {
+      expanded,
+      entries,
+      total: expanded.length,
+      maxTotal,
+      truncated
+    };
+  }
+
   function compactConfigsForSync(configs) {
     return configs.map(c => ({
       id: c.id,
@@ -107,6 +153,7 @@ export function createApiManager(appContext) {
       temperature: c.temperature,
       useStreaming: (c.useStreaming !== false),
       isFavorite: !!c.isFavorite,
+      multiAnswerCount: normalizeMultiAnswerCount(c.multiAnswerCount),
       // 旧字段：单一条数上限（按“消息条目”计数）。保留以便向后兼容与降级回滚。
       maxChatHistory: c.maxChatHistory ?? 500,
       // 新字段：分别限制历史 user / assistant 消息条数（便于长对话压缩 AI 输出）
@@ -407,6 +454,16 @@ export function createApiManager(appContext) {
             config.userMessagePreprocessorIncludeInHistory = false;
             needResave = true;
           }
+          if (!Number.isFinite(config.multiAnswerCount)) {
+            config.multiAnswerCount = 0;
+            needResave = true;
+          } else {
+            const normalizedMulti = normalizeMultiAnswerCount(config.multiAnswerCount);
+            if (normalizedMulti !== config.multiAnswerCount) {
+              config.multiAnswerCount = normalizedMulti;
+              needResave = true;
+            }
+          }
           // 兼容旧版本：将单一 maxChatHistory 迁移为按角色拆分的双上限
           // 设计目标：尽量保持“总条数”接近旧行为（默认按 50%/50% 拆分）
           const hasUserLimit = Number.isFinite(config.maxChatHistoryUser);
@@ -457,6 +514,7 @@ export function createApiManager(appContext) {
           temperature: 1,
           useStreaming: true,
           isFavorite: false, // 添加收藏状态字段
+          multiAnswerCount: 0,
           customParams: '',
           customSystemPrompt: '',
           userMessagePreprocessorTemplate: '',
@@ -486,6 +544,7 @@ export function createApiManager(appContext) {
         temperature: 1,
         useStreaming: true,
         isFavorite: false,
+        multiAnswerCount: 0,
         customParams: '',
         customSystemPrompt: '',
         userMessagePreprocessorTemplate: '',
@@ -711,6 +770,7 @@ export function createApiManager(appContext) {
    * @param {string} [config.modelName] - 模型名称
    * @param {number} [config.temperature] - temperature 值（可为 0）
    * @param {boolean} [config.isFavorite] - 是否收藏
+   * @param {number} [config.multiAnswerCount] - 多答次数（0=不参与）
    * @param {string} [config.customParams] - 自定义参数
    * @param {string} [config.userMessagePreprocessorTemplate] - 用户消息预处理模板（支持 {{#system}}/{{#assistant}}/{{#user}} 角色块）
    * @param {boolean} [config.userMessagePreprocessorIncludeInHistory] - 预处理结果是否写入历史
@@ -830,12 +890,57 @@ export function createApiManager(appContext) {
       setConfigValue: (v) => { apiConfigs[index].maxChatHistoryAssistant = v; }
     });
 
+    const formatMultiAnswerText = (v) => {
+      if (!v || v <= 0) return '不参与';
+      return `x${v}`;
+    };
+
+    const multiAnswerGroup = document.createElement('div');
+    multiAnswerGroup.className = 'form-group';
+    const multiAnswerHeader = document.createElement('div');
+    multiAnswerHeader.className = 'form-group-header';
+    const multiAnswerLabel = document.createElement('label');
+    multiAnswerLabel.textContent = '多答次数（0=不参与）';
+    const multiAnswerValue = document.createElement('span');
+    multiAnswerValue.className = 'temperature-value';
+    multiAnswerHeader.appendChild(multiAnswerLabel);
+    multiAnswerHeader.appendChild(multiAnswerValue);
+
+    const multiAnswerInput = document.createElement('input');
+    multiAnswerInput.type = 'range';
+    multiAnswerInput.className = 'multi-answer-count temperature';
+    multiAnswerInput.min = '0';
+    multiAnswerInput.max = String(MULTI_ANSWER_MAX_PER_CONFIG);
+    multiAnswerInput.step = '1';
+
+    const initialMultiAnswer = normalizeMultiAnswerCount(config.multiAnswerCount);
+    multiAnswerInput.value = String(initialMultiAnswer);
+    multiAnswerValue.textContent = formatMultiAnswerText(initialMultiAnswer);
+
+    multiAnswerInput.addEventListener('input', () => {
+      const v = parseInt(multiAnswerInput.value, 10) || 0;
+      multiAnswerValue.textContent = formatMultiAnswerText(v);
+    });
+
+    multiAnswerInput.addEventListener('change', () => {
+      const v = normalizeMultiAnswerCount(parseInt(multiAnswerInput.value, 10) || 0);
+      multiAnswerInput.value = String(v);
+      multiAnswerValue.textContent = formatMultiAnswerText(v);
+      apiConfigs[index].multiAnswerCount = v;
+      saveAPIConfigs();
+    });
+
+    multiAnswerGroup.appendChild(multiAnswerHeader);
+    multiAnswerGroup.appendChild(multiAnswerInput);
+
     if (formLeft) {
       formLeft.appendChild(userHistoryGroup);
       formLeft.appendChild(assistantHistoryGroup);
+      formLeft.appendChild(multiAnswerGroup);
     } else {
       apiForm.appendChild(userHistoryGroup);
       apiForm.appendChild(assistantHistoryGroup);
+      apiForm.appendChild(multiAnswerGroup);
     }
 
     // 传输模式：流式/非流式 美观开关
@@ -2138,6 +2243,7 @@ export function createApiManager(appContext) {
    * @param {string} [partialConfig.customParams] - 自定义参数字符串
    * @param {string} [partialConfig.userMessagePreprocessorTemplate] - 用户消息预处理模板（支持 {{#system}}/{{#assistant}}/{{#user}} 角色块）
    * @param {boolean} [partialConfig.userMessagePreprocessorIncludeInHistory] - 预处理结果是否写入历史
+   * @param {number} [partialConfig.multiAnswerCount] - 多答次数（0=不参与）
    * @returns {Object|null} 完整的 API 配置对象或 null
    */
   function getApiConfigFromPartial(partialConfig) {
@@ -2181,6 +2287,9 @@ export function createApiManager(appContext) {
       customSystemPrompt: partialConfig.customSystemPrompt || '',
       userMessagePreprocessorTemplate: (typeof partialConfig.userMessagePreprocessorTemplate === 'string') ? partialConfig.userMessagePreprocessorTemplate : '',
       userMessagePreprocessorIncludeInHistory: !!partialConfig.userMessagePreprocessorIncludeInHistory,
+      multiAnswerCount: Number.isFinite(partialConfig.multiAnswerCount)
+        ? normalizeMultiAnswerCount(partialConfig.multiAnswerCount)
+        : 0,
       maxChatHistory: 500, // 旧字段：保留默认值
       maxChatHistoryUser: 500,
       maxChatHistoryAssistant: 500,
@@ -2257,6 +2366,7 @@ export function createApiManager(appContext) {
       temperature: 1,
       useStreaming: true,
       isFavorite: false,
+      multiAnswerCount: 0,
       customParams: '',
       customSystemPrompt: '',
       userMessagePreprocessorTemplate: '',
@@ -2297,6 +2407,7 @@ export function createApiManager(appContext) {
     getModelConfig,
     getApiConfigFromPartial,
     resolveApiParam,
+    getMultiAnswerPlan: (options = {}) => buildMultiAnswerPlan(options),
 
     // 获取和设置配置
     getSelectedConfig: () => {
