@@ -99,8 +99,6 @@ export function createSettingsManager(appContext) {
     autoScroll: true,
     clearOnSearch: true, // This might be specific to a search feature, not a general setting
     shouldSendChatHistory: true,
-    // 是否启用多 API 回答（同一条请求顺序发送给多个 API）
-    multiApiMode: false,
     // 对话标题生成：默认关闭，避免未配置时触发额外请求
     autoGenerateConversationTitle: false,
     // 对话标题生成：是否覆盖总结类标题（保留[总结]前缀）
@@ -286,13 +284,6 @@ export function createSettingsManager(appContext) {
       group: 'behavior',
       defaultValue: DEFAULT_SETTINGS.shouldSendChatHistory,
       apply: (v) => applySendChatHistory(v)
-    },
-    {
-      key: 'multiApiMode',
-      type: 'toggle',
-      label: '多 API 回答',
-      group: 'behavior',
-      defaultValue: DEFAULT_SETTINGS.multiApiMode
     },
     {
       key: 'autoGenerateConversationTitle',
@@ -1858,9 +1849,6 @@ export function createSettingsManager(appContext) {
   // 设置发送聊天历史
   function setSendChatHistory(enabled) { setSetting('shouldSendChatHistory', enabled); }
 
-  // 设置多 API 回答模式
-  function setMultiApiMode(enabled) { setSetting('multiApiMode', enabled); }
-
   function setAutoRetry(enabled) { setSetting('autoRetry', enabled); }
   
   // 设置显示引用标记
@@ -1938,7 +1926,6 @@ export function createSettingsManager(appContext) {
     setStopAtTop,
     setClearOnSearch,
     setSendChatHistory,
-    setMultiApiMode,
     setAutoRetry,
     setShowReference,
     setSidebarPosition,

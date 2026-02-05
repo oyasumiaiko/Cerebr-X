@@ -834,7 +834,9 @@ body.thread-resize-active * {
     z-index: 1001;
 }
 
-#input-container.has-input #input-api-switcher {
+#input-container.has-input #input-api-switcher,
+#input-container.has-focus #input-api-switcher,
+#input-container.api-switcher-active #input-api-switcher {
     opacity: 1;
     pointer-events: auto;
 }
@@ -883,17 +885,59 @@ body.thread-resize-active * {
     text-overflow: ellipsis;
 }
 
-.input-api-multi-badge {
+.input-api-option--multi {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.input-api-option-main {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.input-api-option-controls {
     display: inline-flex;
     align-items: center;
-    padding: 2px 6px;
-    border-radius: 999px;
-    font-size: 0.72em;
-    line-height: 1;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.input-api-count-btn {
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 55%, transparent);
+    background: color-mix(in srgb, var(--cerebr-input-bg) 70%, transparent);
     color: var(--cerebr-text-color);
-    background: color-mix(in srgb, var(--cerebr-highlight) 28%, transparent);
-    border: 1px solid color-mix(in srgb, var(--cerebr-highlight) 45%, transparent);
-    opacity: 0.9;
+    width: 22px;
+    height: 20px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.input-api-count-btn:hover {
+    background: var(--cerebr-control-bg-hover);
+    border-color: var(--cerebr-control-border-hover);
+}
+
+.input-api-count-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.input-api-count-text {
+    min-width: 16px;
+    text-align: center;
+    font-size: calc(var(--cerebr-font-size, 14px) * 0.75);
+    opacity: 0.85;
+}
+
+.input-api-option.primary {
+    border-color: color-mix(in srgb, var(--cerebr-highlight) 35%, transparent);
 }
 
 #input-api-switcher .input-api-list {
@@ -925,6 +969,8 @@ body.thread-resize-active * {
     background: transparent;
 }
 
+#input-container.has-focus #input-api-switcher .input-api-list,
+#input-container.api-switcher-active #input-api-switcher .input-api-list,
 #input-api-switcher:hover .input-api-list {
     display: flex;
     flex-direction: column;

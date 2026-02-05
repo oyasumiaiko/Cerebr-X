@@ -2926,26 +2926,34 @@ export function createMessageSender(appContext) {
       && !hasExplicitApiOverride
       && !(typeof opts.targetAiMessageId === 'string' && opts.targetAiMessageId.trim());
 
-    const multiPlan = allowMultiApi && settingsManager?.getSetting?.('multiApiMode') === true
-      ? (apiManager?.getMultiAnswerPlan?.() || null)
+    const selectionState = allowMultiApi && typeof apiManager?.getRuntimeMultiApiSelection === 'function'
+      ? apiManager.getRuntimeMultiApiSelection()
       : null;
 
-    let multiTargets = Array.isArray(multiPlan?.expanded) ? multiPlan.expanded.slice() : [];
-    if (allowMultiApi && multiTargets.length > 0) {
-      const validTargets = multiTargets.filter(config => config?.baseUrl && hasValidApiKey(config.apiKey));
-      if (validTargets.length !== multiTargets.length && typeof showNotification === 'function') {
-        showNotification({ message: '已跳过未配置的多答 API', type: 'warning', duration: 1800 });
-      }
-      multiTargets = validTargets;
-    }
+    const selectionEntries = Array.isArray(selectionState?.entries) ? selectionState.entries : [];
+    const selectionTotal = Number(selectionState?.total) || 0;
 
-    if (allowMultiApi && multiTargets.length > 0) {
-      if (multiPlan?.truncated && typeof showNotification === 'function') {
-        showNotification({
-          message: `多答队列超过上限，仅发送前 ${multiPlan.maxTotal} 项`,
-          type: 'info',
-          duration: 2000
-        });
+    if (allowMultiApi && selectionTotal > 1 && selectionEntries.length > 0) {
+      const expandedTargets = [];
+      selectionEntries.forEach((entry) => {
+        const count = Number.isFinite(entry?.count) ? entry.count : 0;
+        if (!entry?.config || count <= 0) return;
+        for (let i = 0; i < count; i += 1) {
+          expandedTargets.push(entry.config);
+        }
+      });
+
+      let multiTargets = expandedTargets;
+      if (multiTargets.length > 0) {
+        const validTargets = multiTargets.filter(config => config?.baseUrl && hasValidApiKey(config.apiKey));
+        if (validTargets.length !== multiTargets.length && typeof showNotification === 'function') {
+          showNotification({ message: '已跳过未配置的多答 API', type: 'warning', duration: 1800 });
+        }
+        multiTargets = validTargets;
+      }
+
+      if (multiTargets.length === 0) {
+        return sendMessageCore({ ...opts, originalMessageText: baseText, aspectRatioOverride: aspectRatio || undefined });
       }
 
       const firstOptions = {

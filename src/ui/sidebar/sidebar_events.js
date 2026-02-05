@@ -125,7 +125,6 @@ function applyMessageInputPlaceholder(appContext, currentConfig) {
 function setupApiMenuWatcher(appContext) {
   const apiManager = appContext.services.apiManager;
   const chatHistoryUI = appContext.services.chatHistoryUI;
-  const settingsManager = appContext.services.settingsManager;
   const showNotification = appContext.utils?.showNotification;
 
   const resolveConversationApiUiInfo = () => {
@@ -163,12 +162,36 @@ function setupApiMenuWatcher(appContext) {
     const displayConfig = apiContext?.displayConfig || selectedConfig;
     const hasLock = !!apiInfo?.hasLock;
     const isLockValid = !!apiInfo?.isLockValid;
-    const multiApiEnabled = settingsManager?.getSetting?.('multiApiMode') === true;
-    const multiPlan = apiManager?.getMultiAnswerPlan?.() || null;
-    const multiTotal = Number(multiPlan?.total) || 0;
 
     const configs = apiManager.getAllConfigs?.() || [];
-    const currentName = displayConfig?.displayName || displayConfig?.modelName || displayConfig?.baseUrl || 'API';
+    const selectionState = (typeof apiManager?.getRuntimeMultiApiSelection === 'function')
+      ? apiManager.getRuntimeMultiApiSelection()
+      : { entries: [], total: 0, primaryConfig: null };
+    const selectionEntries = Array.isArray(selectionState?.entries) ? selectionState.entries : [];
+
+    const resolveConfigLabel = (config) => {
+      if (!config) return 'API';
+      return config.displayName || config.modelName || config.baseUrl || 'API';
+    };
+
+    const buildSelectionLabel = (entries) => {
+      if (!Array.isArray(entries) || entries.length === 0) return '';
+      const parts = [];
+      entries.forEach((entry) => {
+        const label = resolveConfigLabel(entry?.config);
+        if (!label) return;
+        const count = Number.isFinite(entry?.count) ? entry.count : 0;
+        if (count > 1) {
+          parts.push(`${label}×${count}`);
+        } else {
+          parts.push(label);
+        }
+      });
+      return parts.join('、');
+    };
+
+    const selectionLabel = buildSelectionLabel(selectionEntries);
+    const currentName = selectionLabel || resolveConfigLabel(displayConfig);
     currentEl.textContent = '';
     const textSpan = document.createElement('span');
     textSpan.className = 'input-api-current-text';
@@ -180,25 +203,14 @@ function setupApiMenuWatcher(appContext) {
       currentEl.appendChild(lockIcon);
     }
     currentEl.appendChild(textSpan);
-    if (multiApiEnabled) {
-      const badge = document.createElement('span');
-      badge.className = 'input-api-multi-badge';
-      badge.textContent = multiTotal > 0 ? `多答×${multiTotal}` : '多答';
-      currentEl.appendChild(badge);
-    }
     currentEl.title = hasLock
       ? (isLockValid ? `已固定：${currentName}` : `已固定：${currentName}（已失效）`)
       : currentName;
 
     switcher.classList.toggle('locked', hasLock);
     switcher.classList.toggle('lock-invalid', hasLock && !isLockValid);
-    switcher.classList.toggle('multi-api-mode', multiApiEnabled);
 
     listEl.innerHTML = '';
-    const favorites = configs
-      .map((config, index) => ({ config, index }))
-      .filter(item => item.config && item.config.isFavorite);
-
     const createOption = (label, onClick, options = {}) => {
       const entry = document.createElement('div');
       entry.className = 'input-api-option';
@@ -208,7 +220,7 @@ function setupApiMenuWatcher(appContext) {
       if (typeof onClick === 'function') {
         entry.addEventListener('click', (e) => {
           e.stopPropagation();
-          onClick();
+          onClick(e);
         });
       } else {
         entry.classList.add('input-api-option--hint');
@@ -222,21 +234,103 @@ function setupApiMenuWatcher(appContext) {
       return divider;
     };
 
-    const multiLabel = multiApiEnabled ? '多 API 回答：已开启' : '多 API 回答：已关闭';
-    const multiTitle = multiApiEnabled
-      ? (multiTotal > 0 ? `当前队列 ${multiTotal} 项` : '尚未配置多答 API')
-      : '开启后按顺序发送到多答队列';
-    listEl.appendChild(createOption(multiLabel, () => {
-      if (!settingsManager?.setMultiApiMode) return;
-      settingsManager.setMultiApiMode(!multiApiEnabled);
-    }, { variant: 'action', title: multiTitle }));
+    listEl.appendChild(createOption('提示：单击切换，Ctrl 多选，右侧 + / - 调整次数', null, { variant: 'hint' }));
+    listEl.appendChild(createDivider());
 
-    if (multiApiEnabled && multiTotal === 0) {
-      listEl.appendChild(createOption('未配置多答 API', null, { variant: 'hint' }));
-    }
-    if (multiApiEnabled && multiPlan?.truncated) {
-      listEl.appendChild(createOption(`多答队列已截断（最多 ${multiPlan.maxTotal} 项）`, null, { variant: 'hint' }));
-    }
+    const selectionMap = new Map();
+    selectionEntries.forEach((entry) => {
+      if (entry?.key) selectionMap.set(entry.key, entry);
+    });
+
+    const resolveConfigKey = (config) => {
+      if (!config) return '';
+      return (config.id || `${config.baseUrl || ''}|${config.modelName || ''}`).trim();
+    };
+
+    const ensureActiveConfigInSelection = (selection) => {
+      const selected = apiManager.getSelectedConfig?.();
+      const selectedKey = selected?.id || '';
+      const selectedKeys = new Set(selection.entries.map(entry => entry?.config?.id).filter(Boolean));
+      if (selectedKey && selectedKeys.has(selectedKey)) return;
+      const primaryId = selection.primaryConfig?.id;
+      if (!primaryId) return;
+      const idx = configs.findIndex(cfg => cfg?.id === primaryId);
+      if (idx >= 0) apiManager.setSelectedIndex(idx);
+    };
+
+    configs.forEach((config, index) => {
+      if (!config) return;
+      const key = resolveConfigKey(config);
+      const entryState = selectionMap.get(key) || null;
+      const count = Number.isFinite(entryState?.count) ? entryState.count : 0;
+      const isSelected = count > 0;
+
+      const row = document.createElement('div');
+      row.className = 'input-api-option input-api-option--multi';
+      if (isSelected) row.classList.add('current');
+      if (entryState?.isPrimary) row.classList.add('primary');
+
+      const main = document.createElement('div');
+      main.className = 'input-api-option-main';
+      main.textContent = resolveConfigLabel(config);
+      main.title = main.textContent;
+      main.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isCtrl = e.ctrlKey || e.metaKey;
+        if (isCtrl) {
+          const result = apiManager.toggleRuntimeMultiApiSelection?.(config);
+          if (result?.ok === false && result?.reason === 'min_one') {
+            showNotification?.({ message: '至少保留一个 API', type: 'warning', duration: 1600 });
+          }
+          if (result?.selection) ensureActiveConfigInSelection(result.selection);
+          return;
+        }
+        apiManager.setSelectedIndex(index);
+        const result = apiManager.setRuntimeMultiApiSingle?.(config);
+        if (result?.selection) ensureActiveConfigInSelection(result.selection);
+      });
+
+      const controls = document.createElement('div');
+      controls.className = 'input-api-option-controls';
+
+      const minusBtn = document.createElement('button');
+      minusBtn.type = 'button';
+      minusBtn.className = 'input-api-count-btn';
+      minusBtn.textContent = '−';
+      minusBtn.disabled = (count <= 0) || (count <= 1 && selectionEntries.length <= 1);
+      minusBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const next = count - 1;
+        const result = apiManager.updateRuntimeMultiApiCount?.(config, next);
+        if (result?.ok === false && result?.reason === 'min_one') {
+          showNotification?.({ message: '至少保留一个 API', type: 'warning', duration: 1600 });
+        }
+        if (result?.selection) ensureActiveConfigInSelection(result.selection);
+      });
+
+      const countText = document.createElement('span');
+      countText.className = 'input-api-count-text';
+      countText.textContent = String(count);
+
+      const plusBtn = document.createElement('button');
+      plusBtn.type = 'button';
+      plusBtn.className = 'input-api-count-btn';
+      plusBtn.textContent = '+';
+      plusBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const next = (count > 0 ? count : 0) + 1;
+        const result = apiManager.updateRuntimeMultiApiCount?.(config, next);
+        if (result?.selection) ensureActiveConfigInSelection(result.selection);
+      });
+
+      controls.appendChild(minusBtn);
+      controls.appendChild(countText);
+      controls.appendChild(plusBtn);
+
+      row.appendChild(main);
+      row.appendChild(controls);
+      listEl.appendChild(row);
+    });
 
     listEl.appendChild(createDivider());
 
@@ -248,11 +342,6 @@ function setupApiMenuWatcher(appContext) {
       if (!isLockValid) {
         listEl.appendChild(createOption('固定配置已失效，发送将回退', null, { variant: 'hint' }));
       }
-
-      if (favorites.length > 0) {
-        listEl.appendChild(createDivider());
-        listEl.appendChild(createOption('固定到以下收藏', null, { variant: 'hint' }));
-      }
     } else {
       listEl.appendChild(createOption('固定到当前对话', () => {
         if (!selectedConfig) {
@@ -261,35 +350,7 @@ function setupApiMenuWatcher(appContext) {
         }
         chatHistoryUI?.setConversationApiLock?.(null, selectedConfig);
       }, { variant: 'action' }));
-      if (favorites.length > 0) {
-        listEl.appendChild(createDivider());
-      }
     }
-
-    const currentId = hasLock
-      ? (apiInfo?.lockConfig?.id || apiInfo?.lock?.id || '')
-      : (selectedConfig?.id || '');
-
-    favorites.forEach((item) => {
-      const entry = document.createElement('div');
-      entry.className = 'input-api-option';
-      entry.textContent = item.config.displayName || item.config.modelName || item.config.baseUrl || '未命名 API';
-      entry.title = entry.textContent;
-      if (currentId && item.config.id && currentId === item.config.id) {
-        entry.classList.add('current');
-      }
-      entry.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (hasLock) {
-          chatHistoryUI?.setConversationApiLock?.(null, item.config);
-          return;
-        }
-        const currentIndex = apiManager.getSelectedIndex?.();
-        if (typeof currentIndex === 'number' && currentIndex === item.index) return;
-        apiManager.setSelectedIndex(item.index);
-      });
-      listEl.appendChild(entry);
-    });
 
     const hasOptions = listEl.childElementCount > 0;
     switcher.classList.toggle('no-favorites', !hasOptions);
@@ -305,7 +366,7 @@ function setupApiMenuWatcher(appContext) {
   updateAll();
   window.addEventListener('apiConfigsUpdated', updateAll);
   document.addEventListener('CONVERSATION_API_CONTEXT_CHANGED', updateAll);
-  settingsManager?.subscribe?.('multiApiMode', updateAll);
+  document.addEventListener('MULTI_API_SELECTION_CHANGED', updateAll);
 }
 
 /**

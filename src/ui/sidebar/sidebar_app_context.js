@@ -147,10 +147,23 @@ export function registerSidebarUtilities(appContext) {
   // 统一生成输入框 placeholder 文案，避免各处硬编码导致切换覆盖不一致。
   appContext.utils.buildMessageInputPlaceholder = (currentConfig, options = {}) => {
     const rawName = currentConfig?.displayName || currentConfig?.modelName || currentConfig?.baseUrl || '';
-    const apiName = (typeof rawName === 'string') ? rawName.trim() : '';
+    const fallbackName = (typeof rawName === 'string') ? rawName.trim() : '';
+    const selectionState = appContext.services.apiManager?.getRuntimeMultiApiSelection?.();
+    const entries = Array.isArray(selectionState?.entries) ? selectionState.entries : [];
+    const selectionLabel = entries.length > 0
+      ? entries.map((entry) => {
+        const label = entry?.config?.displayName || entry?.config?.modelName || entry?.config?.baseUrl || '';
+        const name = (typeof label === 'string') ? label.trim() : '';
+        if (!name) return '';
+        const count = Number.isFinite(entry?.count) ? entry.count : 0;
+        return (count > 1) ? `${name}×${count}` : name;
+      }).filter(Boolean).join('、')
+      : '';
+    const apiName = selectionLabel || fallbackName;
     // 偏好设置开关：是否在 placeholder 中显示模型名（默认开启）。
     const showModelName = appContext.services.settingsManager?.getSetting?.('showModelNameInPlaceholder') !== false;
-    const baseText = (showModelName && apiName)
+    const shouldShowName = showModelName || !!selectionLabel;
+    const baseText = (shouldShowName && apiName)
       ? `给 ${apiName} 发送消息...`
       : '输入消息...';
     if (options?.isTemporaryMode) {
