@@ -835,8 +835,12 @@ body.thread-resize-active * {
 }
 
 #input-container.has-input #input-api-switcher,
-#input-container.has-focus #input-api-switcher,
-#input-container.api-switcher-active #input-api-switcher {
+#input-container.has-focus #input-api-switcher {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+#input-api-switcher:hover {
     opacity: 1;
     pointer-events: auto;
 }
@@ -909,14 +913,21 @@ body.thread-resize-active * {
 
 .input-api-count-btn {
     border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 55%, transparent);
-    background: color-mix(in srgb, var(--cerebr-input-bg) 70%, transparent);
+    background: color-mix(in srgb, var(--cerebr-input-bg) 65%, transparent);
     color: var(--cerebr-text-color);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 22px;
-    height: 20px;
-    border-radius: 6px;
+    height: 22px;
+    border-radius: 999px;
     font-size: 12px;
     line-height: 1;
     cursor: pointer;
+    backdrop-filter: blur(var(--cerebr-blur-radius)) saturate(1.2);
+    box-shadow:
+      0 4px 10px rgba(0, 0, 0, 0.12),
+      inset 0 0 0 1px color-mix(in srgb, #fff 18%, transparent);
 }
 
 .input-api-count-btn:hover {
@@ -927,6 +938,12 @@ body.thread-resize-active * {
 .input-api-count-btn:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+}
+
+.input-api-count-btn i {
+    font-size: 10px;
+    line-height: 1;
+    pointer-events: none;
 }
 
 .input-api-count-text {
@@ -969,8 +986,6 @@ body.thread-resize-active * {
     background: transparent;
 }
 
-#input-container.has-focus #input-api-switcher .input-api-list,
-#input-container.api-switcher-active #input-api-switcher .input-api-list,
 #input-api-switcher:hover .input-api-list {
     display: flex;
     flex-direction: column;

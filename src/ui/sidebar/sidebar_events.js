@@ -164,6 +164,9 @@ function setupApiMenuWatcher(appContext) {
     const isLockValid = !!apiInfo?.isLockValid;
 
     const configs = apiManager.getAllConfigs?.() || [];
+    const favoriteConfigs = configs
+      .map((config, index) => ({ config, index }))
+      .filter(item => item.config && item.config.isFavorite);
     const selectionState = (typeof apiManager?.getRuntimeMultiApiSelection === 'function')
       ? apiManager.getRuntimeMultiApiSelection()
       : { entries: [], total: 0, primaryConfig: null };
@@ -258,7 +261,13 @@ function setupApiMenuWatcher(appContext) {
       if (idx >= 0) apiManager.setSelectedIndex(idx);
     };
 
-    configs.forEach((config, index) => {
+    if (favoriteConfigs.length === 0) {
+      listEl.appendChild(createOption('暂无收藏 API', null, { variant: 'hint' }));
+    }
+
+    favoriteConfigs.forEach((item) => {
+      const config = item.config;
+      const index = item.index;
       if (!config) return;
       const key = resolveConfigKey(config);
       const entryState = selectionMap.get(key) || null;
@@ -296,7 +305,7 @@ function setupApiMenuWatcher(appContext) {
       const minusBtn = document.createElement('button');
       minusBtn.type = 'button';
       minusBtn.className = 'input-api-count-btn';
-      minusBtn.textContent = '−';
+      minusBtn.innerHTML = '<i class="fa-solid fa-minus"></i>';
       minusBtn.disabled = (count <= 0) || (count <= 1 && selectionEntries.length <= 1);
       minusBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -315,7 +324,7 @@ function setupApiMenuWatcher(appContext) {
       const plusBtn = document.createElement('button');
       plusBtn.type = 'button';
       plusBtn.className = 'input-api-count-btn';
-      plusBtn.textContent = '+';
+      plusBtn.innerHTML = '<i class="fa-solid fa-plus"></i>';
       plusBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const next = (count > 0 ? count : 0) + 1;

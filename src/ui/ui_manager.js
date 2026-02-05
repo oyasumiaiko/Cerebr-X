@@ -132,7 +132,6 @@ export function createUIManager(appContext) {
    * 设置输入相关事件监听器
    */
   function setupInputEventListeners() {
-    const apiSwitcher = dom.inputApiSwitcher;
     // 监听输入框变化
     messageInput.addEventListener('input', function () {
       adjustTextareaHeight(this);
@@ -155,21 +154,8 @@ export function createUIManager(appContext) {
 
     messageInput.addEventListener('blur', () => {
       if (!inputContainer) return;
-      if (inputContainer.classList.contains('api-switcher-active')) return;
       inputContainer.classList.remove('has-focus');
     });
-
-    if (apiSwitcher && inputContainer) {
-      apiSwitcher.addEventListener('mouseenter', () => {
-        inputContainer.classList.add('api-switcher-active');
-      });
-      apiSwitcher.addEventListener('mouseleave', () => {
-        inputContainer.classList.remove('api-switcher-active');
-        if (document.activeElement !== messageInput) {
-          inputContainer.classList.remove('has-focus');
-        }
-      });
-    }
 
     // 片粘贴功能
     messageInput.addEventListener('paste', async (e) => {
