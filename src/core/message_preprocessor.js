@@ -5,9 +5,7 @@
  */
 import { replacePlaceholders } from './prompt_resolver.js';
 
-const INJECT_BLOCK_REGEX = /{{#\s*inject\b[^}]*}}([\s\S]*?){{\/\s*inject\s*}}/gi;
-const INJECT_MESSAGE_BLOCK_REGEX = /{{#\s*message\b[^}]*\brole\s*=\s*["']?(user|assistant|system|ai|model)["']?[^}]*}}([\s\S]*?){{\/\s*message\s*}}/gi;
-const INJECT_ROLE_BLOCK_REGEX = /{{#\s*(user|assistant|system|ai|model)\s*}}([\s\S]*?){{\/\s*\1\s*}}/gi;
+const ROLE_BLOCK_REGEX = /{{#\s*message\b[^}]*\brole\s*=\s*["']?(user|assistant|system|ai|model)["']?[^}]*}}([\s\S]*?){{\/\s*message\s*}}|{{#\s*(user|assistant|system|ai|model)\s*}}([\s\S]*?){{\/\s*\3\s*}}/gi;
 
 function renderTemplateText(template, inputText) {
   const rawTemplate = (typeof template === 'string') ? template : '';
@@ -45,37 +43,46 @@ function normalizeInjectedBlockText(text) {
   return lines.join('\n');
 }
 
-function collectInjectedMessages(blockText) {
-  if (typeof blockText !== 'string' || !blockText.trim()) return [];
-  const matches = [];
+/**
+ * 解析模板中的“角色块 + 普通文本”，输出按顺序排列的消息列表。
+ *
+ * 规则：
+ * - {{#system}}/{{#assistant}}/{{#user}} 与 {{#message role="...}} 视为显式角色消息；
+ * - 角色块外的文本 trim 后作为 user 消息插入（空白忽略）；
+ * - 保持模板中的相对顺序，便于手写控制。
+ *
+ * @param {string} renderedText
+ * @returns {{ messages: Array<{role: string, content: string}>, hasRoleBlocks: boolean }}
+ */
+function buildTemplateMessages(renderedText) {
+  if (typeof renderedText !== 'string') {
+    return { messages: [], hasRoleBlocks: false };
+  }
+  const messages = [];
+  let hasRoleBlocks = false;
+  let lastIndex = 0;
+  ROLE_BLOCK_REGEX.lastIndex = 0;
   let match;
-
-  INJECT_MESSAGE_BLOCK_REGEX.lastIndex = 0;
-  while ((match = INJECT_MESSAGE_BLOCK_REGEX.exec(blockText)) !== null) {
-    matches.push({
-      index: match.index,
-      role: normalizeInjectedRole(match[1]),
-      content: normalizeInjectedBlockText(match[2])
-    });
+  while ((match = ROLE_BLOCK_REGEX.exec(renderedText)) !== null) {
+    const before = renderedText.slice(lastIndex, match.index);
+    if (before && before.trim()) {
+      messages.push({ role: 'user', content: before.trim() });
+    }
+    const rawRole = match[1] || match[3] || '';
+    const rawContent = match[2] || match[4] || '';
+    const role = normalizeInjectedRole(rawRole);
+    const content = normalizeInjectedBlockText(rawContent);
+    if (role && content && content.trim()) {
+      messages.push({ role, content });
+    }
+    hasRoleBlocks = true;
+    lastIndex = ROLE_BLOCK_REGEX.lastIndex;
   }
-
-  INJECT_ROLE_BLOCK_REGEX.lastIndex = 0;
-  while ((match = INJECT_ROLE_BLOCK_REGEX.exec(blockText)) !== null) {
-    matches.push({
-      index: match.index,
-      role: normalizeInjectedRole(match[1]),
-      content: normalizeInjectedBlockText(match[2])
-    });
+  const tail = renderedText.slice(lastIndex);
+  if (tail && tail.trim()) {
+    messages.push({ role: 'user', content: tail.trim() });
   }
-
-  matches.sort((a, b) => a.index - b.index);
-  const results = [];
-  for (const item of matches) {
-    if (!item.role) continue;
-    if (!item.content || !item.content.trim()) continue;
-    results.push({ role: item.role, content: item.content });
-  }
-  return results;
+  return { messages, hasRoleBlocks };
 }
 
 /**
@@ -115,20 +122,13 @@ export function renderUserMessageTemplateWithInjection({ template, inputText }) 
     return { renderedText, injectedMessages: [], hasInjectedBlocks: false, injectOnly: false };
   }
 
-  const injectedMessages = [];
-  let hasInjectedBlocks = false;
-  INJECT_BLOCK_REGEX.lastIndex = 0;
-  const cleanedText = renderedText.replace(INJECT_BLOCK_REGEX, (match, blockText) => {
-    hasInjectedBlocks = true;
-    injectedMessages.push(...collectInjectedMessages(blockText));
-    return '';
-  });
-
-  // 说明：当模板仅包含 inject 块且外部无内容时，发送将完全由 inject 控制。
-  const injectOnly = hasInjectedBlocks && !cleanedText.trim();
+  const { messages, hasRoleBlocks } = buildTemplateMessages(renderedText);
+  const hasInjectedBlocks = hasRoleBlocks;
+  const injectOnly = hasRoleBlocks;
+  const injectedMessages = hasRoleBlocks ? messages : [];
 
   return {
-    renderedText: cleanedText,
+    renderedText,
     injectedMessages,
     hasInjectedBlocks,
     injectOnly

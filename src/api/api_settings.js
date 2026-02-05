@@ -18,28 +18,27 @@ import {
   getChunksFromSync
 } from '../utils/sync_chunk.js';
 
-// 用户消息预处理模板的说明与示例，用于“？”提示与“复制注入块”按钮。
+// 用户消息预处理模板的说明与示例，用于“？”提示与“复制角色块”按钮。
 const USER_MESSAGE_TEMPLATE_HELP_TEXT = [
   '模板语法：',
   '- {{input}} / {{text}} / {{message}}：用户输入',
   '- {{datetime}} / {{date}} / {{time}}：时间占位符',
-  '- 注入块（仅发给 API，不写入聊天记录）：',
-  '  {{#inject}}',
-  '    {{#assistant}}...{{/assistant}} / {{#user}}...{{/user}} / {{#system}}...{{/system}}',
-  '    或 {{#message role="assistant"}}...{{/message}}',
-  '  {{/inject}}',
-  '- 若模板仅包含 inject 且外部为空，则发送时会替换最后一条 user（不发送空白消息）',
-  '- inject 块会从最终用户消息中移除'
+  '- 角色块（直接写在模板中，按出现顺序发送）：',
+  '  {{#system}}...{{/system}} / {{#assistant}}...{{/assistant}} / {{#user}}...{{/user}}',
+  '  或 {{#message role="assistant"}}...{{/message}}',
+  '- 角色块外的文本会在 trim 后作为 user 消息插入到相对位置（空白则忽略）',
+  '- 若模板包含任意角色块，则发送时会替换最后一条 user（不发送空白消息）'
 ].join('\n');
 const USER_MESSAGE_TEMPLATE_INJECT_SNIPPET = [
-  '{{#inject}}',
+  '{{#system}}',
+  '这里是你要置顶的系统指令',
+  '{{/system}}',
   '{{#assistant}}',
   '这里是你要“虚拟插入”的 AI 回复',
   '{{/assistant}}',
   '{{#user}}',
   '这里是紧跟其后的用户追问',
-  '{{/user}}',
-  '{{/inject}}'
+  '{{/user}}'
 ].join('\n');
 
 export function createApiManager(appContext) {
@@ -1190,9 +1189,9 @@ export function createApiManager(appContext) {
         }
         try {
           await navigator.clipboard.writeText(USER_MESSAGE_TEMPLATE_INJECT_SNIPPET);
-          utils?.showNotification?.({ message: '已复制注入块', type: 'success', duration: 1800 });
+          utils?.showNotification?.({ message: '已复制角色块', type: 'success', duration: 1800 });
         } catch (error) {
-          console.error('复制注入块失败:', error);
+          console.error('复制角色块失败:', error);
           utils?.showNotification?.({ message: '复制失败，请重试', type: 'error', duration: 2200 });
         }
       });

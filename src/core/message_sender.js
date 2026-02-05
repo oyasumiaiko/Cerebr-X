@@ -2003,10 +2003,8 @@ export function createMessageSender(appContext) {
       : (inputController ? inputController.getInputText() : messageInput.textContent);
     const imageContainsScreenshot = inputController ? inputController.hasScreenshot() : !!imageContainer.querySelector('img[alt="page-screenshot.png"]');
 
-    // 如果消息为空且没有图片标签，则不发送消息
-    const isEmptyMessage = !messageText && !hasImagesInInput;
-    // 允许在“强制发送完整历史”或“重新生成模式”下继续执行（不新增用户消息）
-    if (isEmptyMessage && !regenerateMode && !forceSendFullHistory) return;
+    // 输入为空且没有图片时，仍可能由模板生成结构化消息；是否早退需在模板解析后再判断。
+    const isEmptyMessageRaw = !messageText && !hasImagesInInput;
 
     let activeThreadContext = null;
     // 获取当前提示词设置
@@ -2026,24 +2024,29 @@ export function createMessageSender(appContext) {
     let hasInjectedBlocks = false;
     let injectOnly = false;
 
+    let templateHasContent = false;
     if (skipUserMessagePreprocess) {
-      shouldApplyPreprocessor = regenerateMode || !isEmptyMessage;
+      shouldApplyPreprocessor = regenerateMode || !isEmptyMessageRaw;
       preprocessedMessageText = messageText;
       injectedMessages = [];
       hasInjectedBlocks = false;
+      templateHasContent = !isEmptyMessageRaw;
     } else {
       const template = (typeof preprocessorConfig?.userMessagePreprocessorTemplate === 'string')
         ? preprocessorConfig.userMessagePreprocessorTemplate
         : '';
       const hasTemplate = template.trim().length > 0;
-      shouldApplyPreprocessor = hasTemplate && (regenerateMode || !isEmptyMessage);
-      if (shouldApplyPreprocessor) {
+      if (hasTemplate) {
         const baseText = resolvePreprocessBaseText({ messageText, regenerateMode, messageId });
         const templateResult = renderUserMessageTemplateWithInjection({ template, inputText: baseText });
         preprocessedMessageText = templateResult.renderedText;
         injectedMessages = templateResult.injectedMessages;
         hasInjectedBlocks = templateResult.hasInjectedBlocks;
         injectOnly = templateResult.injectOnly === true;
+        const hasRenderedText = typeof preprocessedMessageText === 'string' && preprocessedMessageText.trim().length > 0;
+        const hasInjectedMessages = Array.isArray(injectedMessages) && injectedMessages.length > 0;
+        templateHasContent = hasRenderedText || hasInjectedMessages;
+        shouldApplyPreprocessor = regenerateMode || !isEmptyMessageRaw || templateHasContent;
         const allowPreprocessHistory = !regenerateMode
           && preprocessorConfig?.userMessagePreprocessorIncludeInHistory
           && !hasInjectedBlocks;
@@ -2054,8 +2057,14 @@ export function createMessageSender(appContext) {
             preprocessRenderedText: preprocessedMessageText
           };
         }
+      } else {
+        shouldApplyPreprocessor = regenerateMode || !isEmptyMessageRaw;
       }
     }
+
+    // 如果输入为空且模板也没有生成任何内容，则直接返回（除非是重新生成或强制发送历史）。
+    const isEffectivelyEmpty = isEmptyMessageRaw && !templateHasContent;
+    if (isEffectivelyEmpty && !regenerateMode && !forceSendFullHistory) return;
 
     const threadContextCandidate = resolveActiveThreadContext();
     if (threadContextCandidate && threadContainer) {
@@ -2199,7 +2208,7 @@ export function createMessageSender(appContext) {
 
       // 在重新生成模式下，不添加新的用户消息
       let userMessageDiv;
-      if (!isEmptyMessage && !regenerateMode) {
+      if (!isEmptyMessageRaw && !regenerateMode) {
         const promptMetaForHistory = buildPromptMetaForHistory({
           promptType: currentPromptType || 'none',
           promptMeta: externalPromptMeta,
