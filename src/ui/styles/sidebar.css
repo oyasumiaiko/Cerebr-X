@@ -918,8 +918,12 @@ body.thread-resize-active * {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 0;
     width: 22px;
     height: 22px;
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0;
     border-radius: 999px;
     font-size: 12px;
     line-height: 1;
