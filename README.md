@@ -14,65 +14,54 @@
 
 ![screenshot](./statics/image.png)
 
-The name "Cerebr" comes from a Latin root related to "brain" or "cerebrum". This etymology reflects our vision: to integrate powerful AI capabilities from Claude, OpenAI, and others, making Cerebr your second brain for deep reading and understanding. Cerebr is a powerful Chrome browser AI assistant extension focused on enhancing your work efficiency and learning experience.
+The name "Cerebr" comes from a Latin root related to "brain" or "cerebrum". This reflects our vision: to integrate powerful AI capabilities and make Cerebr your second brain for deep reading and understanding. Cerebr is a focused AI assistant for Chromium browsers, designed to enhance your work efficiency and learning experience.
 
-Born from a need for a clean, efficient browser AI assistant, Cerebr stands out with its minimalist design and powerful features. While other solutions often come with limitations or cluttered interfaces, Cerebr focuses on delivering a seamless, distraction-free experience for your web browsing needs.
+Born from a need for a clean, efficient browser AI assistant, Cerebr keeps a minimalist design while delivering strong capabilities for everyday web browsing, reading, and research.
 
 ## ✨ Core Features
 
-- 🎯 **Smart Sidebar** - Quick access via hotkey (Windows: `Alt+Z` / Mac: `Ctrl+Z`) to chat with AI anytime, anywhere
-- 🔄 **Multiple API Support** - Configure multiple APIs to flexibly switch between different AI assistants
-- 📝 **Comprehensive Q&A** - Support webpage content Q&A, PDF document Q&A, image Q&A and more
-- 🎨 **Elegant Rendering** - Perfect support for Markdown text rendering and LaTeX math formula display
-- ⚡ **Real-time Response** - Stream output for instant AI replies
-- 🌓 **Theme Switching** - Support light/dark themes to protect your eyes
+- 🎯 **Sidebar, Dock & Fullscreen** - Open from the toolbar or a custom shortcut; switch between docked sidebar and fullscreen immersion
+- 🧠 **Context-Aware Q&A** - Web/PDF extraction, selection threads, quick page/repo summaries, and pure chat mode
+- 🖼️ **Multimodal** - Image upload plus page screenshot capture with preview
+- 🔄 **Multi-API & Multi-Model** - Multiple configs, favorites, quick switching, custom params/system prompts
+- ⚡ **Streaming + Rich Rendering** - Markdown, LaTeX, and code highlighting with real-time output
+- 🌗 **Themes & Backgrounds** - Light/dark themes and random background images
 
-## 🛠️ Technical Features
+## 🛠️ Productivity & Management
 
-- 💾 **State Persistence** - Automatically save chat history, sidebar status, etc.
-- 🔍 **Smart Extraction** - Automatically identify and extract webpage/PDF content
-- ⌨️ **Shortcut Operations** - Support hotkey to clear chat (Windows: `Alt+X` / Mac: `Ctrl+X`), up/down keys for quick history recall
-- 🔒 **Secure & Reliable** - Support multiple API key management with local data storage
-- 🎭 **High Compatibility** - Support mainstream browsers, adapt to various webpage environments
+- 📚 **History Center** - Search/filter by URL and content, tree branches, image gallery, stats
+- 🧩 **Message Tools** - Edit, regenerate, fork conversations, insert messages, copy as text/code/image
+- ⌨️ **Slash Commands** - Type `/` for hints: `/summary`, `/temp`, `/model`, `/history`, `/clear`, `/stop`
+- 🔧 **Prompt & URL Rules** - System/summary/selection prompts and per-site rules
+- 💾 **Backup & Restore** - Export/import conversations, optional image stripping, auto incremental backup
 
 ## 🎮 User Guide
 
 1. 🔑 **Configure API**
-   - Click the settings button
-   - Fill in API Key, Base URL and model name
-   - Support adding multiple API configurations
+   - Open **API Settings**
+   - Fill in API Key, Base URL and model name (multiple keys can be comma-separated)
+   - Add multiple configs and pick a favorite for quick switching
 
-2. 💬 **Start Chatting**
-   - Use hotkey Windows: `Alt+Z` / Mac: `Ctrl+Z` to summon sidebar
-   - Input questions and send
-   - Support image upload for visual Q&A
+2. 💬 **Open the Sidebar / Standalone**
+   - Click the extension icon, or set a shortcut at `chrome://extensions/shortcuts`
+   - Use **Standalone chat page** or **Fullscreen mode** for a focused workspace
 
-3. 📚 **Webpage/PDF Q&A**
-   - Enable webpage Q&A switch
-   - Automatically identify and extract current page content
-   - Support intelligent PDF file Q&A
+3. 📚 **Ask with Page Context**
+   - Ask questions directly; Cerebr will extract webpage/PDF content
+   - Use **Quick Summary** or `/summary` for one-click page summaries
+   - Switch to **Temp Mode** for pure chat without page context
 
-## 🔧 Advanced Features
-
-- 📋 **Right-click Copy** - Support right-click to directly copy message text
-- 🔄 **History Records** - Use up/down arrow keys to quickly recall historical questions
-- 🖼️ **Image Preview** - Click images to view full size
-- ⚙️ **Custom Settings** - Support customizing hotkeys, themes and more
-
-## 🚀 Latest Updates
-
-- 🆕 Added image Q&A functionality
-- 🔄 Optimized webpage content extraction algorithm
-- 🐛 Fixed math formula rendering issues
-- ⚡ Improved overall performance and stability
+4. 🖼️ **Images & Screenshots**
+   - Upload images, or click the screenshot button to capture the current page
+   - Click images to preview and drag to pan
 
 ## 📝 Development Notes
 
-This project is developed using Chrome Extension Manifest V3, with main tech stack:
+This project is built with Chrome Extension Manifest V3 and runs without a build step. Main tech stack:
 
-- 🎨 Native JavaScript + CSS
-- 📦 Chrome Extension API
-- 🔧 PDF.js + KaTeX + Marked.js
+- Native JavaScript + CSS
+- Chrome Extension APIs
+- PDF.js, Marked.js, KaTeX, Highlight.js, DOMPurify, dom-to-image
 
 ## 🤝 Contribution Guide
 
