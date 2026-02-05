@@ -919,8 +919,8 @@ body.thread-resize-active * {
     align-items: center;
     justify-content: center;
     gap: 0;
-    width: 22px;
-    height: 22px;
+    width: 26px;
+    height: 26px;
     min-width: 22px;
     min-height: 22px;
     padding: 0;
@@ -945,7 +945,7 @@ body.thread-resize-active * {
 }
 
 .input-api-count-btn i {
-    font-size: 10px;
+    font-size: 16px;
     line-height: 1;
     pointer-events: none;
 }
