@@ -28,6 +28,7 @@ const USER_MESSAGE_TEMPLATE_HELP_TEXT = [
   '    {{#assistant}}...{{/assistant}} / {{#user}}...{{/user}} / {{#system}}...{{/system}}',
   '    或 {{#message role="assistant"}}...{{/message}}',
   '  {{/inject}}',
+  '- 若模板仅包含 inject 且外部为空，则发送时会替换最后一条 user（不发送空白消息）',
   '- inject 块会从最终用户消息中移除'
 ].join('\n');
 const USER_MESSAGE_TEMPLATE_INJECT_SNIPPET = [

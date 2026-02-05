@@ -106,13 +106,13 @@ export function renderUserMessageTemplate({ template, inputText }) {
  * @param {Object} args
  * @param {string} args.template
  * @param {string} args.inputText
- * @returns {{renderedText: string, injectedMessages: Array<{role: string, content: string}>, hasInjectedBlocks: boolean}}
+ * @returns {{renderedText: string, injectedMessages: Array<{role: string, content: string}>, hasInjectedBlocks: boolean, injectOnly: boolean}}
  */
 export function renderUserMessageTemplateWithInjection({ template, inputText }) {
   const rawTemplate = (typeof template === 'string') ? template : '';
   const renderedText = renderTemplateText(template, inputText);
   if (!rawTemplate.trim()) {
-    return { renderedText, injectedMessages: [], hasInjectedBlocks: false };
+    return { renderedText, injectedMessages: [], hasInjectedBlocks: false, injectOnly: false };
   }
 
   const injectedMessages = [];
@@ -124,10 +124,14 @@ export function renderUserMessageTemplateWithInjection({ template, inputText }) 
     return '';
   });
 
+  // 说明：当模板仅包含 inject 块且外部无内容时，发送将完全由 inject 控制。
+  const injectOnly = hasInjectedBlocks && !cleanedText.trim();
+
   return {
     renderedText: cleanedText,
     injectedMessages,
-    hasInjectedBlocks
+    hasInjectedBlocks,
+    injectOnly
   };
 }
 

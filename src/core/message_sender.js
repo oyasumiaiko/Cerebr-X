@@ -368,15 +368,17 @@ export function createMessageSender(appContext) {
   }
 
   /**
-   * 将注入消息插入到“最后一条 user 消息”之后，保证模型续写逻辑正确。
+   * 将注入消息插入到“最后一条 user 消息”之后，或在需要时替换最后一条 user。
    * @param {Array} messages
    * @param {Array<{role: string, content: string}>} injectedMessages
+   * @param {{ replaceLastUser?: boolean }} [options]
    * @returns {Array}
    */
-  function insertInjectedMessagesAfterLastUser(messages, injectedMessages) {
+  function applyInjectedMessages(messages, injectedMessages, options = {}) {
     if (!Array.isArray(messages) || messages.length === 0) return messages;
     const normalized = normalizeInjectedMessages(injectedMessages);
     if (normalized.length === 0) return messages;
+    const replaceLastUser = options?.replaceLastUser === true;
     let lastUserIndex = -1;
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       if (messages[i]?.role === 'user') {
@@ -386,6 +388,13 @@ export function createMessageSender(appContext) {
     }
     if (lastUserIndex === -1) {
       return messages.concat(normalized);
+    }
+    if (replaceLastUser) {
+      return [
+        ...messages.slice(0, lastUserIndex),
+        ...normalized,
+        ...messages.slice(lastUserIndex + 1)
+      ];
     }
     return [
       ...messages.slice(0, lastUserIndex + 1),
@@ -2015,6 +2024,7 @@ export function createMessageSender(appContext) {
     let preprocessHistoryPatch = null;
     let injectedMessages = [];
     let hasInjectedBlocks = false;
+    let injectOnly = false;
 
     if (skipUserMessagePreprocess) {
       shouldApplyPreprocessor = regenerateMode || !isEmptyMessage;
@@ -2033,6 +2043,7 @@ export function createMessageSender(appContext) {
         preprocessedMessageText = templateResult.renderedText;
         injectedMessages = templateResult.injectedMessages;
         hasInjectedBlocks = templateResult.hasInjectedBlocks;
+        injectOnly = templateResult.injectOnly === true;
         const allowPreprocessHistory = !regenerateMode
           && preprocessorConfig?.userMessagePreprocessorIncludeInHistory
           && !hasInjectedBlocks;
@@ -2425,11 +2436,15 @@ export function createMessageSender(appContext) {
         }
         return msg;
       });
-      const preprocessedMessages = (shouldApplyPreprocessor && typeof preprocessedMessageText === 'string')
+      const hasInjectedMessages = Array.isArray(injectedMessages) && injectedMessages.length > 0;
+      const shouldApplyPreprocessText = shouldApplyPreprocessor
+        && typeof preprocessedMessageText === 'string'
+        && !injectOnly;
+      const preprocessedMessages = shouldApplyPreprocessText
         ? applyPreprocessedTextToMessages(sanitizedMessages, preprocessedMessageText)
         : sanitizedMessages;
-      const finalMessages = (shouldApplyPreprocessor && Array.isArray(injectedMessages) && injectedMessages.length > 0)
-        ? insertInjectedMessagesAfterLastUser(preprocessedMessages, injectedMessages)
+      const finalMessages = hasInjectedMessages
+        ? applyInjectedMessages(preprocessedMessages, injectedMessages, { replaceLastUser: injectOnly })
         : preprocessedMessages;
 
       // 获取API配置：仅使用外部提供（resolvedApiConfig / api 解析）或当前选中。不再做任何内部推断
