@@ -210,6 +210,33 @@ export function createUIManager(appContext) {
 
         });
 
+        if (appContext.dom.preferencesSettingsToggle) {
+          appContext.dom.preferencesSettingsToggle.addEventListener('click', async (e) => {
+            e.stopPropagation();
+
+            const chatHistoryUI = services.chatHistoryUI;
+            const targetTab = 'settings';
+
+            const isPanelOpen = !!chatHistoryUI?.isChatHistoryPanelOpen?.();
+            const activeTab = chatHistoryUI?.getActiveTabName?.();
+
+            // 行为对齐旧交互：
+            // - 若已在“偏好设置”标签页，再点一次则关闭面板；
+            // - 否则打开聊天记录面板并跳转到对应标签页。
+            if (isPanelOpen && activeTab === targetTab) {
+              closeExclusivePanels();
+              return;
+            }
+
+            if (!isPanelOpen) {
+              closeExclusivePanels();
+              await chatHistoryUI?.showChatHistoryPanel?.(targetTab);
+            } else {
+              await chatHistoryUI?.activateTab?.(targetTab);
+            }
+          });
+        }
+
         const scheduleCloseSettingsMenu = () => {
             clearTimeout(settingsMenuTimeout);
             settingsMenuTimeout = setTimeout(() => {

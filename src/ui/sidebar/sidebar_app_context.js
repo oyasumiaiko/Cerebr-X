@@ -11,6 +11,7 @@
  */
 export function createSidebarAppContext(isStandalone) {
   const apiSettingsToggle = document.getElementById('api-settings-toggle');
+  const preferencesSettingsToggle = document.getElementById('preferences-settings-toggle');
   const inputApiSwitcher = document.getElementById('input-api-switcher');
 
   const dom = {
@@ -48,6 +49,7 @@ export function createSidebarAppContext(isStandalone) {
     copyCodeButton: document.getElementById('copy-code'),
     imageContainer: document.getElementById('image-container'),
     promptSettingsToggle: document.getElementById('prompt-settings-toggle'),
+    preferencesSettingsToggle,
     promptSettingsPanel: document.getElementById('prompt-settings'),
     inputContainer: document.getElementById('input-container'),
     regenerateButton: document.getElementById('regenerate-message'),

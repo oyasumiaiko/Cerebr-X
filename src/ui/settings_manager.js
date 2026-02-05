@@ -619,8 +619,9 @@ export function createSettingsManager(appContext) {
         autoSection.className = 'settings-auto-section';
         autoSection.dataset.scope = scope;
         if (scope === 'quick') {
-          // 让“随机背景”紧贴主题选择，快捷项放在其后，避免把按钮挤到列表下方。
-          const anchor = container.querySelector('#settings-random-background')
+          // 让主题/随机背景/停靠模式固定在菜单上方，快捷项放在其后，避免把按钮挤到列表下方。
+          const anchor = container.querySelector('#dock-mode-toggle')
+            || container.querySelector('#settings-random-background')
             || container.querySelector('#theme-selector');
           if (anchor?.nextSibling) {
             container.insertBefore(autoSection, anchor.nextSibling);
@@ -632,7 +633,8 @@ export function createSettingsManager(appContext) {
         }
       }
       if (scope === 'quick') {
-        const anchor = container.querySelector('#settings-random-background')
+        const anchor = container.querySelector('#dock-mode-toggle')
+          || container.querySelector('#settings-random-background')
           || container.querySelector('#theme-selector');
         if (anchor && anchor.nextSibling !== autoSection) {
           container.insertBefore(autoSection, anchor.nextSibling);

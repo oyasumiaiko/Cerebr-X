@@ -758,7 +758,8 @@ function setupClickAwayHandler(appContext) {
         openers: [
           appContext.dom.emptyStateHistory,
           appContext.dom.apiSettingsToggle,
-          appContext.dom.promptSettingsToggle
+          appContext.dom.promptSettingsToggle,
+          appContext.dom.preferencesSettingsToggle
         ]
       }
     ];
