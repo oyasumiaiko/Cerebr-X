@@ -129,6 +129,7 @@ export function createChatHistoryUI(appContext) {
   const GALLERY_FIT_GAP = 2;
   const GALLERY_FIT_ROW_MIN_SCALE = 0.65;
   const GALLERY_FIT_ROW_MAX_SCALE = 1.35;
+  const GALLERY_ITEM_DOUBLE_CLICK_DELAY_MS = 240;
   const galleryThumbQueue = { active: 0, pending: [], scheduled: false };
   // 使用 Worker + OffscreenCanvas 生成缩略图，降低主线程解码/绘制的阻塞。
   const galleryThumbWorkerPool = {
@@ -6775,20 +6776,52 @@ export function createChatHistoryUI(appContext) {
             item.classList.add('is-selected');
           }
 
-          item.addEventListener('click', async () => {
+          const openGalleryMessage = async () => {
+            const conversation = await getConversationFromCacheOrLoad(record.conversationId);
+            if (!conversation) return;
+            await loadConversationIntoChat(conversation, {
+              skipMessageAnimation: true,
+              skipScrollToBottom: true
+            });
+            jumpToMessageById(record.messageId, { highlightClass: 'gallery-highlight', highlightDuration: 1600 });
+          };
+
+          const openGalleryPreview = () => {
+            const preview = services?.imageHandler?.showImagePreview;
+            if (typeof preview === 'function' && record?.url) {
+              preview(record.url);
+              return true;
+            }
+            return false;
+          };
+
+          item.addEventListener('click', () => {
+            if (galleryCache.selectMode) {
+              toggleSelectionForItem(record, item);
+              return;
+            }
+            if (item._galleryClickTimer) {
+              clearTimeout(item._galleryClickTimer);
+              item._galleryClickTimer = null;
+            }
+            item._galleryClickTimer = setTimeout(() => {
+              item._galleryClickTimer = null;
+              try {
+                openGalleryPreview();
+              } catch (error) {
+                console.error('打开图片预览失败:', error);
+              }
+            }, GALLERY_ITEM_DOUBLE_CLICK_DELAY_MS);
+          });
+
+          item.addEventListener('dblclick', async () => {
+            if (galleryCache.selectMode) return;
+            if (item._galleryClickTimer) {
+              clearTimeout(item._galleryClickTimer);
+              item._galleryClickTimer = null;
+            }
             try {
-              if (galleryCache.selectMode) {
-                toggleSelectionForItem(record, item);
-                return;
-              }
-              const conversation = await getConversationFromCacheOrLoad(record.conversationId);
-              if (conversation) {
-                await loadConversationIntoChat(conversation, {
-                  skipMessageAnimation: true,
-                  skipScrollToBottom: true
-                });
-                jumpToMessageById(record.messageId, { highlightClass: 'gallery-highlight', highlightDuration: 1600 });
-              }
+              await openGalleryMessage();
             } catch (error) {
               console.error('打开图片所属对话失败:', error);
             }
