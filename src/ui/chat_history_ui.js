@@ -63,6 +63,8 @@ export function createChatHistoryUI(appContext) {
   let currentConversationId = null;
   // 记录上次关闭面板时的标签名，Esc 重新打开时优先恢复；首次加载为空则回退到“history”。
   let lastClosedTabName = null;
+  // 记录聊天记录面板最近一次关闭的时间戳，用于 ESC 超时后回退到默认“聊天记录”标签。
+  let lastClosedAt = 0;
   // 记录聊天记录列表的滚动位置，关闭面板后 1 分钟内可恢复，避免用户频繁切换丢失阅读位置。
   const HISTORY_PANEL_SCROLL_RESTORE_TTL = 60 * 1000;
   let historyPanelScrollSnapshot = {
@@ -2924,6 +2926,7 @@ export function createChatHistoryUI(appContext) {
     if (panel && panel.classList.contains('visible')) {
       const activeTabName = panel.querySelector('.history-tab.active')?.dataset?.tab;
       lastClosedTabName = activeTabName || lastClosedTabName || 'history';
+      lastClosedAt = Date.now();
       if (activeTabName === 'history') {
         const listContainer = panel.querySelector('#chat-history-list');
         if (listContainer) {
@@ -7417,6 +7420,10 @@ export function createChatHistoryUI(appContext) {
     return lastClosedTabName;
   }
 
+  function getLastClosedChatHistoryAt() {
+    return lastClosedAt;
+  }
+
   async function showChatHistoryPanel(initialTab = 'history') {
     ensurePanelStylesInjected();
     let panel = document.getElementById('chat-history-panel');
@@ -11316,6 +11323,7 @@ export function createChatHistoryUI(appContext) {
     },
     getActiveTabName: getActiveChatHistoryTabName,
     getLastClosedTabName: getLastClosedChatHistoryTabName,
+    getLastClosedAt: getLastClosedChatHistoryAt,
     closeChatHistoryPanel,
     toggleChatHistoryPanel,
     isChatHistoryPanelOpen,

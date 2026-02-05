@@ -719,6 +719,8 @@ function setupRepomixButton(appContext) {
 }
 
 function setupGlobalEscapeHandler(appContext) {
+  // ESC 打开聊天记录面板时，如果关闭超过 5 分钟未再次打开，则回退到默认“聊天记录”标签。
+  const ESC_REOPEN_HISTORY_THRESHOLD_MS = 5 * 60 * 1000;
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (appContext.state.isComposing) return;
@@ -734,9 +736,14 @@ function setupGlobalEscapeHandler(appContext) {
       appContext.services.uiManager.closeExclusivePanels();
     } else {
       const lastClosedTab = appContext.services.chatHistoryUI.getLastClosedTabName?.();
-      const targetTab = (typeof lastClosedTab === 'string' && lastClosedTab.trim())
-        ? lastClosedTab
-        : 'history';
+      const lastClosedAt = appContext.services.chatHistoryUI.getLastClosedAt?.() || 0;
+      const shouldFallbackToHistory = lastClosedAt > 0
+        && (Date.now() - lastClosedAt) > ESC_REOPEN_HISTORY_THRESHOLD_MS;
+      const targetTab = shouldFallbackToHistory
+        ? 'history'
+        : ((typeof lastClosedTab === 'string' && lastClosedTab.trim())
+          ? lastClosedTab
+          : 'history');
       appContext.services.chatHistoryUI.showChatHistoryPanel(targetTab);
     }
     e.preventDefault();
