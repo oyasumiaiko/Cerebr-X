@@ -73,6 +73,59 @@ export function createContextMenuManager(appContext) {
     return chatContainer;
   }
 
+  function findHistoryMessageById(messageId) {
+    const id = (typeof messageId === 'string') ? messageId.trim() : '';
+    if (!id || !chatHistoryManager?.chatHistory?.messages) return null;
+    return chatHistoryManager.chatHistory.messages.find(node => node?.id === id) || null;
+  }
+
+  /**
+   * 从历史树中收集某条用户消息后“同一层”的所有 AI 回复（用于并行重生成）。
+   *
+   * 说明：
+   * - 仅收集直接 children，避免误把后续轮次的 AI 回复混入当前批次；
+   * - 若历史链暂时不完整，会用 fallbackAiMessageId 兜底，确保至少能重生成当前目标。
+   *
+   * @param {string} userMessageId
+   * @param {string|null} [fallbackAiMessageId=null]
+   * @returns {Array<string>}
+   */
+  function collectParallelAiMessageIdsForUser(userMessageId, fallbackAiMessageId = null) {
+    const userNode = findHistoryMessageById(userMessageId);
+    const fallbackId = (typeof fallbackAiMessageId === 'string') ? fallbackAiMessageId.trim() : '';
+    if (!userNode) {
+      return fallbackId ? [fallbackId] : [];
+    }
+
+    const childIds = Array.isArray(userNode.children) ? userNode.children : [];
+    const threadId = userNode.threadId || null;
+    const aiChildren = childIds
+      .map((childId, index) => {
+        const node = findHistoryMessageById(childId);
+        if (!node || node.role !== 'assistant') return null;
+        if (threadId && node.threadId !== threadId) return null;
+        if (node.threadHiddenSelection) return null;
+        return {
+          id: node.id,
+          timestamp: Number(node.timestamp) || 0,
+          order: index
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+        return a.order - b.order;
+      })
+      .map(item => item.id)
+      .filter(Boolean);
+
+    if (fallbackId && !aiChildren.includes(fallbackId)) {
+      aiChildren.push(fallbackId);
+    }
+
+    return aiChildren;
+  }
+
   /**
    * 在线程容器内，优先使用历史链路解析“重新生成”的目标，避免 DOM 被隐藏/重排时误判。
    * @param {HTMLElement} messageElement
@@ -202,13 +255,20 @@ export function createContextMenuManager(appContext) {
 
     const originalMessageText = userMessageElement?.getAttribute?.('data-original-text')
       || (typeof effectiveUserNode.content === 'string' ? effectiveUserNode.content : '');
+    const targetAiMessageId = targetAiNode ? targetAiNode.id : (targetAiMessageElement?.getAttribute?.('data-message-id') || null);
+    const targetAiMessageIds = isAi
+      ? (targetAiMessageId ? [targetAiMessageId] : [])
+      : collectParallelAiMessageIdsForUser(userMessageId, targetAiMessageId);
 
     return {
+      sourceRole: isAi ? 'assistant' : 'user',
+      sourceMessageId: node.id,
       userMessageElement,
       userMessageId,
       originalMessageText,
       targetAiMessageElement,
-      targetAiMessageId: targetAiNode ? targetAiNode.id : (targetAiMessageElement?.getAttribute?.('data-message-id') || null)
+      targetAiMessageId,
+      targetAiMessageIds
     };
   }
 
@@ -224,11 +284,14 @@ export function createContextMenuManager(appContext) {
    *
    * @param {HTMLElement|null} messageElement
    * @returns {{
+   *   sourceRole: 'assistant'|'user',
+   *   sourceMessageId: string,
    *   userMessageElement: HTMLElement,
    *   userMessageId: string,
    *   originalMessageText: string,
    *   targetAiMessageElement: HTMLElement|null,
-   *   targetAiMessageId: string|null
+   *   targetAiMessageId: string|null,
+   *   targetAiMessageIds: Array<string>
    * }|null}
    */
   function resolveRegenerateTarget(messageElement) {
@@ -296,13 +359,19 @@ export function createContextMenuManager(appContext) {
     const targetAiMessageId = targetAiMessageElement
       ? (targetAiMessageElement.getAttribute('data-message-id') || null)
       : null;
+    const targetAiMessageIds = isAi
+      ? (targetAiMessageId ? [targetAiMessageId] : [])
+      : collectParallelAiMessageIdsForUser(userMessageId, targetAiMessageId);
 
     return {
+      sourceRole: isAi ? 'assistant' : 'user',
+      sourceMessageId: messageElement.getAttribute('data-message-id') || '',
       userMessageElement,
       userMessageId,
       originalMessageText,
       targetAiMessageElement,
-      targetAiMessageId
+      targetAiMessageId,
+      targetAiMessageIds
     };
   }
 
@@ -334,11 +403,7 @@ export function createContextMenuManager(appContext) {
     return 'API';
   }
 
-  function resolveApiConfigFromMessage(messageElement) {
-    if (!messageElement || !chatHistoryManager?.chatHistory?.messages) return null;
-    const messageId = messageElement.getAttribute('data-message-id') || '';
-    if (!messageId) return null;
-    const node = chatHistoryManager.chatHistory.messages.find(m => m.id === messageId) || null;
+  function resolveApiConfigFromHistoryNode(node) {
     if (!node || node.role !== 'assistant') return null;
     if (node.apiUuid && apiManager?.resolveApiParam) {
       const resolved = apiManager.resolveApiParam({ id: node.apiUuid });
@@ -355,17 +420,40 @@ export function createContextMenuManager(appContext) {
     return null;
   }
 
-  /**
-   * 统一解析“重新生成”的 API 参数，确保展示与实际发送一致。
-   * - 若传入 apiOverride（如收藏 API/指定 ID），直接使用；
-   * - 否则沿用 prompt 设置中的 model 偏好，未设置则回退为 follow_current。
-   *
-   * @param {string} originalMessageText
-   * @param {any} [apiOverride=null]
-   * @returns {any}
-   */
-  function resolveRegenerateApiParam(originalMessageText, apiOverride = null) {
-    if (apiOverride != null) return apiOverride;
+  function resolveApiConfigFromMessage(messageElement) {
+    if (!messageElement) return null;
+    const messageId = messageElement.getAttribute('data-message-id') || '';
+    if (!messageId) return null;
+    const node = findHistoryMessageById(messageId);
+    return resolveApiConfigFromHistoryNode(node);
+  }
+
+  function getRegenerateTargetAiIds(regenTarget) {
+    if (!regenTarget || typeof regenTarget !== 'object') return [];
+    if (Array.isArray(regenTarget.targetAiMessageIds) && regenTarget.targetAiMessageIds.length > 0) {
+      return regenTarget.targetAiMessageIds
+        .map((id) => (typeof id === 'string' ? id.trim() : ''))
+        .filter(Boolean);
+    }
+    const single = (typeof regenTarget.targetAiMessageId === 'string') ? regenTarget.targetAiMessageId.trim() : '';
+    return single ? [single] : [];
+  }
+
+  function resolveRegenerateTargetApiConfigMap(regenTarget) {
+    const configMap = new Map();
+    const targetIds = getRegenerateTargetAiIds(regenTarget);
+    targetIds.forEach((targetId) => {
+      if (!targetId || configMap.has(targetId)) return;
+      const node = findHistoryMessageById(targetId);
+      const config = resolveApiConfigFromHistoryNode(node);
+      if (config) {
+        configMap.set(targetId, config);
+      }
+    });
+    return configMap;
+  }
+
+  function resolvePromptPreferredApiParam(originalMessageText) {
     let apiParam = 'follow_current';
     try {
       const promptSettingsManager = appContext.services.promptSettingsManager;
@@ -385,14 +473,38 @@ export function createContextMenuManager(appContext) {
   }
 
   /**
+   * 统一解析“重新生成”的 API 参数，确保展示与实际发送一致。
+   * - 若传入 apiOverride（如收藏 API/指定 ID），直接使用；
+   * - 否则优先沿用“被重生成目标 AI 消息”的原始 API；
+   * - 若目标未记录 API，再回退到 prompt 设置中的 model 偏好；仍未命中则 follow_current。
+   *
+   * @param {Object|null} regenTarget
+   * @param {any} [apiOverride=null]
+   * @returns {any}
+   */
+  function resolveRegenerateApiParam(regenTarget, apiOverride = null) {
+    if (apiOverride != null) return apiOverride;
+    const configMap = resolveRegenerateTargetApiConfigMap(regenTarget);
+    const targetIds = getRegenerateTargetAiIds(regenTarget);
+    for (let i = 0; i < targetIds.length; i += 1) {
+      const config = configMap.get(targetIds[i]);
+      if (config) return config;
+    }
+    const originalMessageText = (typeof regenTarget?.originalMessageText === 'string')
+      ? regenTarget.originalMessageText
+      : '';
+    return resolvePromptPreferredApiParam(originalMessageText);
+  }
+
+  /**
    * 获取“重新生成”默认将使用的 API 配置，用于右键菜单小字提示。
    * 说明：这里与发送逻辑保持一致——只有当 apiParam 能解析到明确配置时才覆盖。
    *
-   * @param {string} originalMessageText
+   * @param {Object|null} regenTarget
    * @returns {Object|null}
    */
-  function resolveRegenerateDisplayConfig(originalMessageText) {
-    const apiParam = resolveRegenerateApiParam(originalMessageText, null);
+  function resolveRegenerateDisplayConfig(regenTarget) {
+    const apiParam = resolveRegenerateApiParam(regenTarget, null);
     let overrideConfig = null;
     if (apiParam != null && typeof apiManager?.resolveApiParam === 'function') {
       if (typeof apiParam === 'string' && (apiParam === 'follow_current' || apiParam === 'selected')) {
@@ -408,10 +520,42 @@ export function createContextMenuManager(appContext) {
     return overrideConfig || displayConfig;
   }
 
-  function updateRegenerateApiHint(originalMessageText) {
+  function buildRegenerateApiHintLabel(regenTarget) {
+    const targetIds = getRegenerateTargetAiIds(regenTarget);
+    const shouldShowCombo = regenTarget?.sourceRole === 'user' && targetIds.length > 1;
+    if (shouldShowCombo) {
+      const configMap = resolveRegenerateTargetApiConfigMap(regenTarget);
+      const grouped = [];
+      const groupedIndex = new Map();
+      targetIds.forEach((targetId) => {
+        const config = configMap.get(targetId);
+        if (!config) return;
+        const key = (typeof config.id === 'string' && config.id)
+          ? config.id
+          : `${config.baseUrl || ''}::${config.modelName || ''}::${config.displayName || ''}`;
+        if (groupedIndex.has(key)) {
+          const index = groupedIndex.get(key);
+          grouped[index].count += 1;
+          return;
+        }
+        groupedIndex.set(key, grouped.length);
+        grouped.push({ config, count: 1 });
+      });
+
+      if (grouped.length > 0) {
+        return grouped
+          .map(item => `${getApiDisplayName(item.config)}${item.count > 1 ? ` x${item.count}` : ''}`)
+          .join(' + ');
+      }
+    }
+
+    const config = resolveRegenerateDisplayConfig(regenTarget);
+    return getApiDisplayName(config);
+  }
+
+  function updateRegenerateApiHint(regenTarget) {
     if (!regenerateApiHint) return;
-    const config = resolveRegenerateDisplayConfig(originalMessageText);
-    const label = getApiDisplayName(config);
+    const label = buildRegenerateApiHintLabel(regenTarget);
     regenerateApiHint.textContent = label;
     regenerateApiHint.title = label;
   }
@@ -520,7 +664,7 @@ export function createContextMenuManager(appContext) {
     if (regenTarget) {
       renderRegenerateSubmenu();
       updateSubmenuDirection(regenerateButton, regenerateSubmenu);
-      updateRegenerateApiHint(regenTarget.originalMessageText);
+      updateRegenerateApiHint(regenTarget);
     } else {
       regenerateButton.classList.remove('context-menu-item--submenu-left');
       if (regenerateApiHint) {
@@ -639,20 +783,42 @@ export function createContextMenuManager(appContext) {
     }
 
     const {
+      sourceRole,
       userMessageId,
       originalMessageText,
       targetAiMessageId
     } = regenTarget;
+    const targetAiMessageIds = getRegenerateTargetAiIds(regenTarget);
 
     try {
-      const apiParam = resolveRegenerateApiParam(originalMessageText, apiOverride);
+      const shouldRegenerateParallelGroup = apiOverride == null
+        && sourceRole === 'user'
+        && targetAiMessageIds.length > 1;
+
+      if (shouldRegenerateParallelGroup) {
+        const configMap = resolveRegenerateTargetApiConfigMap(regenTarget);
+        const fallbackApiParam = resolveRegenerateApiParam(regenTarget, null);
+        targetAiMessageIds.forEach((currentAiMessageId) => {
+          const apiParam = configMap.get(currentAiMessageId) || fallbackApiParam;
+          messageSender.sendMessage({
+            originalMessageText,
+            regenerateMode: true,
+            messageId: userMessageId,
+            targetAiMessageId: currentAiMessageId || null,
+            api: apiParam
+          });
+        });
+        return;
+      }
+
+      const apiParam = resolveRegenerateApiParam(regenTarget, apiOverride);
 
       // 关键：指定 targetAiMessageId，让发送层“原地替换”目标 AI 消息内容（不删除/不新增其他消息）
       messageSender.sendMessage({
         originalMessageText,
         regenerateMode: true,
         messageId: userMessageId,
-        targetAiMessageId: targetAiMessageId || null,
+        targetAiMessageId: targetAiMessageId || targetAiMessageIds[0] || null,
         api: apiParam
       });
     } catch (err) {
