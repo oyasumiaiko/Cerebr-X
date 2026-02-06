@@ -2587,13 +2587,12 @@ export function createSelectionThreadManager(appContext) {
   }
 
   function getFullscreenResizePointerScale() {
-    // fullscreenWidth is stored in logical pixels; convert drag delta with scale/DPI so movement matches visual width.
-    const scaleFactor = Number(settingsManager?.getSetting?.('scaleFactor'));
-    const safeScaleFactor = Number.isFinite(scaleFactor) && scaleFactor > 0 ? scaleFactor : 1;
+    // In embedded mode fullscreenWidth uses physical-pixel semantics while clientX delta is CSS pixels.
+    // Multiply by DPR so drag distance and visible width change stay consistent under DPI scaling.
     const dpr = Number(window.devicePixelRatio);
     const safeDpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
-    const pointerScale = safeScaleFactor / safeDpr;
-    return Number.isFinite(pointerScale) && pointerScale > 0 ? pointerScale : 1;
+    const isStandaloneMode = !!appContext?.state?.isStandalone;
+    return isStandaloneMode ? 1 : safeDpr;
   }
 
   function handleFullscreenWidthResizeMove(event) {
