@@ -905,6 +905,7 @@ export function createMessageSender(appContext) {
     try {
       messageElement.style.removeProperty('--parallel-answer-count');
       messageElement.style.removeProperty('--parallel-answer-index');
+      messageElement.style.removeProperty('--parallel-answer-is-last');
     } catch (_) {}
   }
 
@@ -978,6 +979,7 @@ export function createMessageSender(appContext) {
         try {
           messageElement.style.setProperty('--parallel-answer-count', String(total));
           messageElement.style.setProperty('--parallel-answer-index', String(visualIndex));
+          messageElement.style.setProperty('--parallel-answer-is-last', visualIndex === total - 1 ? '1' : '0');
         } catch (_) {}
       } else {
         clearParallelAnswerLayoutMarker(messageElement);

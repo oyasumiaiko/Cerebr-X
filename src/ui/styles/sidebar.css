@@ -6942,6 +6942,7 @@ html.fullscreen-mode::before {
 .fullscreen-mode #chat-container.parallel-answer-layout-active,
 .fullscreen-mode #thread-container.parallel-answer-layout-active {
   display: block;
+  --parallel-answer-gap: 8px;
 }
 
 .fullscreen-mode #chat-container.parallel-answer-layout-active > .message:not(:last-child),
@@ -6955,10 +6956,10 @@ html.fullscreen-mode::before {
   vertical-align: top;
   box-sizing: border-box;
   min-width: 0;
-  width: calc(100% / var(--parallel-answer-count, 1));
-  max-width: calc(100% / var(--parallel-answer-count, 1));
+  width: calc((100% - (var(--parallel-answer-count, 1) - 1) * var(--parallel-answer-gap, 8px)) / var(--parallel-answer-count, 1));
+  max-width: calc((100% - (var(--parallel-answer-count, 1) - 1) * var(--parallel-answer-gap, 8px)) / var(--parallel-answer-count, 1));
   margin-left: 0;
-  margin-right: 0;
+  margin-right: calc((1 - var(--parallel-answer-is-last, 0)) * var(--parallel-answer-gap, 8px));
 }
 
 .fullscreen-mode #chat-container.parallel-answer-layout-active > .ai-message:not(.parallel-answer-item),
