@@ -453,6 +453,38 @@ export function createContextMenuManager(appContext) {
     return configMap;
   }
 
+  function getRuntimeRegenerateApiGroupEntries() {
+    const selectionState = (typeof apiManager?.getRuntimeMultiApiSelection === 'function')
+      ? apiManager.getRuntimeMultiApiSelection()
+      : null;
+    const selectionEntries = Array.isArray(selectionState?.entries) ? selectionState.entries : [];
+    const grouped = [];
+
+    selectionEntries.forEach((entry) => {
+      const config = entry?.config || null;
+      if (!config) return;
+      const rawCount = Number(entry?.count);
+      const count = Number.isFinite(rawCount) ? Math.max(1, Math.floor(rawCount)) : 1;
+      grouped.push({ config, count });
+    });
+
+    if (grouped.length > 0) return grouped;
+
+    const selectedConfig = apiManager?.getSelectedConfig?.() || null;
+    return selectedConfig ? [{ config: selectedConfig, count: 1 }] : [];
+  }
+
+  function getRuntimeRegenerateApiExpandedTargets() {
+    const grouped = getRuntimeRegenerateApiGroupEntries();
+    const expanded = [];
+    grouped.forEach((item) => {
+      for (let i = 0; i < item.count; i += 1) {
+        expanded.push(item.config);
+      }
+    });
+    return { grouped, expanded };
+  }
+
   function resolvePromptPreferredApiParam(originalMessageText) {
     let apiParam = 'follow_current';
     try {
@@ -521,31 +553,12 @@ export function createContextMenuManager(appContext) {
   }
 
   function buildRegenerateApiHintLabel(regenTarget) {
-    const targetIds = getRegenerateTargetAiIds(regenTarget);
-    const shouldShowCombo = regenTarget?.sourceRole === 'user' && targetIds.length > 1;
-    if (shouldShowCombo) {
-      const configMap = resolveRegenerateTargetApiConfigMap(regenTarget);
-      const grouped = [];
-      const groupedIndex = new Map();
-      targetIds.forEach((targetId) => {
-        const config = configMap.get(targetId);
-        if (!config) return;
-        const key = (typeof config.id === 'string' && config.id)
-          ? config.id
-          : `${config.baseUrl || ''}::${config.modelName || ''}::${config.displayName || ''}`;
-        if (groupedIndex.has(key)) {
-          const index = groupedIndex.get(key);
-          grouped[index].count += 1;
-          return;
-        }
-        groupedIndex.set(key, grouped.length);
-        grouped.push({ config, count: 1 });
-      });
-
+    if (regenTarget?.sourceRole === 'user') {
+      const grouped = getRuntimeRegenerateApiGroupEntries();
       if (grouped.length > 0) {
         return grouped
-          .map(item => `${getApiDisplayName(item.config)}${item.count > 1 ? ` x${item.count}` : ''}`)
-          .join(' + ');
+          .map((item) => `${getApiDisplayName(item.config)}${item.count > 1 ? ` x${item.count}` : ''}`)
+          .join('\n');
       }
     }
 
@@ -791,24 +804,23 @@ export function createContextMenuManager(appContext) {
     const targetAiMessageIds = getRegenerateTargetAiIds(regenTarget);
 
     try {
-      const shouldRegenerateParallelGroup = apiOverride == null
-        && sourceRole === 'user'
-        && targetAiMessageIds.length > 1;
+      const shouldUseRuntimeApiGroup = apiOverride == null && sourceRole === 'user';
 
-      if (shouldRegenerateParallelGroup) {
-        const configMap = resolveRegenerateTargetApiConfigMap(regenTarget);
-        const fallbackApiParam = resolveRegenerateApiParam(regenTarget, null);
-        targetAiMessageIds.forEach((currentAiMessageId) => {
-          const apiParam = configMap.get(currentAiMessageId) || fallbackApiParam;
-          messageSender.sendMessage({
-            originalMessageText,
-            regenerateMode: true,
-            messageId: userMessageId,
-            targetAiMessageId: currentAiMessageId || null,
-            api: apiParam
+      if (shouldUseRuntimeApiGroup) {
+        const runtimeTargets = getRuntimeRegenerateApiExpandedTargets();
+        if (runtimeTargets.expanded.length > 0) {
+          runtimeTargets.expanded.forEach((apiConfig, index) => {
+            const currentAiMessageId = targetAiMessageIds[index] || null;
+            messageSender.sendMessage({
+              originalMessageText,
+              regenerateMode: true,
+              messageId: userMessageId,
+              targetAiMessageId: currentAiMessageId,
+              api: apiConfig
+            });
           });
-        });
-        return;
+          return;
+        }
       }
 
       const apiParam = resolveRegenerateApiParam(regenTarget, apiOverride);

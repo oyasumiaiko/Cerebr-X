@@ -2991,9 +2991,10 @@ input:checked + .slider::before {
     margin-top: 2px;
     font-size: 11px;
     color: color-mix(in srgb, var(--cerebr-text-color) 70%, transparent);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: pre-line;
+    line-height: 1.25;
+    overflow: visible;
+    text-overflow: clip;
 }
 
 .context-menu-item__hint:empty {
