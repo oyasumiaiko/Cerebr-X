@@ -98,7 +98,8 @@ export function createSelectionThreadManager(appContext) {
     edge: '',
     startX: 0,
     startWidth: 0,
-    currentWidth: 0
+    currentWidth: 0,
+    pointerScale: 1
   };
 
   function clearThreadBannerPeekTimer() {
@@ -2585,11 +2586,25 @@ export function createSelectionThreadManager(appContext) {
     return !state.activeThreadId && isFullscreenLayout();
   }
 
+  function getFullscreenResizePointerScale() {
+    // fullscreenWidth is stored in logical pixels; convert drag delta with scale/DPI so movement matches visual width.
+    const scaleFactor = Number(settingsManager?.getSetting?.('scaleFactor'));
+    const safeScaleFactor = Number.isFinite(scaleFactor) && scaleFactor > 0 ? scaleFactor : 1;
+    const dpr = Number(window.devicePixelRatio);
+    const safeDpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+    const pointerScale = safeScaleFactor / safeDpr;
+    return Number.isFinite(pointerScale) && pointerScale > 0 ? pointerScale : 1;
+  }
+
   function handleFullscreenWidthResizeMove(event) {
     if (!fullscreenResizeState.active) return;
     const delta = (event?.clientX ?? 0) - fullscreenResizeState.startX;
     const direction = fullscreenResizeState.edge === 'edge-right' ? 1 : -1;
-    const nextWidth = fullscreenResizeState.startWidth + delta * 2 * direction;
+    const pointerScale = (Number.isFinite(fullscreenResizeState.pointerScale) && fullscreenResizeState.pointerScale > 0)
+      ? fullscreenResizeState.pointerScale
+      : getFullscreenResizePointerScale();
+    const logicalDelta = delta * pointerScale;
+    const nextWidth = fullscreenResizeState.startWidth + logicalDelta * 2 * direction;
     const clampedWidth = applyFullscreenWidthPreview(nextWidth);
     fullscreenResizeState.currentWidth = clampedWidth;
   }
@@ -2601,6 +2616,7 @@ export function createSelectionThreadManager(appContext) {
     );
     fullscreenResizeState.active = false;
     fullscreenResizeState.edge = '';
+    fullscreenResizeState.pointerScale = 1;
     document.body.classList.remove('fullscreen-width-resize-active');
     document.removeEventListener('mousemove', handleFullscreenWidthResizeMove);
     document.removeEventListener('mouseup', stopFullscreenWidthResize);
@@ -2619,6 +2635,7 @@ export function createSelectionThreadManager(appContext) {
     fullscreenResizeState.startX = event.clientX;
     fullscreenResizeState.startWidth = startWidth;
     fullscreenResizeState.currentWidth = startWidth;
+    fullscreenResizeState.pointerScale = getFullscreenResizePointerScale();
 
     applyFullscreenWidthPreview(startWidth);
     document.body.classList.add('fullscreen-width-resize-active');
@@ -2714,6 +2731,7 @@ export function createSelectionThreadManager(appContext) {
       if (fullscreenResizeState.active) {
         fullscreenResizeState.startWidth = currentWidth;
         fullscreenResizeState.currentWidth = currentWidth;
+        fullscreenResizeState.pointerScale = getFullscreenResizePointerScale();
       }
     }
   }
