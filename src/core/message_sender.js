@@ -897,15 +897,41 @@ export function createMessageSender(appContext) {
     return containers;
   }
 
+  function refreshParallelLayoutContainerState() {
+    getParallelLayoutContainers().forEach((container) => {
+      const hasParallel = !!container.querySelector('.message.ai-message.parallel-answer-item');
+      container.classList.toggle('parallel-answer-layout-active', hasParallel);
+    });
+  }
+
   function clearParallelAnswerLayoutMarker(messageElement) {
     if (!messageElement || !messageElement.classList) return;
     messageElement.classList.remove('parallel-answer-item');
     messageElement.removeAttribute('data-parallel-parent-id');
     messageElement.removeAttribute('data-parallel-answer-count');
+    messageElement.removeAttribute('data-parallel-answer-index');
     try {
       messageElement.style.removeProperty('--parallel-answer-count');
       messageElement.style.removeProperty('--parallel-answer-index');
       messageElement.style.removeProperty('--parallel-answer-is-last');
+    } catch (_) {}
+  }
+
+  function markParallelAnswerLayoutMarker(messageElement, parentId, total, visualIndex) {
+    if (!messageElement || !messageElement.classList || total <= 1 || !parentId) {
+      clearParallelAnswerLayoutMarker(messageElement);
+      return;
+    }
+
+    const normalizedIndex = Math.max(0, Math.min(total - 1, Number.isFinite(visualIndex) ? Math.floor(visualIndex) : 0));
+    messageElement.classList.add('parallel-answer-item');
+    messageElement.setAttribute('data-parallel-parent-id', parentId);
+    messageElement.setAttribute('data-parallel-answer-count', String(total));
+    messageElement.setAttribute('data-parallel-answer-index', String(normalizedIndex));
+    try {
+      messageElement.style.setProperty('--parallel-answer-count', String(total));
+      messageElement.style.setProperty('--parallel-answer-index', String(normalizedIndex));
+      messageElement.style.setProperty('--parallel-answer-is-last', normalizedIndex === total - 1 ? '1' : '0');
     } catch (_) {}
   }
 
@@ -919,16 +945,100 @@ export function createMessageSender(appContext) {
     });
   }
 
-  function resolveMessageElementById(messageId) {
+  function resolveMessageElementsById(messageId) {
     const safeId = escapeMessageIdForSelector(messageId);
-    if (!safeId) return null;
+    if (!safeId) return [];
     const selector = `.message[data-message-id="${safeId}"]`;
-    const containers = getParallelLayoutContainers();
-    for (const container of containers) {
-      const element = container.querySelector(selector);
-      if (element) return element;
+    const elements = [];
+    getParallelLayoutContainers().forEach((container) => {
+      container.querySelectorAll(selector).forEach((element) => {
+        elements.push(element);
+      });
+    });
+    return elements;
+  }
+
+  function readParallelAnswerIndexFromElement(messageElement) {
+    if (!messageElement) return null;
+    const styleIndex = messageElement.style?.getPropertyValue?.('--parallel-answer-index') || '';
+    const attrIndex = messageElement.getAttribute('data-parallel-answer-index') || '';
+    const rawIndex = styleIndex || attrIndex;
+    const parsed = Number(rawIndex);
+    if (!Number.isFinite(parsed) || parsed < 0) return null;
+    return Math.floor(parsed);
+  }
+
+  function readParallelAnswerCountFromElement(messageElement) {
+    if (!messageElement) return null;
+    const styleCount = messageElement.style?.getPropertyValue?.('--parallel-answer-count') || '';
+    const attrCount = messageElement.getAttribute('data-parallel-answer-count') || '';
+    const rawCount = styleCount || attrCount;
+    const parsed = Number(rawCount);
+    if (!Number.isFinite(parsed) || parsed <= 1) return null;
+    return Math.floor(parsed);
+  }
+
+  function normalizeParallelAnswerCount(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return null;
+    const normalized = Math.floor(parsed);
+    if (normalized <= 1) return null;
+    return normalized;
+  }
+
+  function normalizeParallelAnswerIndex(value, total = null) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return null;
+    let normalized = Math.floor(parsed);
+    if (normalized < 0) return null;
+    if (Number.isFinite(total) && total > 0) {
+      normalized = Math.max(0, Math.min(total - 1, normalized));
     }
-    return null;
+    return normalized;
+  }
+
+  function readParallelAnswerCountFromNode(node) {
+    if (!node || typeof node !== 'object') return null;
+    return normalizeParallelAnswerCount(node.parallelAnswerCount);
+  }
+
+  function readParallelAnswerIndexFromNode(node, total = null) {
+    if (!node || typeof node !== 'object') return null;
+    return normalizeParallelAnswerIndex(node.parallelAnswerIndex, total);
+  }
+  // Persist parallel layout slot metadata on history nodes for stable reload behavior.
+  function applyParallelAnswerLayoutMetaToNode(node, total, index) {
+    if (!node || typeof node !== 'object') return;
+    const normalizedTotal = normalizeParallelAnswerCount(total);
+    const normalizedIndex = normalizeParallelAnswerIndex(index, normalizedTotal || undefined);
+    if (normalizedTotal && Number.isFinite(normalizedIndex)) {
+      node.parallelAnswerCount = normalizedTotal;
+      node.parallelAnswerIndex = normalizedIndex;
+    } else {
+      delete node.parallelAnswerCount;
+      delete node.parallelAnswerIndex;
+    }
+  }
+
+  function resolveParallelAnswerGroupTotal(parentId, assistantCount, containers) {
+    const safeParentId = escapeMessageIdForSelector(parentId);
+    if (!safeParentId) return assistantCount;
+
+    let maxTotal = Math.max(assistantCount, 0);
+    const selector = `.message.ai-message[data-parallel-parent-id="${safeParentId}"]`;
+    containers.forEach((container) => {
+      const elements = container.querySelectorAll(selector);
+      if (elements.length > maxTotal) {
+        maxTotal = elements.length;
+      }
+      elements.forEach((element) => {
+        const parsed = readParallelAnswerCountFromElement(element);
+        if (Number.isFinite(parsed) && parsed > maxTotal) {
+          maxTotal = parsed;
+        }
+      });
+    });
+    return maxTotal;
   }
 
   function syncParallelAnswerLayoutForParent(parentMessageId) {
@@ -948,51 +1058,104 @@ export function createMessageSender(appContext) {
 
     const childIds = Array.isArray(parentNode.children) ? parentNode.children : [];
     const assistantChildren = childIds
-      .map((childId) => messageLookup.get(childId))
-      .filter((node) => node && node.role === 'assistant' && !node.threadHiddenSelection);
+      .map((childId, orderIndex) => ({ node: messageLookup.get(childId), orderIndex }))
+      .filter((item) => item.node && item.node.role === 'assistant' && !item.node.threadHiddenSelection);
 
-    const total = assistantChildren.length;
-    const validIds = new Set(assistantChildren.map((node) => node.id));
+    const validIds = new Set(assistantChildren.map((item) => item.node.id));
     const safeParentId = escapeMessageIdForSelector(parentId);
     const containers = getParallelLayoutContainers();
+
+    const total = resolveParallelAnswerGroupTotal(parentId, assistantChildren.length, containers);
 
     if (safeParentId) {
       const staleSelector = `.message.ai-message[data-parallel-parent-id="${safeParentId}"]`;
       containers.forEach((container) => {
         container.querySelectorAll(staleSelector).forEach((element) => {
           const messageId = element.getAttribute('data-message-id') || '';
-          if (!validIds.has(messageId)) {
-            clearParallelAnswerLayoutMarker(element);
-          }
+          if (messageId && validIds.has(messageId)) return;
+          const keepPendingLoading = !messageId && total > 1 && element.classList.contains('loading-message');
+          if (keepPendingLoading) return;
+          clearParallelAnswerLayoutMarker(element);
         });
       });
     }
 
-    assistantChildren.forEach((node, visualIndex) => {
-      const messageElement = resolveMessageElementById(node.id);
-      if (!messageElement) return;
-
-      if (total > 1) {
-        messageElement.classList.add('parallel-answer-item');
-        messageElement.setAttribute('data-parallel-parent-id', parentId);
-        messageElement.setAttribute('data-parallel-answer-count', String(total));
-        try {
-          messageElement.style.setProperty('--parallel-answer-count', String(total));
-          messageElement.style.setProperty('--parallel-answer-index', String(visualIndex));
-          messageElement.style.setProperty('--parallel-answer-is-last', visualIndex === total - 1 ? '1' : '0');
-        } catch (_) {}
-      } else {
-        clearParallelAnswerLayoutMarker(messageElement);
+    const items = assistantChildren.map((item) => {
+      const elements = resolveMessageElementsById(item.node.id);
+      const nodePreferredIndex = readParallelAnswerIndexFromNode(item.node, total);
+      let preferredIndex = Number.isFinite(nodePreferredIndex) ? nodePreferredIndex : null;
+      if (!Number.isFinite(preferredIndex)) {
+        for (const element of elements) {
+          const currentIndex = readParallelAnswerIndexFromElement(element);
+          if (Number.isFinite(currentIndex)) {
+            preferredIndex = currentIndex;
+            break;
+          }
+        }
       }
+      return {
+        node: item.node,
+        orderIndex: item.orderIndex,
+        elements,
+        preferredIndex
+      };
     });
 
-    containers.forEach((container) => {
-      const hasParallel = !!container.querySelector('.message.ai-message.parallel-answer-item');
-      container.classList.toggle('parallel-answer-layout-active', hasParallel);
+    const allocatedIndexes = new Set();
+    const nodeIndexMap = new Map();
+    const clampIndex = (value) => {
+      if (total <= 0) return 0;
+      return Math.max(0, Math.min(total - 1, value));
+    };
+
+    items
+      .filter((item) => Number.isFinite(item.preferredIndex))
+      .sort((a, b) => {
+        if (a.preferredIndex !== b.preferredIndex) return a.preferredIndex - b.preferredIndex;
+        return a.orderIndex - b.orderIndex;
+      })
+      .forEach((item) => {
+        let next = clampIndex(Math.floor(item.preferredIndex));
+        while (allocatedIndexes.has(next) && next < total - 1) {
+          next += 1;
+        }
+        while (allocatedIndexes.has(next) && next > 0) {
+          next -= 1;
+        }
+        if (allocatedIndexes.has(next)) return;
+        allocatedIndexes.add(next);
+        nodeIndexMap.set(item.node.id, next);
+      });
+
+    let cursor = 0;
+    items
+      .filter((item) => !nodeIndexMap.has(item.node.id))
+      .sort((a, b) => a.orderIndex - b.orderIndex)
+      .forEach((item) => {
+        while (allocatedIndexes.has(cursor) && cursor < total) {
+          cursor += 1;
+        }
+        const next = cursor < total ? cursor : clampIndex(total - 1);
+        allocatedIndexes.add(next);
+        nodeIndexMap.set(item.node.id, next);
+      });
+
+    items.forEach((item) => {
+      const visualIndex = nodeIndexMap.get(item.node.id) ?? clampIndex(item.orderIndex);
+      applyParallelAnswerLayoutMetaToNode(item.node, total, visualIndex);
+      if (!item.elements.length) return;
+      item.elements.forEach((element) => {
+        if (total > 1) {
+          markParallelAnswerLayoutMarker(element, parentId, total, visualIndex);
+        } else {
+          clearParallelAnswerLayoutMarker(element);
+        }
+      });
     });
+
+    refreshParallelLayoutContainerState();
   }
-
-  // 为历史回放、全屏切换等“非发送链路”提供一次性重算入口。
+  // Recompute parallel layout markers for non-send flows (history replay/fullscreen toggle).
   function refreshParallelAnswerLayout() {
     clearAllParallelAnswerLayoutMarkers();
 
@@ -2089,8 +2252,16 @@ export function createMessageSender(appContext) {
       resolvedApiConfig = null,
       pageContentSnapshot = null,
       conversationSnapshot = null,
-      aspectRatioOverride: externalAspectRatioOverride = null
+      aspectRatioOverride: externalAspectRatioOverride = null,
+      __parallelAnswerCount = null,
+      __parallelAnswerIndex = null
     } = options;
+
+    const requestedParallelAnswerCount = normalizeParallelAnswerCount(__parallelAnswerCount);
+    const requestedParallelAnswerIndex = normalizeParallelAnswerIndex(
+      __parallelAnswerIndex,
+      requestedParallelAnswerCount || undefined
+    );
 
     const conversationApiInfo = (typeof chatHistoryUI?.resolveActiveConversationApiConfig === 'function')
       ? chatHistoryUI.resolveActiveConversationApiConfig()
@@ -2315,6 +2486,14 @@ export function createMessageSender(appContext) {
       // 开始处理消息：为本次请求注册 attempt，并在必要时开启全局“正在处理”状态
       attempt = beginAttempt();
       const signal = attempt.controller.signal;
+      // Keep a fixed slot index for each parallel request to avoid position swapping under concurrent updates.
+      if (requestedParallelAnswerCount && Number.isFinite(requestedParallelAnswerIndex)) {
+        attempt.parallelAnswerCount = requestedParallelAnswerCount;
+        attempt.parallelAnswerIndex = requestedParallelAnswerIndex;
+      } else {
+        attempt.parallelAnswerCount = 1;
+        attempt.parallelAnswerIndex = null;
+      }
 
       // 如果已有注入的系统消息，则使用它；否则从消息文本中提取
       const injectedSystemMessages = existingInjectedSystemMessages.length > 0 ? 
@@ -2446,6 +2625,22 @@ export function createMessageSender(appContext) {
 
           if (canUpdateExistingAiMessage) {
             // 绑定 attempt 到目标 AI 消息，便于“停止更新”按消息粒度工作
+            const nodeParallelCount = readParallelAnswerCountFromNode(node);
+            const elementParallelCount = readParallelAnswerCountFromElement(el);
+            const resolvedParallelCount = nodeParallelCount || elementParallelCount;
+            const nodeParallelIndex = readParallelAnswerIndexFromNode(node, resolvedParallelCount || undefined);
+            const elementParallelIndex = readParallelAnswerIndexFromElement(el);
+            const resolvedParallelIndex = Number.isFinite(nodeParallelIndex)
+              ? nodeParallelIndex
+              : normalizeParallelAnswerIndex(elementParallelIndex, resolvedParallelCount || undefined);
+
+            if ((!attempt.parallelAnswerCount || attempt.parallelAnswerCount <= 1)
+              && resolvedParallelCount
+              && Number.isFinite(resolvedParallelIndex)) {
+              attempt.parallelAnswerCount = resolvedParallelCount;
+              attempt.parallelAnswerIndex = resolvedParallelIndex;
+            }
+
             attempt.aiMessageId = normalizedTargetAiMessageId;
             // 阅读位置锁定：仅对“原地替换”重新生成开启。
             // - preserveTargetMessageId 用于在流式/非流式更新时判断是否需要做滚动补偿；
@@ -2488,6 +2683,14 @@ export function createMessageSender(appContext) {
           loadingMessage.classList.add('loading-message');
           // 让“等待回复”占位消息也带有 updating 状态，便于右键菜单显示“停止更新”
           loadingMessage.classList.add('updating');
+
+          const parallelCount = normalizeParallelAnswerCount(attempt.parallelAnswerCount);
+          const parallelIndex = normalizeParallelAnswerIndex(attempt.parallelAnswerIndex, parallelCount || undefined);
+          const parallelParentId = resolveHistoryParentIdForAi(activeThreadContext, attempt);
+          if (parallelParentId && parallelCount && Number.isFinite(parallelIndex)) {
+            markParallelAnswerLayoutMarker(loadingMessage, parallelParentId, parallelCount, parallelIndex);
+            refreshParallelLayoutContainerState();
+          }
         }
       } else {
         loadingMessage = null;
@@ -2809,6 +3012,10 @@ export function createMessageSender(appContext) {
         conversationSnapshot: Array.isArray(conversationChain) ? conversationChain : null,
         aspectRatioOverride,
         __skipUserMessagePreprocess: skipNextPreprocess,
+        __parallelAnswerCount: attempt?.parallelAnswerCount || requestedParallelAnswerCount || null,
+        __parallelAnswerIndex: Number.isFinite(attempt?.parallelAnswerIndex)
+          ? attempt.parallelAnswerIndex
+          : (Number.isFinite(requestedParallelAnswerIndex) ? requestedParallelAnswerIndex : null),
         // 透传外部策略决定的API（若有）
         resolvedApiConfig,
         api
@@ -3158,7 +3365,9 @@ export function createMessageSender(appContext) {
         ...opts,
         originalMessageText: baseText,
         resolvedApiConfig: multiTargets[0],
-        aspectRatioOverride: aspectRatio || undefined
+        aspectRatioOverride: aspectRatio || undefined,
+        __parallelAnswerCount: multiTargets.length,
+        __parallelAnswerIndex: 0
       };
 
       if (multiTargets.length === 1) {
@@ -3193,7 +3402,9 @@ export function createMessageSender(appContext) {
           regenerateMode: true,
           messageId: baseUserMessageId,
           resolvedApiConfig: multiTargets[i],
-          aspectRatioOverride: aspectRatio || undefined
+          aspectRatioOverride: aspectRatio || undefined,
+          __parallelAnswerCount: multiTargets.length,
+          __parallelAnswerIndex: i
         };
         tasks.push(sendMessageCore(extraOptions));
       }
@@ -3265,7 +3476,9 @@ export function createMessageSender(appContext) {
           ...opts,
           originalMessageText: baseText,
           regenerateMode: true,
-          aspectRatioOverride: aspectRatio || undefined
+          aspectRatioOverride: aspectRatio || undefined,
+          __parallelAnswerCount: parallelCount,
+          __parallelAnswerIndex: i
         };
         tasks.push(sendMessageCore(taskOptions));
       }
@@ -3277,7 +3490,9 @@ export function createMessageSender(appContext) {
     const firstOptions = {
       ...opts,
       originalMessageText: baseText,
-      aspectRatioOverride: aspectRatio || undefined
+      aspectRatioOverride: aspectRatio || undefined,
+      __parallelAnswerCount: parallelCount,
+      __parallelAnswerIndex: 0
     };
     const firstPromise = sendMessageCore(firstOptions);
     tasks.push(firstPromise);
@@ -3298,7 +3513,9 @@ export function createMessageSender(appContext) {
         originalMessageText: baseText,
         regenerateMode: true,
         messageId: baseUserMessageId,
-        aspectRatioOverride: aspectRatio || undefined
+        aspectRatioOverride: aspectRatio || undefined,
+        __parallelAnswerCount: parallelCount,
+        __parallelAnswerIndex: i
       };
       tasks.push(sendMessageCore(extraOptions));
     }

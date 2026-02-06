@@ -6963,9 +6963,10 @@ html.fullscreen-mode::before {
   max-width: 100%;
 }
 
-/* 全屏下：用户消息宽度跟随容器 */
+/* Fullscreen: keep user messages content-sized instead of stretching full row */
 .fullscreen-mode .user-message {
-  max-width: 100%;
+  width: fit-content;
+  max-width: -webkit-fill-available;
 }
 
 /* 全屏并行回答：让同一用户消息下的多路 AI 回复横向均分，不改变消息内部布局上下文 */
@@ -6993,12 +6994,17 @@ html.fullscreen-mode::before {
 }
 
 .fullscreen-mode #chat-container.parallel-answer-layout-active > .ai-message:not(.parallel-answer-item),
-.fullscreen-mode #thread-container.parallel-answer-layout-active > .ai-message:not(.parallel-answer-item),
-.fullscreen-mode #chat-container.parallel-answer-layout-active > .user-message,
-.fullscreen-mode #thread-container.parallel-answer-layout-active > .user-message {
+.fullscreen-mode #thread-container.parallel-answer-layout-active > .ai-message:not(.parallel-answer-item) {
   display: block;
   width: auto;
   max-width: 100%;
+}
+
+.fullscreen-mode #chat-container.parallel-answer-layout-active > .user-message,
+.fullscreen-mode #thread-container.parallel-answer-layout-active > .user-message {
+  display: block;
+  width: fit-content;
+  max-width: -webkit-fill-available;
 }
 
 /* Dark theme fullscreen mode */
