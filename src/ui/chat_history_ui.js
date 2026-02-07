@@ -21,6 +21,7 @@ import { extractThinkingFromText, mergeThoughts } from '../utils/thoughts_parser
 import { generateCandidateUrls } from '../utils/url_candidates.js';
 import { buildConversationSummaryFromMessages } from '../utils/conversation_title.js';
 import { normalizeStoredMessageContent, splitStoredMessageContent } from '../utils/message_content.js';
+import { normalizeConversationApiLock, mergeConversationApiLockState } from './conversation_state_merge.js';
 
 /**
  * 创建聊天历史UI管理器
@@ -145,24 +146,8 @@ export function createChatHistoryUI(appContext) {
   // --- 会话固定 API（用于“对话级别”的模型锁定）---
   let activeConversationApiLock = null;
 
-  function normalizeConversationApiLock(rawLock) {
-    if (!rawLock || typeof rawLock !== 'object') return null;
-    const id = typeof rawLock.id === 'string' ? rawLock.id.trim() : '';
-    const displayName = typeof rawLock.displayName === 'string' ? rawLock.displayName.trim() : '';
-    const modelName = typeof rawLock.modelName === 'string' ? rawLock.modelName.trim() : '';
-    const baseUrl = typeof rawLock.baseUrl === 'string' ? rawLock.baseUrl.trim() : '';
-    if (!id && !displayName && !modelName && !baseUrl) return null;
-    return { id, displayName, modelName, baseUrl };
-  }
-
   function buildConversationApiLockFromConfig(config) {
-    if (!config || typeof config !== 'object') return null;
-    const id = typeof config.id === 'string' ? config.id.trim() : '';
-    const displayName = typeof config.displayName === 'string' ? config.displayName.trim() : '';
-    const modelName = typeof config.modelName === 'string' ? config.modelName.trim() : '';
-    const baseUrl = typeof config.baseUrl === 'string' ? config.baseUrl.trim() : '';
-    if (!id && !displayName && !modelName && !baseUrl) return null;
-    return { id, displayName, modelName, baseUrl };
+    return normalizeConversationApiLock(config);
   }
 
   function isSameConversationApiLock(a, b) {
@@ -1938,8 +1923,9 @@ export function createChatHistoryUI(appContext) {
     // 分支元信息：仅在更新已有会话时需要“继承”下来，避免分支关系被覆盖丢失
     let parentConversationIdToSave = null;
     let forkedFromMessageIdToSave = null;
-    // 会话固定 API：尽量继承现有锁定，避免保存时丢失
-    let apiLockToSave = normalizeConversationApiLock(activeConversationApiLock || activeConversation?.apiLock);
+    // 会话固定 API：先快照“内存态”，后续与“已存储态”通过纯函数合并。
+    const memoryApiLockSnapshot = normalizeConversationApiLock(activeConversationApiLock || activeConversation?.apiLock);
+    let existingConversationSnapshot = null;
     
     // 默认使用“会话起始页”的页面元数据（首条用户消息冻结的 pageMeta）
     urlToSave = startPageMeta.url || '';
@@ -1951,6 +1937,7 @@ export function createChatHistoryUI(appContext) {
         // 使用false参数，不加载完整内容，只获取元数据
         const existingConversation = await getConversationById(currentConversationId, false);
         if (existingConversation) {
+          existingConversationSnapshot = existingConversation;
           urlToSave = existingConversation.url || '';
           titleToSave = existingConversation.title || '';
           summarySourceToSave = (typeof existingConversation.summarySource === 'string' && existingConversation.summarySource.trim())
@@ -1965,10 +1952,6 @@ export function createChatHistoryUI(appContext) {
             forkedFromMessageIdToSave = existingConversation.forkedFromMessageId.trim();
           }
 
-          if (preserveExistingApiLock && !apiLockToSave) {
-            apiLockToSave = normalizeConversationApiLock(existingConversation.apiLock);
-          }
-          
           // 如果原有摘要存在，则保留原有摘要，避免覆盖用户手动重命名的摘要
           if (existingConversation.summary) {
             summaryToSave = existingConversation.summary;
@@ -1990,6 +1973,17 @@ export function createChatHistoryUI(appContext) {
         `URL=${urlToSave}, 标题=${titleToSave}`
       );
     }
+
+    // 统一 API 锁定合并规则：
+    // - memory 优先；
+    // - preserveExistingApiLock=true 时可回退 stored；
+    // - 否则输出 null（显式清锁）。
+    const apiLockMerge = mergeConversationApiLockState({
+      memoryApiLock: memoryApiLockSnapshot,
+      storedApiLock: existingConversationSnapshot?.apiLock,
+      preserveExistingApiLock
+    });
+    const apiLockToSave = apiLockMerge.apiLock;
 
     const generateConversationId = () => `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const messageStats = computeConversationMessageStats(messagesCopy);
