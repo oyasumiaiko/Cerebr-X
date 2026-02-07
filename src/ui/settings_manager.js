@@ -20,7 +20,6 @@ import { queueStorageSet, queueStoragePrime } from '../utils/storage_write_queue
  * @param {HTMLElement} appContext.dom.autoScrollSwitch - 自动滚动开关元素
  * @param {HTMLElement} appContext.dom.clearOnSearchSwitch - 划词搜索清空聊天开关元素
  * @param {HTMLElement} appContext.dom.sendChatHistorySwitch - 发送聊天历史开关元素
- * @param {HTMLElement} appContext.dom.showReferenceSwitch - 显示引用标记开关元素
  * @param {HTMLElement} appContext.dom.sidebarPositionSwitch - 侧边栏位置开关元素
  * @param {HTMLElement} appContext.dom.stopAtTopSwitch - 滚动到顶部时停止开关元素
  * @param {HTMLElement} appContext.dom.showThoughtProcessSwitch - 显示思考过程开关元素
@@ -54,7 +53,6 @@ export function createSettingsManager(appContext) {
   const clearOnSearchSwitch = dom.clearOnSearchSwitch;
   const sendChatHistorySwitch = dom.sendChatHistorySwitch;
   const autoRetrySwitch = dom.autoRetrySwitch;
-  const showReferenceSwitch = dom.showReferenceSwitch;
   const sidebarPositionSwitch = dom.sidebarPositionSwitch;
   const stopAtTopSwitch = dom.stopAtTopSwitch;
   const showThoughtProcessSwitch = dom.showThoughtProcessSwitch;
@@ -113,7 +111,6 @@ export function createSettingsManager(appContext) {
     // 说明：即使关闭该开关，Cerebr 仍会在接收响应时照常把 signature 存入历史，便于用户随时重新开启。
     shouldSendSignature: true,
     autoRetry: false,
-    showReference: true,
     sidebarPosition: 'right', // 'left' 或 'right'
     stopAtTop: true, // 滚动到顶部时停止
     scaleFactor: 1, // Added default scaleFactor
@@ -365,16 +362,6 @@ export function createSettingsManager(appContext) {
       group: 'display',
       label: '使用 $ / $$ 作为公式分隔符',
       defaultValue: DEFAULT_SETTINGS.enableDollarMath
-    },
-    // 显示引用标记
-    {
-      key: 'showReference',
-      type: 'toggle',
-      id: 'show-reference-switch',
-      label: '显示引用标记',
-      group: 'display',
-      defaultValue: DEFAULT_SETTINGS.showReference,
-      apply: (v) => applyShowReference(v)
     },
     // 侧边栏位置（使用切换表示右侧）
     {
@@ -1663,16 +1650,6 @@ export function createSettingsManager(appContext) {
     }
   }
   
-  // 应用显示引用标记设置
-  function applyShowReference(enabled) {
-    updateReferenceVisibility(enabled);
-    
-    // 更新UI元素
-    if (showReferenceSwitch) {
-      showReferenceSwitch.checked = enabled;
-    }
-  }
-
   // 应用“输入框占位符显示模型名”设置
   function applyShowModelNameInPlaceholder(enabled) {
     // 这里主要用于立即刷新占位符文案
@@ -1699,15 +1676,6 @@ export function createSettingsManager(appContext) {
     
     // 通知父窗口侧边栏位置变化
     notifySidebarPositionChange(position);
-  }
-  
-  // 更新引用标记可见性
-  function updateReferenceVisibility(shouldShow) {
-    if (shouldShow) {
-      document.body.classList.remove('hide-references');
-    } else {
-      document.body.classList.add('hide-references');
-    }
   }
   
   // 通知侧边栏宽度变化
@@ -1931,9 +1899,6 @@ export function createSettingsManager(appContext) {
 
   function setAutoRetry(enabled) { setSetting('autoRetry', enabled); }
   
-  // 设置显示引用标记
-  function setShowReference(enabled) { setSetting('showReference', enabled); }
-  
   // 设置侧边栏位置
   function setSidebarPosition(position) { console.log(`设置侧边栏位置: ${position}`); setSetting('sidebarPosition', position); }
   
@@ -2012,10 +1977,8 @@ export function createSettingsManager(appContext) {
     setClearOnSearch,
     setSendChatHistory,
     setAutoRetry,
-    setShowReference,
     setSidebarPosition,
     refreshBackgroundImage,
-    updateReferenceVisibility,
     applyTheme
   };
 }

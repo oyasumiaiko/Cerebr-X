@@ -45,7 +45,6 @@ export function createSidebarAppContext(isStandalone) {
     dockModeToggle: document.getElementById('dock-mode-toggle'),
     sendButton: document.getElementById('send-button'),
     sendChatHistorySwitch: document.getElementById('send-chat-history-switch'),
-    showReferenceSwitch: document.getElementById('show-reference-switch'),
     copyCodeButton: document.getElementById('copy-code'),
     imageContainer: document.getElementById('image-container'),
     promptSettingsToggle: document.getElementById('prompt-settings-toggle'),
