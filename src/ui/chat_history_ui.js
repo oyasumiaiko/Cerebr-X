@@ -1870,17 +1870,13 @@ export function createChatHistoryUI(appContext) {
     } catch (e) {
       console.warn('保存会话时落盘图片失败，已跳过部分图片:', e);
     }
-    // 保存前压缩引用元数据（groundingMetadata），避免把检索结果全文写进 IndexedDB
+    // Gemini grounding 已下线：保存前移除历史遗留字段，避免继续落盘无效元数据。
     try {
       for (const msg of messagesCopy) {
-        const compacted = compactGroundingMetadata(msg?.groundingMetadata);
-        if (compacted.changed) {
-          if (compacted.value == null) delete msg.groundingMetadata;
-          else msg.groundingMetadata = compacted.value;
-        }
+        stripGroundingMetadataFromMessage(msg);
       }
     } catch (e) {
-      console.warn('保存会话时压缩引用元数据失败，已跳过:', e);
+      console.warn('保存会话时清理引用元数据失败，已跳过:', e);
     }
     const timestamps = messagesCopy.map(msg => msg.timestamp);
     const startTime = Math.min(...timestamps);
@@ -9167,116 +9163,19 @@ export function createChatHistoryUI(appContext) {
     return { changed, found, converted, failed };
   }
 
-  // ==== 引用元数据压缩（groundingMetadata）====
-  const GROUNDING_META_KEYS = ['groundingSupports', 'groundingChunks', 'webSearchQueries'];
-  const GROUNDING_SUPPORT_KEYS = ['segment', 'groundingChunkIndices', 'confidenceScores'];
-  const GROUNDING_SEGMENT_KEYS = ['text'];
-  const GROUNDING_CHUNK_KEYS = ['web'];
-  const GROUNDING_WEB_KEYS = ['uri', 'title', 'url'];
-
+  // ==== legacy 引用元数据（groundingMetadata）清理 ====
   /**
-   * 纯函数：压缩 groundingMetadata，只保留引用展示所需字段，避免存储全文检索结果
-   * - 保留：groundingSupports.segment.text、groundingSupports.groundingChunkIndices、confidenceScores
-   * - 保留：groundingChunks[*].web.uri/title（保持索引位置，缺失项置 null）
-   * - 保留：webSearchQueries（字符串数组）
+   * 纯函数：移除消息节点上的 legacy groundingMetadata 字段。
+   * 说明：Gemini grounding 能力已下线，保留该字段只会增加存储体积与迁移负担。
    *
-   * @param {any} meta
-   * @returns {{ value: any, changed: boolean }}
+   * @param {any} message
+   * @returns {boolean} 是否发生变更
    */
-  function compactGroundingMetadata(meta) {
-    if (!meta || typeof meta !== 'object') return { value: meta, changed: false };
-
-    let changed = false;
-    const topKeys = Object.keys(meta || {});
-    for (const key of topKeys) {
-      if (!GROUNDING_META_KEYS.includes(key)) {
-        changed = true;
-        break;
-      }
-    }
-
-    const supportsIn = Array.isArray(meta.groundingSupports) ? meta.groundingSupports : [];
-    const chunksIn = Array.isArray(meta.groundingChunks) ? meta.groundingChunks : [];
-    const queriesIn = Array.isArray(meta.webSearchQueries) ? meta.webSearchQueries : [];
-
-    const supports = supportsIn.map((support) => {
-      if (!support || typeof support !== 'object') {
-        if (support != null) changed = true;
-        return null;
-      }
-      const out = {};
-      if (support.segment && typeof support.segment === 'object') {
-        const text = (typeof support.segment.text === 'string') ? support.segment.text : '';
-        if (text) out.segment = { text };
-        if (Object.keys(support.segment).some(k => !GROUNDING_SEGMENT_KEYS.includes(k))) {
-          changed = true;
-        }
-      } else if (support.segment != null) {
-        changed = true;
-      }
-
-      if (Array.isArray(support.groundingChunkIndices)) {
-        out.groundingChunkIndices = support.groundingChunkIndices.slice();
-      } else if (support.groundingChunkIndices != null) {
-        changed = true;
-      }
-
-      if (Array.isArray(support.confidenceScores)) {
-        out.confidenceScores = support.confidenceScores.slice();
-      } else if (support.confidenceScores != null) {
-        changed = true;
-      }
-
-      if (Object.keys(support).some(k => !GROUNDING_SUPPORT_KEYS.includes(k))) {
-        changed = true;
-      }
-
-      return Object.keys(out).length > 0 ? out : null;
-    });
-
-    const compactSupports = supports.filter(Boolean);
-    if (compactSupports.length !== supportsIn.length) {
-      changed = true;
-    }
-
-    const compactChunks = chunksIn.map((chunk) => {
-      if (!chunk || typeof chunk !== 'object') {
-        if (chunk != null) changed = true;
-        return null;
-      }
-      if (Object.keys(chunk).some(k => !GROUNDING_CHUNK_KEYS.includes(k))) {
-        changed = true;
-      }
-      const web = chunk.web && typeof chunk.web === 'object' ? chunk.web : null;
-      if (!web) return null;
-
-      const uri = (typeof web.uri === 'string') ? web.uri : (typeof web.url === 'string' ? web.url : '');
-      const title = (typeof web.title === 'string') ? web.title : '';
-      if (Object.keys(web).some(k => !GROUNDING_WEB_KEYS.includes(k))) {
-        changed = true;
-      }
-      if (!uri && !title) return null;
-      return { web: { uri, title } };
-    });
-
-    const compactQueries = queriesIn.filter(q => typeof q === 'string' && q.trim());
-    if (compactQueries.length !== queriesIn.length) {
-      changed = true;
-    }
-
-    const hasAny = compactSupports.length > 0 || compactChunks.some(Boolean) || compactQueries.length > 0;
-    if (!hasAny) {
-      return { value: null, changed: true };
-    }
-
-    return {
-      value: {
-        groundingSupports: compactSupports,
-        groundingChunks: compactChunks,
-        webSearchQueries: compactQueries
-      },
-      changed
-    };
+  function stripGroundingMetadataFromMessage(message) {
+    if (!message || typeof message !== 'object') return false;
+    if (!Object.prototype.hasOwnProperty.call(message, 'groundingMetadata')) return false;
+    delete message.groundingMetadata;
+    return true;
   }
 
   /**
@@ -9404,18 +9303,16 @@ export function createChatHistoryUI(appContext) {
   }
 
   /**
-   * 压缩引用元数据（groundingMetadata）：
-   * - 仅保留引用展示所需字段，剔除检索结果全文与冗余字段；
-   * - 不影响正文与引用编号渲染；
-   * - 适用于 Gemini/OpenAI 兼容的引用元信息清理。
+   * 清理历史会话中的 legacy 引用元数据（groundingMetadata）。
+   * 说明：该字段已停止使用，此操作会批量移除它以降低存储体积与序列化开销。
    */
-  async function compactGroundingMetadataInDb() {
-    const sp = utils.createStepProgress({ steps: ['加载会话', '压缩元数据', '完成'], type: 'info' });
+  async function removeGroundingMetadataInDb() {
+    const sp = utils.createStepProgress({ steps: ['加载会话', '清理元数据', '完成'], type: 'info' });
     sp.setStep(0);
 
     const metas = await getAllConversationMetadata();
     const total = metas.length || 1;
-    sp.next('压缩元数据');
+    sp.next('清理元数据');
 
     let updatedConversations = 0;
     let updatedMessages = 0;
@@ -9426,11 +9323,7 @@ export function createChatHistoryUI(appContext) {
 
       if (conv && Array.isArray(conv.messages)) {
         for (const msg of conv.messages) {
-          if (!msg || msg.groundingMetadata == null) continue;
-          const compacted = compactGroundingMetadata(msg.groundingMetadata);
-          if (compacted.changed) {
-            if (compacted.value == null) delete msg.groundingMetadata;
-            else msg.groundingMetadata = compacted.value;
+          if (stripGroundingMetadataFromMessage(msg)) {
             convChanged = true;
             updatedMessages += 1;
           }
@@ -9445,7 +9338,7 @@ export function createChatHistoryUI(appContext) {
         updatedConversations += 1;
       }
       try {
-        sp?.updateSub?.(i + 1, total, `压缩元数据 (${i + 1}/${total})`);
+        sp?.updateSub?.(i + 1, total, `清理元数据 (${i + 1}/${total})`);
       } catch (_) {}
     }
 
@@ -9471,7 +9364,6 @@ export function createChatHistoryUI(appContext) {
   ];
   const META_JSON_FIELDS = [
     'tool_calls',
-    'groundingMetadata',
     'promptMeta',
     'pageMeta'
   ];
@@ -10556,7 +10448,7 @@ export function createChatHistoryUI(appContext) {
 
     const compactMetaBtn = document.createElement('button');
     compactMetaBtn.className = 'backup-button';
-    compactMetaBtn.textContent = '压缩引用元数据';
+    compactMetaBtn.textContent = '清理引用元数据（legacy）';
     cleanupButtons.appendChild(compactMetaBtn);
 
     cleanupSection.appendChild(cleanupButtons);
@@ -10569,7 +10461,7 @@ export function createChatHistoryUI(appContext) {
 
     const compactMetaHint = document.createElement('div');
     compactMetaHint.className = 'backup-panel-hint';
-    compactMetaHint.textContent = '仅保留引用展示所需字段，剔除检索结果全文，适合元数据膨胀时使用。';
+    compactMetaHint.textContent = '移除历史会话中的 groundingMetadata 遗留字段，不影响正文与思考显示。';
     cleanupSection.appendChild(compactMetaHint);
 
     const signatureSection = document.createElement('div');
@@ -10871,37 +10763,37 @@ export function createChatHistoryUI(appContext) {
       let confirmed = true;
       if (typeof confirmFn === 'function') {
         confirmed = await confirmFn({
-          message: '确认压缩引用元数据？',
-          description: '该操作会剔除检索结果全文，仅保留引用展示必要字段，可显著降低元数据体积。',
-          confirmText: '开始压缩',
+          message: '确认清理 legacy 引用元数据？',
+          description: '该操作会删除 groundingMetadata 字段，用于清理历史遗留数据。',
+          confirmText: '开始清理',
           cancelText: '取消',
           type: 'warning'
         });
       } else {
-        confirmed = window.confirm('将压缩引用元数据，仅保留必要字段，是否继续？');
+        confirmed = window.confirm('将清理 groundingMetadata 遗留字段，是否继续？');
       }
       if (!confirmed) return;
 
       const originalText = compactMetaBtn.textContent;
       compactMetaBtn.disabled = true;
-      compactMetaBtn.textContent = '压缩中...';
+      compactMetaBtn.textContent = '清理中...';
       try {
-        const result = await compactGroundingMetadataInDb();
+        const result = await removeGroundingMetadataInDb();
         const summary = [
           `扫描 ${result.scannedConversations} 会话`,
           `更新 ${result.updatedConversations} 会话`,
           `更新 ${result.updatedMessages} 消息`
         ].join('；');
         showNotification?.({
-          message: '引用元数据压缩完成',
+          message: '引用元数据清理完成',
           description: summary,
           type: 'success',
           duration: 4200
         });
       } catch (error) {
-        console.error('压缩引用元数据失败:', error);
+        console.error('清理引用元数据失败:', error);
         showNotification?.({
-          message: '压缩引用元数据失败',
+          message: '清理引用元数据失败',
           description: String(error?.message || error),
           type: 'error',
           duration: 3200

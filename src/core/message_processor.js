@@ -9,7 +9,6 @@
  * @param {HTMLElement} appContext.dom.chatContainer - 聊天容器元素
  * @param {Object} appContext.services.chatHistoryManager - 聊天历史管理器
  * @param {Function} appContext.services.imageHandler.processImageTags - 处理图片标签的函数
- * @param {boolean} [appContext.settingsManager.getSetting('showReference')=true] - 是否显示引用标记
  * @returns {Object} 消息处理API
  */
 import { renderMarkdownSafe } from '../utils/markdown_renderer.js';
@@ -183,10 +182,7 @@ export function createMessageProcessor(appContext) {
 
     const uniqueContainers = Array.from(new Set(containers));
     uniqueContainers.forEach((container) => {
-      container.querySelectorAll('a:not(.reference-number)').forEach((link) => {
-        // 跳过引用 tooltip 内的链接：它们由引用系统生成，保留其原有行为。
-        if (link.closest('.reference-tooltip')) return;
-
+      container.querySelectorAll('a').forEach((link) => {
         const rawHref = link.getAttribute('href') || '';
         const policy = getMarkdownLinkPolicy(rawHref, linkContext);
         const isSamePage = policy.target === '_top';
@@ -230,7 +226,6 @@ export function createMessageProcessor(appContext) {
       if (!target || typeof target.closest !== 'function') return;
       const link = target.closest('a');
       if (!link) return;
-      if (link.classList.contains('reference-number') || link.closest('.reference-tooltip')) return;
       if (link.dataset.cerebrSamePage !== 'true') return;
       if (link.dataset.cerebrTextFragment !== 'true') return;
 
@@ -930,9 +925,8 @@ export function createMessageProcessor(appContext) {
    * @param {string} messageId - 要更新的消息的ID
    * @param {string} newAnswerContent - 最新的完整答案文本
    * @param {string|null} newThoughtsRaw - 最新的完整思考过程原始文本 (可选)
-   * @param {Object|null} groundingMetadata - 引用元数据对象，包含引用信息
    */
-  function updateAIMessage(messageId, newAnswerContent, newThoughtsRaw, groundingMetadata) {
+  function updateAIMessage(messageId, newAnswerContent, newThoughtsRaw) {
     const messageDiv = resolveMessageElement(messageId);
     const node = chatHistoryManager.chatHistory.messages.find(msg => msg.id === messageId);
 
@@ -979,9 +973,6 @@ export function createMessageProcessor(appContext) {
     if (shouldUpdateThoughts) { // 允许显式将思考过程设置为 null/空字符串
       node.thoughtsRaw = resolvedThoughts;
     }
-    if (groundingMetadata !== undefined) {
-      node.groundingMetadata = groundingMetadata || null;
-    }
 
     // 线程切换/面板关闭时可能找不到 DOM，仍需保证历史数据完整。
     if (!messageDiv) {
@@ -1008,19 +999,7 @@ export function createMessageProcessor(appContext) {
         }
     }
     
-    let processedText = safeAnswerContent;
-    let htmlElements = [];
-    let processedResult = safeAnswerContent;
-
-    if (groundingMetadata) {
-      processedResult = addGroundingToMessage(safeAnswerContent, groundingMetadata);
-      if (typeof processedResult === 'object') {
-        processedText = processedResult.text;
-        htmlElements = processedResult.htmlElements;
-      }
-    }
-
-    textContentDiv.innerHTML = processMathAndMarkdown(processedText);
+    textContentDiv.innerHTML = processMathAndMarkdown(safeAnswerContent);
 
     decorateMarkdownLinks(messageDiv);
 
@@ -1030,21 +1009,6 @@ export function createMessageProcessor(appContext) {
 
     bindInlineImagePreviews(messageDiv);
 
-    if (groundingMetadata) {
-      if (htmlElements && htmlElements.length > 0) {
-        htmlElements.forEach(element => {
-          const placeholder = element.placeholder;
-          const html = element.html;
-          textContentDiv.innerHTML = textContentDiv.innerHTML.replace(placeholder, html);
-        });
-      }
-      textContentDiv.innerHTML = textContentDiv.innerHTML.replace(/\u200B😎REF_\d+😎\u200B/g, '');
-      if (typeof processedResult === 'object' && processedResult.sources && processedResult.sources.length > 0) {
-        // Ensure renderSourcesList appends to textContentDiv or an appropriate container within messageDiv
-        const sourcesContainer = messageDiv.querySelector('.sources-list-container') || textContentDiv; 
-        renderSourcesList(sourcesContainer, processedResult, groundingMetadata);
-      }
-    }
     try {
       services.selectionThreadManager?.decorateMessageElement?.(messageDiv, node);
     } catch (e) {
@@ -1052,299 +1016,6 @@ export function createMessageProcessor(appContext) {
     }
     scrollToBottom(resolveScrollContainerForMessage(messageDiv));
     messageVirtualizer.scheduleUpdate(resolveMessageListContainer(messageDiv));
-  }
-
-  /**
-   * 为消息添加引用标记和来源信息
-   * @param {string} text - 原始消息文本
-   * @param {Object} groundingMetadata - 引用元数据对象
-   * @returns {(string|Object)} 处理后的结果对象或原文本
-   */
-  function addGroundingToMessage(text, groundingMetadata) {
-    if (!groundingMetadata?.groundingSupports) return text;
-
-    // Dynamically get showReference setting
-    const showReferenceSetting = appContext.services.settingsManager.getSetting('showReference');
-
-    let markedText = text;
-    const htmlElements = [];
-    const orderedSources = [];
-    const webSearchQueries = groundingMetadata.webSearchQueries || [];
-
-    // 创建URL到引用编号的映射
-    const urlToRefNumber = new Map();
-    let nextRefNumber = 1;
-
-    // 记录每个文本片段在原文中的位置
-    const textPositions = groundingMetadata.groundingSupports
-        .filter(support => support.segment?.text)
-        .map(support => {
-            const pos = text.indexOf(support.segment.text);
-            return {
-                support,
-                position: pos >= 0 ? pos : Number.MAX_SAFE_INTEGER
-            };
-        })
-        .sort((a, b) => a.position - b.position);
-
-    textPositions.forEach(({ support }, index) => {
-        const placeholder = `\u200B😎REF_${index}😎\u200B`;
-
-        // 转义正则表达式特殊字符
-        const escapedText = support.segment.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(escapedText, 'g');
-
-        // 收集该文本片段的所有引用源和对应的置信度
-        const sourceRefs = [];
-        if (support.groundingChunkIndices?.length > 0) {
-            support.groundingChunkIndices.forEach((chunkIndex, idx) => {
-                // Check if groundingChunks exists and if chunkIndex is valid
-                const chunk = (groundingMetadata.groundingChunks && groundingMetadata.groundingChunks[chunkIndex]) 
-                                ? groundingMetadata.groundingChunks[chunkIndex] 
-                                : null;
-                const confidence = support.confidenceScores?.[idx] || 0;
-
-                if (chunk?.web) {
-                    const url = chunk.web.uri;
-                    if (!urlToRefNumber.has(url)) {
-                        urlToRefNumber.set(url, nextRefNumber++);
-                    }
-                    sourceRefs.push({
-                        refNumber: urlToRefNumber.get(url),
-                        title: chunk.web.title,
-                        url: url,
-                        confidence: confidence
-                    });
-                }
-            });
-        }
-
-        // 按引用编号排序
-        sourceRefs.sort((a, b) => a.refNumber - b.refNumber);
-
-        // 生成引用标记
-        const refMark = sourceRefs.map(ref =>
-            `<a href="${encodeURI(ref.url)}" 
-                class="reference-number superscript" 
-                target="_blank" 
-                data-ref-number="${ref.refNumber}"
-                >[${ref.refNumber}]</a>`
-        ).join('');
-
-        // 构建包含所有源信息的tooltip
-        const tooltipContent = `
-            <span class="reference-tooltip">
-                ${sourceRefs.map(ref => `
-                    <span class="reference-source">
-                        <span class="ref-number">[${ref.refNumber}]</span>
-                        <a href="${encodeURI(ref.url)}" target="_blank">${ref.title}</a>
-                        <span class="confidence">${(ref.confidence * 100).toFixed(1)}%</span>
-                    </span>
-                `).join('')}
-            </span>
-        `;
-
-        // 包装引用标记组
-        const refGroup = `
-            <span class="reference-mark-group">
-                ${refMark}
-                <span class="reference-tooltip-wrapper">${tooltipContent}</span>
-            </span>
-        `;
-
-        if (showReferenceSetting) {
-            // 替换文本并添加引用标记
-            markedText = markedText.replace(regex, `$&${placeholder}`);
-            htmlElements.push({
-                placeholder,
-                html: refGroup
-            });
-        }
-
-        // 添加到有序来源列表
-        sourceRefs.forEach(ref => {
-            if (!orderedSources.some(s => s.refNumber === ref.refNumber)) {
-                orderedSources.push({
-                    refNumber: ref.refNumber,
-                    domain: ref.title,
-                    url: ref.url
-                });
-            }
-        });
-    });
-
-    return {
-        text: markedText,
-        htmlElements,
-        sources: orderedSources.sort((a, b) => a.refNumber - b.refNumber),
-        webSearchQueries
-    };
-  }
-  /**
-   * 渲染来源列表
-   * @param {HTMLElement} messageElement - 消息元素
-   * @param {Object} processedResult - 处理后的结果对象
-   * @param {Object} groundingMetadata - 引用元数据
-   */
-  function renderSourcesList(messageElement, processedResult, groundingMetadata) {
-    // 创建并添加引用来源列表
-    const sourcesList = document.createElement('div');
-    sourcesList.className = 'sources-list';
-
-    // 创建可折叠的标题
-    const titleContainer = document.createElement('div');
-    titleContainer.className = 'sources-title-container';
-    titleContainer.innerHTML = `
-      <h4 class="sources-title">
-        <span class="expand-icon">▶</span> 
-        参考来源 (${processedResult.sources.length})
-      </h4>
-    `;
-
-    const sourcesContent = document.createElement('div');
-    sourcesContent.className = 'sources-content';
-    sourcesContent.style.display = 'none'; // 默认隐藏
-
-    const ul = document.createElement('ul');
-
-    // 计算每个来源的平均置信度
-    const sourceConfidences = new Map();
-    const sourceConfidenceCounts = new Map();
-
-    groundingMetadata.groundingSupports.forEach(support => {
-      if (support.groundingChunkIndices && support.confidenceScores) {
-        support.groundingChunkIndices.forEach((chunkIndex, idx) => {
-          const chunk = groundingMetadata.groundingChunks[chunkIndex];
-          const confidence = support.confidenceScores[idx] || 0;
-
-          if (chunk?.web?.uri) {
-            const url = chunk.web.uri;
-            sourceConfidences.set(url, (sourceConfidences.get(url) || 0) + confidence);
-            sourceConfidenceCounts.set(url, (sourceConfidenceCounts.get(url) || 0) + 1);
-          }
-        });
-      }
-    });
-
-    processedResult.sources.forEach(source => {
-      const li = document.createElement('li');
-      const totalConfidence = sourceConfidences.get(source.url) || 0;
-      const count = sourceConfidenceCounts.get(source.url) || 1;
-      const avgConfidence = (totalConfidence / count) * 100;
-
-      // 创建置信度进度条容器
-      const confidenceBar = document.createElement('div');
-      confidenceBar.className = 'confidence-bar';
-
-      // 创建进度条
-      const progressBar = document.createElement('div');
-      progressBar.className = 'progress-bar';
-      progressBar.style.width = `${avgConfidence}%`;
-
-      // 添加进度条到容器
-      confidenceBar.appendChild(progressBar);
-
-      // 收集该来源的所有匹配文本和置信度
-      const matchingTexts = [];
-      groundingMetadata.groundingSupports.forEach(support => {
-        if (support.groundingChunkIndices && support.confidenceScores) {
-          support.groundingChunkIndices.forEach((chunkIndex, idx) => {
-            const chunk = groundingMetadata.groundingChunks[chunkIndex];
-            if (chunk?.web?.uri === source.url) {
-              matchingTexts.push({
-                text: support.segment.text,
-                confidence: support.confidenceScores[idx] * 100
-              });
-            }
-          });
-        }
-      });
-
-      // 创建悬浮提示内容
-      const tooltipContent = matchingTexts.map(match =>
-        `<div class="match-item">
-          <div class="match-text">${match.text}</div>
-          <div class="match-confidence">${match.confidence.toFixed(1)}%</div>
-        </div>`
-      ).join('');
-
-      li.innerHTML = `
-        <div class="source-item">
-          <div class="source-info">
-            [${source.refNumber}] <a href="${encodeURI(source.url)}" target="_blank">${source.domain}</a>
-            <span class="confidence-text">
-              ${avgConfidence.toFixed(1)}% (${count}次引用)
-            </span>
-          </div>
-          <div class="source-tooltip">
-            <div class="tooltip-content">
-              <h4>匹配内容：</h4>
-              ${tooltipContent}
-            </div>
-          </div>
-        </div>
-      `;
-
-      // 新增：添加点击事件，使点击 .confidence-text 打开对应网页
-      const confidenceTextElem = li.querySelector('.confidence-text');
-      if (confidenceTextElem) {
-        confidenceTextElem.style.cursor = 'pointer';
-        confidenceTextElem.addEventListener('click', () => {
-          window.open(source.url, '_blank');
-        });
-      }
-
-      // 将进度条插入到source-item中
-      const sourceItem = li.querySelector('.source-item');
-      sourceItem.appendChild(confidenceBar);
-
-      ul.appendChild(li);
-    });
-
-    // 添加点击事件处理展开/收起
-    titleContainer.addEventListener('click', () => {
-      const expandIcon = titleContainer.querySelector('.expand-icon');
-      const isExpanded = sourcesContent.style.display !== 'none';
-      
-      expandIcon.textContent = isExpanded ? '▶' : '▼';
-      sourcesContent.style.display = isExpanded ? 'none' : 'block';
-    });
-
-    sourcesList.appendChild(titleContainer);
-    sourcesList.appendChild(sourcesContent);
-    sourcesContent.appendChild(ul);
-
-    messageElement.appendChild(sourcesList);
-
-    // 添加Web搜索查询部分(如果存在)
-    if (processedResult.webSearchQueries && processedResult.webSearchQueries.length > 0) {
-      renderWebSearchQueries(messageElement, processedResult.webSearchQueries);
-    }
-  }
-
-  /**
-   * 渲染Web搜索查询列表
-   * @param {HTMLElement} messageElement - 消息元素
-   * @param {Array<string>} queries - 查询列表 
-   */
-  function renderWebSearchQueries(messageElement, queries) {
-    const searchQueriesList = document.createElement('div');
-    searchQueriesList.className = 'search-queries-list';
-    searchQueriesList.innerHTML = '<h4>搜索查询：</h4>';
-    const ul = document.createElement('ul');
-
-    queries.forEach(query => {
-      const li = document.createElement('li');
-      li.textContent = query;
-      li.addEventListener('click', () => {
-        const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-        window.open(searchUrl, '_blank');
-      });
-      ul.appendChild(li);
-    });
-
-    searchQueriesList.appendChild(ul);
-    messageElement.appendChild(searchQueriesList);
   }
 
   function bindInlineImagePreviews(container) {
@@ -1381,14 +1052,8 @@ export function createMessageProcessor(appContext) {
       const historyNode = chatHistoryManager?.chatHistory?.messages?.find(msg => msg.id === messageId);
       if (!historyNode) return;
 
-      const hasRefsWithoutMetadata = !historyNode.groundingMetadata && messageDiv.querySelector('.reference-number');
-      if (hasRefsWithoutMetadata) {
-        console.warn('跳过重新渲染以避免丢失引用信息:', messageId);
-        return;
-      }
-
       try {
-        updateAIMessage(messageId, originalText, historyNode.thoughtsRaw ?? null, historyNode.groundingMetadata ?? null);
+        updateAIMessage(messageId, originalText, historyNode.thoughtsRaw ?? null);
       } catch (error) {
         console.error('重新渲染消息失败:', messageId, error);
       }
@@ -1534,7 +1199,6 @@ export function createMessageProcessor(appContext) {
     updateAIMessage,
     processMathAndMarkdown,
     decorateMarkdownLinks,
-    addGroundingToMessage,
     getPromptTypeFromContent,
     extractSystemContent
   };

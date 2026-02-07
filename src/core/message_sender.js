@@ -2987,7 +2987,7 @@ export function createMessageSender(appContext) {
       }
     }
 
-    const promoteLoadingMessageToAi = ({ answer, thoughts, groundingMetadata }) => {
+    const promoteLoadingMessageToAi = ({ answer, thoughts }) => {
       if (!loadingMessage || !loadingMessage.parentNode) return null;
       const shouldRenderDom = !threadContext || isThreadUiActive(threadContext);
       if (!shouldRenderDom) return null;
@@ -3016,7 +3016,7 @@ export function createMessageSender(appContext) {
       try { loadingMessage.classList.add('ai-message'); } catch (_) {}
       loadingMessage.textContent = '';
       loadingMessage.removeAttribute('title');
-      messageProcessor.updateAIMessage(node.id, answer || '', thoughts || '', groundingMetadata);
+      messageProcessor.updateAIMessage(node.id, answer || '', thoughts || '');
       applyApiMetaToMessage(node.id, usedApiConfig, loadingMessage);
       updateThreadLastMessage(threadContext, node.id);
       return node.id;
@@ -3071,12 +3071,11 @@ export function createMessageSender(appContext) {
 	          ? captureReadingAnchorForRegenerate(regenContainer, payload.messageId, attemptState)
 	          : null;
 	        try {
-	          messageProcessor.updateAIMessage(
-	            payload.messageId,
-	            payload.answer || '',
-	            payload.thoughts || '',
-	            payload.groundingMetadata
-	          );
+          messageProcessor.updateAIMessage(
+            payload.messageId,
+            payload.answer || '',
+            payload.thoughts || ''
+          );
 	        } finally {
 	          if (regenContainer) {
 	            restoreReadingAnchor(regenContainer, anchor);
@@ -3243,7 +3242,6 @@ export function createMessageSender(appContext) {
       // 本事件的增量内容
       let currentEventAnswerDelta = '';
       let currentEventThoughtsDelta = '';
-      let groundingMetadata = null;
       const newInlineImages = [];
 
       if (data.candidates && data.candidates.length > 0) {
@@ -3309,7 +3307,6 @@ export function createMessageSender(appContext) {
             }
           }
         }
-        groundingMetadata = candidate.groundingMetadata;
       }
 
       // 将本事件中的图片转为内联 img 元素，直接插入到答案增量中
@@ -3363,12 +3360,11 @@ export function createMessageSender(appContext) {
 	            ? captureReadingAnchorForRegenerate(regenContainer, currentAiMessageId, attemptState)
 	            : null;
 	          try {
-	            messageProcessor.updateAIMessage(
-	              currentAiMessageId,
-	              aiResponse,
-	              aiThoughtsRaw,
-	              groundingMetadata
-	            );
+            messageProcessor.updateAIMessage(
+              currentAiMessageId,
+              aiResponse,
+              aiThoughtsRaw
+            );
 	            if (!hasClearedBoundSignatureForRegenerate) {
 	              hasClearedBoundSignatureForRegenerate = clearBoundSignatureForRegenerate(currentAiMessageId, attemptState);
 	            }
@@ -3388,8 +3384,7 @@ export function createMessageSender(appContext) {
           if (loadingMessage && loadingMessage.parentNode) {
             promotedId = promoteLoadingMessageToAi({
               answer: aiResponse,
-              thoughts: aiThoughtsRaw,
-              groundingMetadata
+              thoughts: aiThoughtsRaw
             });
           }
           if (promotedId) {
@@ -3471,14 +3466,13 @@ export function createMessageSender(appContext) {
 	        }
 
 	        uiUpdateThrottler.enqueue(
-	          {
-	            messageId: currentAiMessageId,
-	            answer: aiResponse,
-	            thoughts: aiThoughtsRaw,
-	            groundingMetadata
-	          },
-	          { force: forceUiUpdate }
-	        );
+          {
+            messageId: currentAiMessageId,
+            answer: aiResponse,
+            thoughts: aiThoughtsRaw
+          },
+          { force: forceUiUpdate }
+        );
 	        // scrollToBottom() 在 updateAIMessage 内部调用
 	      }
     }
@@ -3747,14 +3741,13 @@ export function createMessageSender(appContext) {
 	              }
 
 	              uiUpdateThrottler.enqueue(
-	                {
-	                  messageId: currentAiMessageId,
-	                  answer: aiResponse,
-	                  thoughts: aiThoughtsRaw,
-	                  groundingMetadata: null
-	                },
-	                { force: forceUiUpdate }
-	              );
+                  {
+                    messageId: currentAiMessageId,
+                    answer: aiResponse,
+                    thoughts: aiThoughtsRaw
+                  },
+                  { force: forceUiUpdate }
+                );
 	              // scrollToBottom() 会在 updateAIMessage 内部被调用，这里无需重复调用
 	          }
       }
@@ -3875,7 +3868,7 @@ export function createMessageSender(appContext) {
       try { loadingMessage.classList.add('ai-message'); } catch (_) {}
       loadingMessage.textContent = '';
       loadingMessage.removeAttribute('title');
-      messageProcessor.updateAIMessage(node.id, answer || '', thoughts || '', null);
+      messageProcessor.updateAIMessage(node.id, answer || '', thoughts || '');
       applyApiMetaToMessage(node.id, usedApiConfig, loadingMessage);
       updateThreadLastMessage(threadContext, node.id);
       return node.id;
@@ -4058,7 +4051,7 @@ export function createMessageSender(appContext) {
             ? captureReadingAnchorForRegenerate(regenContainer, existingMessageId, attemptState)
             : null;
           try {
-            messageProcessor.updateAIMessage(existingMessageId, answer || '', thoughts || '', null);
+            messageProcessor.updateAIMessage(existingMessageId, answer || '', thoughts || '');
             // 重新生成（原地替换）：一旦开始写回新内容，旧签名就不再匹配，必须先清空
             clearBoundSignatureForRegenerate(existingMessageId, attemptState);
             applyApiMetaToMessage(existingMessageId, usedApiConfig, existingEl);
