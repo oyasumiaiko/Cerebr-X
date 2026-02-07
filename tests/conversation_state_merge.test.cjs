@@ -83,3 +83,78 @@ test('mergeConversationApiLockState clears lock when preserve is disabled and me
   assert.equal(result.source, 'none');
   assert.equal(result.apiLock, null);
 });
+
+test('mergeConversationSaveMetadataState keeps start-page metadata for new conversation', async () => {
+  const { mergeConversationSaveMetadataState } = await loadMergeRulesModule();
+
+  const result = mergeConversationSaveMetadataState({
+    isUpdate: false,
+    startPageMeta: { url: ' https://example.com ', title: ' 首页 ' },
+    summaryCandidate: '自动摘要'
+  });
+
+  assert.deepEqual(result, {
+    urlToSave: 'https://example.com',
+    titleToSave: '首页',
+    summaryToSave: '自动摘要',
+    summarySourceToSave: 'default',
+    parentConversationIdToSave: null,
+    forkedFromMessageIdToSave: null
+  });
+});
+
+test('mergeConversationSaveMetadataState preserves existing summary and branch metadata on update', async () => {
+  const { mergeConversationSaveMetadataState } = await loadMergeRulesModule();
+
+  const result = mergeConversationSaveMetadataState({
+    isUpdate: true,
+    startPageMeta: { url: 'https://new.example', title: '新标题' },
+    summaryCandidate: '新自动摘要',
+    summaryFromExistingTitle: '按旧标题重算',
+    existingConversation: {
+      url: ' https://old.example ',
+      title: ' 旧标题 ',
+      summary: '用户手动命名',
+      summarySource: ' manual ',
+      parentConversationId: ' parent-1 ',
+      forkedFromMessageId: ' msg-1 '
+    }
+  });
+
+  assert.deepEqual(result, {
+    urlToSave: 'https://old.example',
+    titleToSave: '旧标题',
+    summaryToSave: '用户手动命名',
+    summarySourceToSave: 'manual',
+    parentConversationIdToSave: 'parent-1',
+    forkedFromMessageIdToSave: 'msg-1'
+  });
+});
+
+test('mergeConversationSaveMetadataState uses summaryFromExistingTitle when existing summary is empty', async () => {
+  const { mergeConversationSaveMetadataState } = await loadMergeRulesModule();
+
+  const result = mergeConversationSaveMetadataState({
+    isUpdate: true,
+    startPageMeta: { url: 'https://new.example', title: '新标题' },
+    summaryCandidate: '新自动摘要',
+    summaryFromExistingTitle: '按旧标题重算',
+    existingConversation: {
+      url: 'https://old.example',
+      title: '旧标题',
+      summary: '',
+      summarySource: '   ',
+      parentConversationId: '',
+      forkedFromMessageId: ''
+    }
+  });
+
+  assert.deepEqual(result, {
+    urlToSave: 'https://old.example',
+    titleToSave: '旧标题',
+    summaryToSave: '按旧标题重算',
+    summarySourceToSave: null,
+    parentConversationIdToSave: null,
+    forkedFromMessageIdToSave: null
+  });
+});

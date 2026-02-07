@@ -21,7 +21,11 @@ import { extractThinkingFromText, mergeThoughts } from '../utils/thoughts_parser
 import { generateCandidateUrls } from '../utils/url_candidates.js';
 import { buildConversationSummaryFromMessages } from '../utils/conversation_title.js';
 import { normalizeStoredMessageContent, splitStoredMessageContent } from '../utils/message_content.js';
-import { normalizeConversationApiLock, mergeConversationApiLockState } from './conversation_state_merge.js';
+import {
+  normalizeConversationApiLock,
+  mergeConversationApiLockState,
+  mergeConversationSaveMetadataState
+} from './conversation_state_merge.js';
 
 /**
  * 创建聊天历史UI管理器
@@ -1916,20 +1920,13 @@ export function createChatHistoryUI(appContext) {
       maxLength: 160
     });
 
-    let urlToSave = '';
-    let titleToSave = '';
-    let summaryToSave = summary;
-    let summarySourceToSave = isUpdate ? null : 'default';
-    // 分支元信息：仅在更新已有会话时需要“继承”下来，避免分支关系被覆盖丢失
-    let parentConversationIdToSave = null;
-    let forkedFromMessageIdToSave = null;
+    // 会话元数据合并前置输入：
+    // - startPageMeta/summary 代表当前内存态计算结果；
+    // - existingConversationSnapshot/summaryFromExistingTitle 代表已存储态补充信息。
+    let summaryFromExistingTitle = '';
     // 会话固定 API：先快照“内存态”，后续与“已存储态”通过纯函数合并。
     const memoryApiLockSnapshot = normalizeConversationApiLock(activeConversationApiLock || activeConversation?.apiLock);
     let existingConversationSnapshot = null;
-    
-    // 默认使用“会话起始页”的页面元数据（首条用户消息冻结的 pageMeta）
-    urlToSave = startPageMeta.url || '';
-    titleToSave = startPageMeta.title || '';
 
     // 如果是更新操作并且已存在记录，则固定使用首次保存的 url 和 title
     if (isUpdate && currentConversationId) {
@@ -1938,26 +1935,9 @@ export function createChatHistoryUI(appContext) {
         const existingConversation = await getConversationById(currentConversationId, false);
         if (existingConversation) {
           existingConversationSnapshot = existingConversation;
-          urlToSave = existingConversation.url || '';
-          titleToSave = existingConversation.title || '';
-          summarySourceToSave = (typeof existingConversation.summarySource === 'string' && existingConversation.summarySource.trim())
-            ? existingConversation.summarySource.trim()
-            : null;
-
-          // 继承分支关系字段（如果存在）
-          if (typeof existingConversation.parentConversationId === 'string' && existingConversation.parentConversationId.trim()) {
-            parentConversationIdToSave = existingConversation.parentConversationId.trim();
-          }
-          if (typeof existingConversation.forkedFromMessageId === 'string' && existingConversation.forkedFromMessageId.trim()) {
-            forkedFromMessageIdToSave = existingConversation.forkedFromMessageId.trim();
-          }
-
-          // 如果原有摘要存在，则保留原有摘要，避免覆盖用户手动重命名的摘要
-          if (existingConversation.summary) {
-            summaryToSave = existingConversation.summary;
-          } else if (existingConversation.title) {
-            // 若用户未手动改名，且该会话已有固定 title，则用固定 title 重算摘要（避免用到“当前标签页标题”）
-            summaryToSave = buildConversationSummaryFromMessages(messagesCopy, {
+          // 若用户未手动改名，且该会话已有固定 title，则用固定 title 重算摘要（避免用到“当前标签页标题”）
+          if (!existingConversation.summary && existingConversation.title) {
+            summaryFromExistingTitle = buildConversationSummaryFromMessages(messagesCopy, {
               promptsConfig,
               pageTitle: existingConversation.title || '',
               maxLength: 160
@@ -1970,9 +1950,25 @@ export function createChatHistoryUI(appContext) {
     } else {
       console.log(
         `首次保存会话，使用${startPageMeta.source === 'first_user_message' ? '首条用户消息的页面快照' : '当前页面信息'}: ` +
-        `URL=${urlToSave}, 标题=${titleToSave}`
+        `URL=${startPageMeta.url || ''}, 标题=${startPageMeta.title || ''}`
       );
     }
+
+    const metadataMerge = mergeConversationSaveMetadataState({
+      isUpdate,
+      startPageMeta,
+      summaryCandidate: summary,
+      existingConversation: existingConversationSnapshot,
+      summaryFromExistingTitle
+    });
+    const {
+      urlToSave,
+      titleToSave,
+      summaryToSave,
+      summarySourceToSave,
+      parentConversationIdToSave,
+      forkedFromMessageIdToSave
+    } = metadataMerge;
 
     // 统一 API 锁定合并规则：
     // - memory 优先；
@@ -11155,12 +11151,17 @@ export function createChatHistoryUI(appContext) {
         return text.endsWith(branchSuffix) ? text : `${text}${branchSuffix}`;
       };
       let parentSummary = '';
+      let parentConversationSnapshot = null;
       if (parentConversationId && activeConversation?.id === parentConversationId) {
+        parentConversationSnapshot = activeConversation;
         parentSummary = (typeof activeConversation.summary === 'string') ? activeConversation.summary.trim() : '';
       }
       if (!parentSummary && parentConversationId) {
         try {
           const parentConversation = await getConversationFromCacheOrLoad(parentConversationId, false);
+          if (parentConversation) {
+            parentConversationSnapshot = parentConversation;
+          }
           parentSummary = (typeof parentConversation?.summary === 'string') ? parentConversation.summary.trim() : '';
         } catch (_) {
           parentSummary = '';
@@ -11176,7 +11177,13 @@ export function createChatHistoryUI(appContext) {
         });
         summary = baseSummary ? `${baseSummary}${branchSuffix}` : '分支对话';
       }
-      const apiLockToSave = normalizeConversationApiLock(activeConversationApiLock || activeConversation?.apiLock);
+      // 分支会话也复用统一合并规则，避免父会话锁定在不同入口下出现不一致行为。
+      const branchApiLockMerge = mergeConversationApiLockState({
+        memoryApiLock: normalizeConversationApiLock(activeConversationApiLock || activeConversation?.apiLock),
+        storedApiLock: parentConversationSnapshot?.apiLock,
+        preserveExistingApiLock: true
+      });
+      const apiLockToSave = branchApiLockMerge.apiLock;
       
       // 创建新的会话对象
       const newConversation = {

@@ -53,3 +53,76 @@ export function mergeConversationApiLockState(input = {}) {
 
   return { apiLock: null, source: 'none' };
 }
+
+function normalizeOptionalTrimmedString(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim();
+}
+
+/**
+ * 合并会话保存时的元数据状态（纯函数）。
+ *
+ * 说明：
+ * - 该函数只处理“值选择”与“字段继承规则”，不触发任何 IO/副作用；
+ * - 适用于 saveCurrentConversation 等需要在“内存态 + 已存储态”之间做一致性合并的场景。
+ *
+ * @param {{
+ *   isUpdate?: boolean,
+ *   startPageMeta?: { url?: string, title?: string },
+ *   summaryCandidate?: string,
+ *   existingConversation?: any,
+ *   summaryFromExistingTitle?: string
+ * }} [input]
+ * @returns {{
+ *   urlToSave: string,
+ *   titleToSave: string,
+ *   summaryToSave: string,
+ *   summarySourceToSave: string|null,
+ *   parentConversationIdToSave: string|null,
+ *   forkedFromMessageIdToSave: string|null
+ * }}
+ */
+export function mergeConversationSaveMetadataState(input = {}) {
+  const isUpdate = input?.isUpdate === true;
+  const startPageMeta = input?.startPageMeta || {};
+  const existingConversation = input?.existingConversation || null;
+  const summaryCandidate = (typeof input?.summaryCandidate === 'string') ? input.summaryCandidate : '';
+  const summaryFromExistingTitle = (typeof input?.summaryFromExistingTitle === 'string')
+    ? input.summaryFromExistingTitle
+    : '';
+
+  let urlToSave = normalizeOptionalTrimmedString(startPageMeta?.url);
+  let titleToSave = normalizeOptionalTrimmedString(startPageMeta?.title);
+  let summaryToSave = summaryCandidate;
+  let summarySourceToSave = isUpdate ? null : 'default';
+  let parentConversationIdToSave = null;
+  let forkedFromMessageIdToSave = null;
+
+  if (isUpdate && existingConversation && typeof existingConversation === 'object') {
+    urlToSave = normalizeOptionalTrimmedString(existingConversation.url);
+    titleToSave = normalizeOptionalTrimmedString(existingConversation.title);
+
+    const summarySource = normalizeOptionalTrimmedString(existingConversation.summarySource);
+    summarySourceToSave = summarySource || null;
+
+    const parentConversationId = normalizeOptionalTrimmedString(existingConversation.parentConversationId);
+    const forkedFromMessageId = normalizeOptionalTrimmedString(existingConversation.forkedFromMessageId);
+    parentConversationIdToSave = parentConversationId || null;
+    forkedFromMessageIdToSave = forkedFromMessageId || null;
+
+    if (existingConversation.summary) {
+      summaryToSave = existingConversation.summary;
+    } else if (existingConversation.title) {
+      summaryToSave = summaryFromExistingTitle;
+    }
+  }
+
+  return {
+    urlToSave,
+    titleToSave,
+    summaryToSave,
+    summarySourceToSave,
+    parentConversationIdToSave,
+    forkedFromMessageIdToSave
+  };
+}
