@@ -315,7 +315,7 @@ function mapRole(role) {
  * 实现细节：
  * - 分隔线插在“后一条 user 消息”的开头（即对第 2 条及之后的连续 user 消息做前置），形成：
  *   「上一条 user ...」 + 「\n\n---\n\n下一条 user ...」。
- * - 之所以选择“前置到后一条”，是为了不影响发送层对“消息末尾控制标记”的统一清理逻辑（如 [xN] 等）。
+ * - This keeps sender-side trailing marker cleanup stable (for example ratio markers like [16:9]).
  * - 使用 `\n\n---\n\n` 以满足 Markdown 对分隔线的常见解析要求（前后留空行）。
  *
  * @param {Array<{role: string, content: any}>} messages - 已构造好的消息数组（content 可能为 string 或旧格式 array）

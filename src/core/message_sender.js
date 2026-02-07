@@ -2215,10 +2215,10 @@ export function createMessageSender(appContext) {
   }
 
   /**
-   * 核心发送逻辑（单路请求），不处理 [xN] 并行语法。
+   * Core single-request send logic.
    *
    * 说明：
-   * - 对外暴露的 API 请使用 sendMessage（见下方），sendMessage 会在需要时解析 [xN] 并发起多路并行请求；
+   * - Public callers should use sendMessage (below), which handles multi-API parallel dispatch when needed;
    * - sendMessageCore 始终只处理“一次对话请求”，方便自动重试逻辑直接复用，而不会重复拆分并行。
    *
    * @private
@@ -2832,7 +2832,7 @@ export function createMessageSender(appContext) {
       });
 
       // 在真正发给模型前，统一清理所有用户消息末尾的控制标记
-      // 包括：[xN] 并行标记 和 [16:9]/[Auto] 等宽高比标记，避免模型看到这些内部控制语法
+      // Strip only ratio markers like [16:9]/[Auto] before model request.
       const sanitizedMessages = messages.map((msg) => {
         if (msg && msg.role === 'user' && typeof msg.content === 'string') {
           const { baseText } = extractTrailingControlMarkers(msg.content);
@@ -3022,7 +3022,7 @@ export function createMessageSender(appContext) {
       };
       const retry = (delayMs = 0, override = {}) => new Promise((resolve) => {
         setTimeout(async () => {
-          // 注意：自动重试直接调用核心发送逻辑，避免再次触发 [xN] 并行拆分
+          // Retry uses core logic directly to avoid duplicate parallel dispatch.
           resolve(await sendMessageCore({ ...retryHint, ...override }));
         }, Math.max(0, delayMs));
       });
@@ -3129,22 +3129,19 @@ export function createMessageSender(appContext) {
   }
 
   /**
-   * 支持从消息末尾解析控制标记：
-   * - [xN]  并行次数
-   * - [16:9] / [Auto] 等图片宽高比
+   * Parse trailing control markers from user text.
    *
-   * 解析策略：
-   * - 从文本末尾开始，循环吃掉形如 "[...]" 的标记；
-   * - 顺序无关，直到遇到无法识别的标记为止；
-   * - 返回去掉所有已识别标记后的文本、并行次数与宽高比。
+   * Current behavior:
+   * - Only image aspect-ratio markers are recognized (for example [16:9] / [Auto]);
+   * - Legacy [xN] input syntax is no longer supported;
+   * - Parsing stops on unknown or duplicate markers to avoid trimming normal text accidentally.
    *
    * @param {string} text
    * @returns {{ baseText: string, parallelCount: number, aspectRatio: string|null }}
    */
   function extractTrailingControlMarkers(text) {
     let raw = (text || '').trimEnd();
-    const MAX_PARALLEL_COUNT = 10;
-    /** 支持的宽高比（大小写不敏感） */
+    // Supported image aspect-ratio markers (case-insensitive).
     const SUPPORTED_RATIOS = [
       'Auto',
       '1:1', '9:16', '16:9',
@@ -3154,7 +3151,6 @@ export function createMessageSender(appContext) {
       '21:9'
     ];
 
-    let parallelCount = null;
     let aspectRatio = null;
 
     while (true) {
@@ -3163,57 +3159,23 @@ export function createMessageSender(appContext) {
 
       const token = match[1].trim();
       const lower = token.toLowerCase();
-      let consumed = false;
-
-      // 1) [xN] 并行标记
-      const mX = /^x(\d+)$/.exec(lower);
-      if (mX && parallelCount == null) {
-        let n = parseInt(mX[1], 10);
-        if (Number.isFinite(n) && n >= 2) {
-          if (n > MAX_PARALLEL_COUNT) n = MAX_PARALLEL_COUNT;
-          parallelCount = n;
-        }
-        consumed = true;
-      } else if (aspectRatio == null) {
-        // 2) 宽高比标记（Auto / 16:9 / 1:1 等）
-        const found = SUPPORTED_RATIOS.find(
-          (r) => r.toLowerCase() === lower
-        );
-        if (found) {
-          aspectRatio = found; // 使用白名单里的规范写法
-          consumed = true;
-        }
-      }
-
-      if (!consumed) {
-        // 遇到未知标记，停止继续向前吃，避免误删用户自定义 [xxx]
+      const found = SUPPORTED_RATIOS.find((r) => r.toLowerCase() === lower);
+      if (!found || aspectRatio != null) {
+        // Unknown or duplicate marker: stop to avoid trimming normal content.
         break;
       }
 
+      aspectRatio = found;
       raw = raw.slice(0, match.index).trimEnd();
     }
 
     return {
       baseText: raw,
-      parallelCount: parallelCount || 1,
+      // Backward-compatible shape: [xN] no longer controls parallel responses.
+      parallelCount: 1,
       aspectRatio: aspectRatio || null
     };
   }
-
-  /**
-   * 仅解析并行标记 [xN]，保持向后兼容旧接口。
-   * @param {string} text
-   * @returns {{ baseText: string, parallelCount: number }}
-   */
-  function parseParallelMultiplier(text) {
-    const info = extractTrailingControlMarkers(text);
-    return {
-      baseText: info.baseText,
-      parallelCount: info.parallelCount,
-      aspectRatio: info.aspectRatio
-    };
-  }
-
   function resolveLatestUserMessageId() {
     try {
       const history = chatHistoryManager.chatHistory;
@@ -3234,28 +3196,29 @@ export function createMessageSender(appContext) {
   }
 
   /**
-   * 对外暴露的发送接口：
-   * - 负责解析用户输入中的 [xN] 并行生成语法；
-   * - 根据是否为重新生成模式，调度多路 sendMessageCore 并行执行；
-   * - 自动确保用户消息只插入一次，其余视作对同一用户消息的“并行重新生成”。
+   * Public send entry:
+   * - Handles slash commands and trailing control markers;
+   * - Uses current runtime multi-API selection for parallel dispatch when enabled;
+   * - Inserts user message once and attaches additional parallel answers to that same user node.
    *
    * @public
-   * @param {Object} [options] - 参见 sendMessageCore 的参数说明
-   * @returns {Promise<any>} - 单路时返回 sendMessageCore 的结果；并行时返回 Promise.allSettled 的结果数组
+   * @param {Object} [options] - See sendMessageCore params.
+   * @returns {Promise<any>} - Single route returns sendMessageCore result; parallel route returns Promise.allSettled-like array.
    */
   async function sendMessage(options = {}) {
     const opts = options || {};
 
-    // 应用层有时会显式跳过并行解析（例如自动重试），此时直接走核心逻辑
+    // Internal retry/recursive branch: bypass parallel expansion and run core directly.
     if (opts.__skipParallelExpansion) {
       const { __skipParallelExpansion, ...rest } = opts;
       return sendMessageCore(rest);
     }
 
-    // 推断本次要使用的原始文本：
-    // - 重新生成模式优先读取被重新生成的用户消息当前文本（data-original-text）；
-    // - 否则优先使用调用方传入的 originalMessageText；
-    // - 最后回退到输入框中的内容。
+    // Resolve source text with the following precedence:
+    // 1) regenerate target node data-original-text;
+    // 2) regenerate target node content from chat history;
+    // 3) options.originalMessageText;
+    // 4) current input text.
     let rawText = '';
 
     if (opts.regenerateMode && opts.messageId) {
@@ -3273,7 +3236,7 @@ export function createMessageSender(appContext) {
           }
         }
       } catch (e) {
-        console.warn('从历史中读取用于并行解析的消息文本失败，将回退到 originalMessageText:', e);
+        console.warn('从当前消息节点读取 originalMessageText 失败:', e);
       }
     }
 
@@ -3284,7 +3247,7 @@ export function createMessageSender(appContext) {
         try {
           rawText = inputController ? inputController.getInputText() : (messageInput.textContent || '');
         } catch (e) {
-          console.warn('读取输入文本失败，将按空文本处理:', e);
+          console.warn('读取输入框文本失败:', e);
           rawText = '';
         }
       }
@@ -3294,7 +3257,7 @@ export function createMessageSender(appContext) {
       ? inputController.hasImages()
       : !!imageContainer.querySelector('.image-tag');
 
-    // 斜杠命令只对“用户直接输入”的文本生效，避免影响重试/重生成等内部流程
+    // Slash commands are only handled for normal sends.
     const hasExplicitOriginalText = opts.originalMessageText !== null && opts.originalMessageText !== undefined;
     const shouldCheckSlashCommand = !opts.regenerateMode
       && !opts.forceSendFullHistory
@@ -3315,7 +3278,9 @@ export function createMessageSender(appContext) {
       }
     }
 
-    let { baseText, parallelCount, aspectRatio } = parseParallelMultiplier(rawText);
+    const markerInfo = extractTrailingControlMarkers(rawText);
+    const baseText = markerInfo.baseText;
+    const aspectRatio = markerInfo.aspectRatio;
 
     const isFollowCurrentApiParam = (apiParam) => {
       if (typeof apiParam !== 'string') return false;
@@ -3352,7 +3317,7 @@ export function createMessageSender(appContext) {
       if (multiTargets.length > 0) {
         const validTargets = multiTargets.filter(config => config?.baseUrl && hasValidApiKey(config.apiKey));
         if (validTargets.length !== multiTargets.length && typeof showNotification === 'function') {
-          showNotification({ message: '已跳过未配置的多答 API', type: 'warning', duration: 1800 });
+          showNotification({ message: '部分 API 配置无效，已自动跳过', type: 'warning', duration: 1800 });
         }
         multiTargets = validTargets;
       }
@@ -3421,118 +3386,25 @@ export function createMessageSender(appContext) {
       return results;
     }
 
-    // “原地替换指定 AI 消息”不支持并行生成：
-    // - 并行会导致多路流式更新互相覆盖同一条消息，结果不可控；
-    // - 因此一旦指定 targetAiMessageId，强制退回为单路执行。
-    if (typeof opts.targetAiMessageId === 'string' && opts.targetAiMessageId.trim()) {
-      parallelCount = 1;
+    const singleOpts = { ...opts };
+    if (baseText !== rawText) {
+      singleOpts.originalMessageText = baseText;
+    }
+    if (aspectRatio) {
+      singleOpts.aspectRatioOverride = aspectRatio;
     }
 
-    // 兜底：如果当前原始文本中未检测到 [xN]，再尝试从最后一条用户消息中解析一次
-    // 这样可以覆盖一些边缘情况，例如重新生成时上下文传入的 originalMessageText 未及时更新等。
-    if (parallelCount <= 1) {
-      try {
-        const userMessages = chatContainer.querySelectorAll('.user-message');
-        if (userMessages.length > 0) {
-          const lastUser = userMessages[userMessages.length - 1];
-          const lastUserText =
-            lastUser.getAttribute('data-original-text') ||
-            lastUser.textContent ||
-            '';
-          const parsedLast = parseParallelMultiplier(lastUserText);
-          if (parsedLast.parallelCount > 1) {
-            baseText = parsedLast.baseText;
-            parallelCount = parsedLast.parallelCount;
-            aspectRatio = aspectRatio || parsedLast.aspectRatio || null;
-          }
-        }
-      } catch (e) {
-        console.warn('从最后一条用户消息解析并行标记失败:', e);
-      }
-    }
-    // 无并行标记或空消息场景：直接走单路核心逻辑（这里仍会沿用去掉 [xN] 后的 baseText）
-    const isEmptyMessage = !baseText && !hasImagesInInput && !opts.forceSendFullHistory && !opts.regenerateMode;
-    if (parallelCount <= 1 || isEmptyMessage) {
-      const singleOpts = { ...opts };
-      // 如果原始文本来自输入框或调用方，我们用去掉 [xN] 的文本覆盖 originalMessageText
-      if (baseText !== rawText) {
-        singleOpts.originalMessageText = baseText;
-      }
-      if (aspectRatio) {
-        singleOpts.aspectRatioOverride = aspectRatio;
-      }
-      return sendMessageCore(singleOpts);
-    }
-
-    // 并行生成：根据上下文选择不同策略
-    const tasks = [];
-
-    if (opts.regenerateMode) {
-      // 场景一：对已有用户消息的“编辑后重新生成”（包括 Ctrl+Enter）
-      // - 此时 messageId 为用户消息 ID；
-      // - 直接对同一消息发起多路重新生成即可。
-      for (let i = 0; i < parallelCount; i += 1) {
-        const taskOptions = {
-          ...opts,
-          originalMessageText: baseText,
-          regenerateMode: true,
-          aspectRatioOverride: aspectRatio || undefined,
-          __parallelAnswerCount: parallelCount,
-          __parallelAnswerIndex: i
-        };
-        tasks.push(sendMessageCore(taskOptions));
-      }
-      return Promise.allSettled(tasks);
-    }
-
-    // 场景二：普通发送（从输入框发送一条新用户消息，末尾带 [xN]）
-    // 第一步：启动第一路核心请求，让它负责插入用户消息与第一条 AI 回复
-    const firstOptions = {
-      ...opts,
-      originalMessageText: baseText,
-      aspectRatioOverride: aspectRatio || undefined,
-      __parallelAnswerCount: parallelCount,
-      __parallelAnswerIndex: 0
-    };
-    const firstPromise = sendMessageCore(firstOptions);
-    tasks.push(firstPromise);
-
-    // 由于 sendMessageCore 在首次 await 之前会同步插入用户消息，
-    // 此处可以立即通过 chatHistoryManager 获取“当前最后一条用户消息”的 ID。
-    const baseUserMessageId = resolveLatestUserMessageId();
-
-    if (!baseUserMessageId) {
-      // 找不到基准用户消息时，保守地只保留第一路请求，避免插入多条重复用户消息
-      return firstPromise;
-    }
-
-    // 第二步：为其余 (parallelCount - 1) 路生成发起“对同一用户消息的重新生成”
-    for (let i = 1; i < parallelCount; i += 1) {
-      const extraOptions = {
-        ...opts,
-        originalMessageText: baseText,
-        regenerateMode: true,
-        messageId: baseUserMessageId,
-        aspectRatioOverride: aspectRatio || undefined,
-        __parallelAnswerCount: parallelCount,
-        __parallelAnswerIndex: i
-      };
-      tasks.push(sendMessageCore(extraOptions));
-    }
-
-    return Promise.allSettled(tasks);
+    return sendMessageCore(singleOpts);
   }
 
-  // 消息构造逻辑已迁移到 message_composer.js 的纯函数 composeMessages
+  // Message composition itself is delegated to composeMessages in message_composer.js.
 
   /**
-   * 处理API的流式响应（单路）
-   * @private
-   * @param {Response} response - Fetch API 响应对象
-   * @param {HTMLElement} loadingMessage - 加载状态消息元素
-   * @param {Object} usedApiConfig - 本次使用的 API 配置
-   * @param {{id:string, aiMessageId?:string}|null} attemptState - 当前请求的 attempt 状态对象
-   * @returns {Promise<void>}
+   * Handle streaming response (SSE).
+   * @param {Response} response
+   * @param {HTMLElement} loadingMessage
+   * @param {Object} usedApiConfig
+   * @param {Object} attemptState
    */
   async function handleStreamResponse(response, loadingMessage, usedApiConfig, attemptState) {
     // 流式场景：此时已拿到响应头，但正文 token 尚未到达。
