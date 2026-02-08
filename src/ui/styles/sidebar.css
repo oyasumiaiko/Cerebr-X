@@ -458,7 +458,7 @@ body.standalone-mode #empty-state-repomix {
 
 /* 全屏滚动缩略图（MiniMap）：
    - 仅在全屏布局下由脚本按需激活；
-   - 默认放在主对话列左侧，便于快速定位长对话。 */
+   - 位置由脚本按主聊天/线程模式动态决定。 */
 .chat-scroll-minimap {
     position: absolute;
     width: var(--cerebr-scroll-minimap-width, 24px);
@@ -466,17 +466,29 @@ body.standalone-mode #empty-state-repomix {
     z-index: 5;
     opacity: 0;
     border-radius: 8px;
-    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 55%, transparent);
-    background: color-mix(in srgb, var(--cerebr-bg-color) 72%, transparent);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
     transition: opacity 0.16s ease;
     overflow: hidden;
 }
 
+/* 将轨道层透明度与容器显隐拆开，避免父级 opacity 影响 thumb 可见度。 */
+.chat-scroll-minimap::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 55%, transparent);
+    background: color-mix(in srgb, var(--cerebr-bg-color) 72%, transparent);
+    opacity: var(--cerebr-scroll-minimap-opacity, 0.94);
+    pointer-events: none;
+    transition: opacity 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
+}
+
 .chat-scroll-minimap.chat-scroll-minimap--active {
     pointer-events: auto;
-    opacity: var(--cerebr-scroll-minimap-opacity, 0.94);
+    opacity: 1;
 }
 
 .chat-scroll-minimap.chat-scroll-minimap--active.chat-scroll-minimap--auto-hide {
@@ -497,13 +509,25 @@ body.standalone-mode #empty-state-repomix {
 }
 
 .chat-scroll-minimap .chat-scroll-minimap__canvas {
+    position: relative;
+    z-index: 1;
     display: block;
     width: 100%;
     height: 100%;
+    opacity: var(--cerebr-scroll-minimap-opacity, 0.94);
+    transition: opacity 0.14s ease;
+}
+
+.chat-scroll-minimap.chat-scroll-minimap--active:active::before,
+.chat-scroll-minimap.chat-scroll-minimap--dragging::before,
+.chat-scroll-minimap.chat-scroll-minimap--active:active .chat-scroll-minimap__canvas,
+.chat-scroll-minimap.chat-scroll-minimap--dragging .chat-scroll-minimap__canvas {
+    opacity: 1;
 }
 
 .chat-scroll-minimap .chat-scroll-minimap__thumb {
     position: absolute;
+    z-index: 2;
     left: 2px;
     right: 2px;
     top: 0;
@@ -511,10 +535,21 @@ body.standalone-mode #empty-state-repomix {
     border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 75%, transparent);
     background: color-mix(in srgb, var(--cerebr-bg-color) 34%, transparent);
     box-shadow: 0 1px 6px color-mix(in srgb, #000 24%, transparent);
+    opacity: 0.86;
+    transition: opacity 0.14s ease, background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
     cursor: grab;
 }
 
+.chat-scroll-minimap:hover .chat-scroll-minimap__thumb,
+.chat-scroll-minimap:focus-within .chat-scroll-minimap__thumb {
+    opacity: 1;
+    background: color-mix(in srgb, var(--cerebr-bg-color) 58%, transparent);
+    border-color: color-mix(in srgb, var(--cerebr-border-color) 95%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--cerebr-bg-color) 34%, transparent), 0 2px 10px color-mix(in srgb, #000 28%, transparent);
+}
+
 .chat-scroll-minimap.chat-scroll-minimap--dragging .chat-scroll-minimap__thumb {
+    opacity: 1;
     cursor: grabbing;
 }
 
