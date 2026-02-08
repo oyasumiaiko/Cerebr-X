@@ -373,30 +373,66 @@
           bottom: top + height
         });
       }
+      const firstMessageTop = messageLayout.length > 0
+        ? (messageLayout[0]?.top || 0)
+        : 0;
+      const lastMessageBottom = messageLayout.length > 0
+        ? (messageLayout[messageLayout.length - 1]?.bottom || 0)
+        : 0;
+      const leadingGap = Math.max(0, Math.min(safeScrollHeight, firstMessageTop));
+      const trailingGap = Math.max(0, safeScrollHeight - Math.max(0, lastMessageBottom));
+      const hasLeadingGapSegment = leadingGap > 0.5;
+      const hasTrailingGapSegment = trailingGap > 0.5;
+      const fixedSegmentCount = messageLayout.length
+        + (hasLeadingGapSegment ? 1 : 0)
+        + (hasTrailingGapSegment ? 1 : 0);
       return {
         mode,
         scrollHeight: safeScrollHeight,
         clientHeight: safeClientHeight,
         maxScroll: Math.max(0, safeScrollHeight - safeClientHeight),
         messageLayout,
-        messageCount: messageLayout.length
+        messageCount: messageLayout.length,
+        leadingGap,
+        trailingGap,
+        hasLeadingGapSegment,
+        hasTrailingGapSegment,
+        fixedSegmentCount
       };
     }
 
     function resolveProgressFromContentOffset(context, offset) {
       if (!context) return 0;
-      const safeOffset = clampNumber(offset, 0, context.scrollHeight);
+      const progressHeight = Math.max(1, context.scrollHeight);
+      const safeOffset = clampNumber(offset, 0, progressHeight);
       if (context.mode !== MINIMAP_MESSAGE_MODE_FIXED || context.messageCount <= 0) {
-        return clampNumber(safeOffset / Math.max(1, context.scrollHeight), 0, 1);
+        return clampNumber(safeOffset / progressHeight, 0, 1);
       }
 
       const items = context.messageLayout;
       const total = context.messageCount;
+      const hasLeadingGapSegment = context.hasLeadingGapSegment === true;
+      const hasTrailingGapSegment = context.hasTrailingGapSegment === true;
+      const leadingGap = Math.max(0, Number(context.leadingGap) || 0);
+      const trailingGap = Math.max(0, Number(context.trailingGap) || 0);
+      const segmentCount = Math.max(1, Number(context.fixedSegmentCount) || total);
+      const segmentSize = 1 / segmentCount;
       const first = items[0];
       const last = items[total - 1];
       if (!first || !last) return 0;
-      if (safeOffset <= first.top) return 0;
-      if (safeOffset >= last.bottom) return 1;
+      if (hasLeadingGapSegment && safeOffset <= first.top) {
+        const ratio = leadingGap > 0 ? clampNumber(safeOffset / leadingGap, 0, 1) : 1;
+        return clampNumber(ratio * segmentSize, 0, 1);
+      }
+      if (!hasLeadingGapSegment && safeOffset <= first.top) return 0;
+      if (safeOffset >= last.bottom) {
+        if (hasTrailingGapSegment && trailingGap > 0) {
+          const ratio = clampNumber((safeOffset - last.bottom) / trailingGap, 0, 1);
+          const trailingStart = (segmentCount - 1) * segmentSize;
+          return clampNumber(trailingStart + ratio * segmentSize, 0, 1);
+        }
+        return 1;
+      }
 
       let low = 0;
       let high = total - 1;
@@ -413,9 +449,10 @@
 
       const current = items[idx];
       if (!current) return 0;
+      const messageSegmentBase = hasLeadingGapSegment ? 1 : 0;
       if (safeOffset < current.top && idx > 0) {
         // 落在两条消息之间的间隙时，归入上一条消息末尾，避免拖拽时跳变。
-        return clampNumber(idx / total, 0, 1);
+        return clampNumber((messageSegmentBase + idx) / segmentCount, 0, 1);
       }
 
       const inMessageRatio = clampNumber(
@@ -423,31 +460,57 @@
         0,
         1
       );
-      return clampNumber((idx + inMessageRatio) / total, 0, 1);
+      return clampNumber((messageSegmentBase + idx + inMessageRatio) / segmentCount, 0, 1);
     }
 
     function resolveContentOffsetFromProgress(context, progress) {
       if (!context) return 0;
       const safeProgress = clampNumber(progress, 0, 1);
+      const progressHeight = Math.max(1, context.scrollHeight);
       if (context.mode !== MINIMAP_MESSAGE_MODE_FIXED || context.messageCount <= 0) {
-        return safeProgress * context.scrollHeight;
+        return safeProgress * progressHeight;
       }
 
       const total = context.messageCount;
-      const scaled = safeProgress * total;
-      let idx = Math.floor(scaled);
-      let ratio = scaled - idx;
-      if (idx >= total) {
-        idx = total - 1;
-        ratio = 1;
+      const hasLeadingGapSegment = context.hasLeadingGapSegment === true;
+      const hasTrailingGapSegment = context.hasTrailingGapSegment === true;
+      const leadingGap = Math.max(0, Number(context.leadingGap) || 0);
+      const trailingGap = Math.max(0, Number(context.trailingGap) || 0);
+      const segmentCount = Math.max(1, Number(context.fixedSegmentCount) || total);
+      const scaled = safeProgress * segmentCount;
+      let segmentIndex = Math.floor(scaled);
+      let segmentRatio = scaled - segmentIndex;
+      if (segmentIndex >= segmentCount) {
+        segmentIndex = segmentCount - 1;
+        segmentRatio = 1;
       }
-      const current = context.messageLayout[idx];
-      if (!current) return safeProgress * context.scrollHeight;
-      return clampNumber(
-        current.top + ratio * Math.max(1, current.height),
-        0,
-        context.scrollHeight
-      );
+
+      let messageIndex = segmentIndex;
+      if (hasLeadingGapSegment) {
+        if (segmentIndex <= 0) {
+          return clampNumber(segmentRatio * leadingGap, 0, progressHeight);
+        }
+        messageIndex = segmentIndex - 1;
+      }
+
+      if (messageIndex < total) {
+        const current = context.messageLayout[messageIndex];
+        if (current) {
+          return clampNumber(
+            current.top + segmentRatio * Math.max(1, current.height),
+            0,
+            progressHeight
+          );
+        }
+      }
+
+      if (hasTrailingGapSegment) {
+        const last = context.messageLayout[total - 1];
+        const start = Math.max(0, Number(last?.bottom) || 0);
+        return clampNumber(start + segmentRatio * trailingGap, 0, progressHeight);
+      }
+
+      return progressHeight;
     }
 
     function resolveScrollTopFromProgress(context, progress, options = {}) {
@@ -488,7 +551,8 @@
       }
 
       if (visibleSpan <= 0) {
-        visibleSpan = context.clientHeight / Math.max(1, context.scrollHeight);
+        const progressHeight = Math.max(1, context.scrollHeight);
+        visibleSpan = context.clientHeight / progressHeight;
       }
 
       return {
@@ -546,7 +610,7 @@
       return state.side || 'right';
     }
 
-    function drawMinimapOverview(state, messages, trackHeight, scrollHeight, messageDisplayMode) {
+    function drawMinimapOverview(state, messages, trackHeight, renderContext) {
       if (!state?.canvas || !state?.root) return;
       const width = Math.max(1, state.root.clientWidth);
       const height = Math.max(1, trackHeight);
@@ -564,11 +628,8 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
-      const contentHeight = Math.max(1, scrollHeight);
       const innerPadding = 3;
       const innerWidth = Math.max(2, width - innerPadding * 2);
-      const useFixedMessageHeight = messageDisplayMode === MINIMAP_MESSAGE_MODE_FIXED;
-      const safeMessageCount = Math.max(1, messages.length);
       const messageGap = 1;
       const messageCornerRadius = 2;
       let previousBarBottom = -messageGap;
@@ -602,30 +663,26 @@
 
       for (let index = 0; index < messages.length; index += 1) {
         const el = messages[index];
-        let y = 0;
-        let h = 1;
-        if (useFixedMessageHeight) {
-          // 固定消息高度模式：先分配等长槽位，随后统一走“间距+圆角”规则。
-          const slotTop = Math.floor((index / safeMessageCount) * height);
-          const slotBottom = Math.ceil(((index + 1) / safeMessageCount) * height);
-          y = Math.max(0, Math.min(height - 1, slotTop));
-          h = Math.max(1, slotBottom - slotTop);
-        } else {
-          const topRatio = (el.offsetTop || 0) / contentHeight;
-          const heightRatio = (el.offsetHeight || 0) / contentHeight;
-          y = Math.max(0, Math.floor(topRatio * height));
-          h = Math.max(1, Math.ceil(heightRatio * height));
-        }
+        const messageTop = Math.max(0, Number(el.offsetTop) || 0);
+        const messageBottom = messageTop + Math.max(1, Number(el.offsetHeight) || 0);
+        const topProgress = resolveProgressFromContentOffset(renderContext, messageTop);
+        const bottomProgress = resolveProgressFromContentOffset(renderContext, messageBottom);
+        let y = Math.max(0, Math.min(height - 1, Math.floor(topProgress * height)));
+        let h = Math.max(1, Math.ceil((bottomProgress - topProgress) * height));
         const isUser = el.classList.contains('user-message');
         const isError = el.classList.contains('error-message');
         // 消息块不再通过左右缩进区分角色，只用颜色区分，避免画面左右节奏过于杂乱。
         const x = innerPadding;
         const w = innerWidth;
 
-        // 统一加 1px 竖向间距，确保连续同类型消息也有分界。
+        // 统一加 1px 竖向间距，且通过“减小本条高度”而不是“整体下推”避免累计漂移。
         if (index > 0) {
           const minTop = previousBarBottom + messageGap;
-          if (y < minTop) y = minTop;
+          if (y < minTop) {
+            const overlap = minTop - y;
+            y = minTop;
+            h = Math.max(1, h - overlap);
+          }
         }
         if (y >= height) break;
         h = Math.max(1, Math.min(height - y, h));
@@ -1035,7 +1092,7 @@
       if (metricsChanged) state.needsMapRedraw = true;
 
       if (state.needsMapRedraw) {
-        drawMinimapOverview(state, messages, trackHeight, scrollHeight, messageDisplayMode);
+        drawMinimapOverview(state, messages, trackHeight, renderContext);
         state.needsMapRedraw = false;
         state.lastScrollHeight = scrollHeight;
         state.lastClientHeight = clientHeight;
