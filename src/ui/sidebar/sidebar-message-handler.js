@@ -50,6 +50,8 @@
     const MINIMAP_THUMB_MIN_HEIGHT = 28;
     const MINIMAP_MESSAGE_MODE_PROPORTIONAL = 'proportional';
     const MINIMAP_MESSAGE_MODE_FIXED = 'fixed';
+    const MINIMAP_WHEEL_STEP_PX = 56;
+    const MINIMAP_WHEEL_IDLE_RESET_MS = 180;
 
     function createMinimapState(key, container, side) {
       if (!container) return null;
@@ -66,7 +68,9 @@
         lastMessageCount: 0,
         lastMessageMode: MINIMAP_MESSAGE_MODE_PROPORTIONAL,
         dragSession: null,
-        renderContext: null
+        renderContext: null,
+        wheelDeltaAccumulator: 0,
+        wheelResetTimer: null
       };
     }
 
@@ -315,6 +319,7 @@
       chatLayout.appendChild(root);
 
       root.addEventListener('pointerdown', (event) => handleMinimapPointerDown(state, event));
+      root.addEventListener('wheel', (event) => handleMinimapWheel(state, event), { passive: false });
       thumb.addEventListener('pointerdown', (event) => handleMinimapThumbPointerDown(state, event));
       thumb.addEventListener('pointermove', (event) => handleMinimapThumbPointerMove(state, event));
       thumb.addEventListener('pointerup', (event) => finishMinimapThumbDrag(state, event));
@@ -643,6 +648,7 @@
         state.root.classList.remove('chat-scroll-minimap--dragging');
         state.dragSession = null;
         state.renderContext = null;
+        resetMinimapWheelAccumulator(state);
       }
     }
 
@@ -687,6 +693,113 @@
       const maxScroll = Math.max(0, (state.container.scrollHeight || 0) - (state.container.clientHeight || 0));
       if (maxScroll <= 0) return;
       state.container.scrollTop = ratio * maxScroll;
+    }
+
+    function normalizeWheelDeltaToPixels(event, pageSize) {
+      const mode = Number(event?.deltaMode) || 0;
+      const rawDelta = Number(event?.deltaY) || 0;
+      if (mode === 1) return rawDelta * 16;
+      if (mode === 2) return rawDelta * Math.max(1, pageSize);
+      return rawDelta;
+    }
+
+    function findFirstVisibleMessageLayoutIndex(layout, scrollTop) {
+      if (!Array.isArray(layout) || layout.length === 0) return -1;
+      const targetTop = Math.max(0, Number(scrollTop) || 0);
+      let low = 0;
+      let high = layout.length - 1;
+      let answer = layout.length - 1;
+      while (low <= high) {
+        const mid = (low + high) >> 1;
+        const item = layout[mid];
+        if ((item?.bottom || 0) <= targetTop + 1) {
+          low = mid + 1;
+        } else {
+          answer = mid;
+          high = mid - 1;
+        }
+      }
+      return clampNumber(answer, 0, layout.length - 1);
+    }
+
+    function scrollContainerByMessageStep(state, stepCount) {
+      if (!state?.container) return;
+      const context = state.renderContext;
+      const layout = context?.messageLayout;
+      const total = context?.messageCount || 0;
+      if (!Array.isArray(layout) || total <= 0 || !Number.isFinite(stepCount) || stepCount === 0) return;
+
+      const currentTop = Math.max(0, state.container.scrollTop || 0);
+      const currentIdx = findFirstVisibleMessageLayoutIndex(layout, currentTop);
+      if (currentIdx < 0) return;
+
+      let targetIdx = currentIdx + stepCount;
+      if (stepCount < 0 && currentTop > (layout[currentIdx]?.top || 0) + 1) {
+        // 向上滚动时，若当前视口落在消息中间，先对齐到当前消息顶部，再继续按消息步进。
+        targetIdx += 1;
+      }
+      targetIdx = clampNumber(targetIdx, 0, total - 1);
+
+      const rawTargetTop = layout[targetIdx]?.top || 0;
+      const maxScroll = Math.max(0, context?.maxScroll || 0);
+      const targetTop = clampNumber(rawTargetTop, 0, maxScroll);
+
+      try {
+        state.container.scrollTo({
+          top: targetTop,
+          behavior: 'smooth'
+        });
+      } catch (_) {
+        state.container.scrollTop = targetTop;
+      }
+    }
+
+    function resetMinimapWheelAccumulator(state) {
+      if (!state) return;
+      state.wheelDeltaAccumulator = 0;
+      if (state.wheelResetTimer) {
+        clearTimeout(state.wheelResetTimer);
+        state.wheelResetTimer = null;
+      }
+    }
+
+    function scheduleMinimapWheelAccumulatorReset(state) {
+      if (!state) return;
+      if (state.wheelResetTimer) clearTimeout(state.wheelResetTimer);
+      state.wheelResetTimer = setTimeout(() => {
+        state.wheelResetTimer = null;
+        state.wheelDeltaAccumulator = 0;
+      }, MINIMAP_WHEEL_IDLE_RESET_MS);
+    }
+
+    function handleMinimapWheel(state, event) {
+      if (!state?.root || !state?.thumb || !state.root.classList.contains('chat-scroll-minimap--active')) return;
+      const deltaPx = normalizeWheelDeltaToPixels(event, state.root.clientHeight || 120);
+      if (Math.abs(deltaPx) < 0.01) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (state.dragSession) return;
+
+      const currentAcc = Number(state.wheelDeltaAccumulator) || 0;
+      const currentSign = Math.sign(currentAcc);
+      const deltaSign = Math.sign(deltaPx);
+      if (currentSign !== 0 && deltaSign !== 0 && currentSign !== deltaSign) {
+        state.wheelDeltaAccumulator = 0;
+      }
+      state.wheelDeltaAccumulator += deltaPx;
+      scheduleMinimapWheelAccumulatorReset(state);
+
+      const accumulator = Number(state.wheelDeltaAccumulator) || 0;
+      const steps = Math.trunc(Math.abs(accumulator) / MINIMAP_WHEEL_STEP_PX);
+      if (steps <= 0) return;
+
+      const direction = accumulator > 0 ? 1 : -1;
+      const residual = accumulator - direction * steps * MINIMAP_WHEEL_STEP_PX;
+      state.wheelDeltaAccumulator = residual;
+      scrollContainerByMessageStep(state, direction * steps);
+      if (state.key === 'chat') scheduleReadingAnchorCapture();
+      scheduleMinimapRender();
     }
 
     function handleMinimapPointerDown(state, event) {
@@ -1204,6 +1317,7 @@
         state.thumb = null;
         state.dragSession = null;
         state.renderContext = null;
+        resetMinimapWheelAccumulator(state);
       });
       window.removeEventListener('resize', handleWindowResize);
       window.removeEventListener('message', handleWindowMessage);
