@@ -53,6 +53,7 @@
     const MINIMAP_WHEEL_STEP_UNIT = 1;
     const MINIMAP_WHEEL_IDLE_RESET_MS = 180;
     const MINIMAP_WHEEL_ANIMATION_MS = 120;
+    const MINIMAP_INTERACTION_VISIBLE_MS = 1500;
 
     function createMinimapState(key, container, side) {
       if (!container) return null;
@@ -76,7 +77,8 @@
         wheelAnimationRaf: null,
         wheelAnimationFromTop: 0,
         wheelAnimationToTop: 0,
-        wheelAnimationStartAt: 0
+        wheelAnimationStartAt: 0,
+        interactionVisibleTimer: null
       };
     }
 
@@ -330,6 +332,7 @@
       root.addEventListener('pointerup', (event) => finishMinimapRootDrag(state, event));
       root.addEventListener('pointercancel', (event) => finishMinimapRootDrag(state, event));
       root.addEventListener('lostpointercapture', (event) => finishMinimapRootDrag(state, event));
+      root.addEventListener('pointerleave', () => handleMinimapPointerLeave(state));
       thumb.addEventListener('pointerdown', (event) => handleMinimapThumbPointerDown(state, event));
       thumb.addEventListener('pointermove', (event) => handleMinimapThumbPointerMove(state, event));
       thumb.addEventListener('pointerup', (event) => finishMinimapThumbDrag(state, event));
@@ -737,11 +740,57 @@
       state.thumb.dataset.viewportSpan = String(visibleSpan);
     }
 
+    function setMinimapInteractionVisible(state, visible) {
+      if (!state?.root) return;
+      state.root.classList.toggle('chat-scroll-minimap--interacting', !!visible);
+    }
+
+    function clearMinimapInteractionTimer(state) {
+      if (!state?.interactionVisibleTimer) return;
+      clearTimeout(state.interactionVisibleTimer);
+      state.interactionVisibleTimer = null;
+    }
+
+    function scheduleMinimapInteractionAutoHide(state) {
+      if (!state?.root) return;
+      clearMinimapInteractionTimer(state);
+      state.interactionVisibleTimer = setTimeout(() => {
+        state.interactionVisibleTimer = null;
+        // 拖拽期间保持可见，拖拽结束后再按超时收起。
+        if (state.dragSession) {
+          scheduleMinimapInteractionAutoHide(state);
+          return;
+        }
+        setMinimapInteractionVisible(state, false);
+      }, MINIMAP_INTERACTION_VISIBLE_MS);
+    }
+
+    function clearMinimapInteractionIfPointerOutside(state) {
+      if (!state?.root) return;
+      try {
+        if (state.root.matches(':hover')) {
+          scheduleMinimapInteractionAutoHide(state);
+          return;
+        }
+      } catch (_) {}
+      clearMinimapInteractionTimer(state);
+      setMinimapInteractionVisible(state, false);
+    }
+
+    function handleMinimapPointerLeave(state) {
+      if (!state?.root) return;
+      if (state.dragSession) return;
+      clearMinimapInteractionTimer(state);
+      setMinimapInteractionVisible(state, false);
+    }
+
     function setMinimapVisible(state, visible) {
       if (!state?.root) return;
       state.root.classList.toggle('chat-scroll-minimap--active', !!visible);
       if (!visible) {
         state.root.classList.remove('chat-scroll-minimap--dragging');
+        state.root.classList.remove('chat-scroll-minimap--interacting');
+        clearMinimapInteractionTimer(state);
         state.dragSession = null;
         state.dragCaptureTarget = null;
         state.renderContext = null;
@@ -982,6 +1031,9 @@
       event.preventDefault();
       event.stopPropagation();
       if (state.dragSession) return;
+      // 在缩略图上滚轮交互后保持高可见，直到鼠标离开缩略图区域。
+      setMinimapInteractionVisible(state, true);
+      scheduleMinimapInteractionAutoHide(state);
 
       const currentAcc = Number(state.wheelDeltaAccumulator) || 0;
       const currentSign = Math.sign(currentAcc);
@@ -1008,6 +1060,8 @@
       if (event.button !== 0) return;
       if (event.target === state.thumb) return;
       event.preventDefault();
+      setMinimapInteractionVisible(state, true);
+      scheduleMinimapInteractionAutoHide(state);
       const rootRect = state.root.getBoundingClientRect();
       const thumbHeight = Math.max(0, state.thumb?.offsetHeight || 0);
       const dragOffset = thumbHeight > 0 ? (thumbHeight / 2) : 0;
@@ -1023,6 +1077,8 @@
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
+      setMinimapInteractionVisible(state, true);
+      scheduleMinimapInteractionAutoHide(state);
       stopMinimapWheelAnimation(state);
       const thumbRect = state.thumb.getBoundingClientRect();
       beginMinimapDrag(state, event.pointerId, event.clientY - thumbRect.top, { captureTarget: state.thumb });
@@ -1071,6 +1127,7 @@
           } catch (_) {}
         }
       }
+      clearMinimapInteractionIfPointerOutside(state);
     }
 
     function renderMinimapState(state, minimapWidth, featureEnabled, fullscreenEnabled, autoHideEnabled, messageDisplayMode) {
@@ -1538,6 +1595,7 @@
         state.dragSession = null;
         state.dragCaptureTarget = null;
         state.renderContext = null;
+        clearMinimapInteractionTimer(state);
         resetMinimapWheelAccumulator(state);
       });
       window.removeEventListener('resize', handleWindowResize);
