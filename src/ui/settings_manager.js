@@ -118,6 +118,9 @@ export function createSettingsManager(appContext) {
     backgroundImageIntensity: 0.6,
     fullscreenBackgroundCover: false,
     backgroundOverallOpacity: 1,
+    // 网页渗色：让背景带一点网页底色，但通过强模糊避免透出清晰内容。
+    backgroundPageBleedStrength: 0.16,
+    backgroundPageBleedBlur: 72,
     // 全屏滚动缩略图（MiniMap）：显示开关、宽度与透明度
     enableScrollMinimap: true,
     scrollMinimapWidth: 24,
@@ -182,6 +185,8 @@ export function createSettingsManager(appContext) {
   let currentSettings = {...DEFAULT_SETTINGS};
   let backgroundImageLoadToken = 0;
   let backgroundImageQueueState = { signature: '', pool: [], index: 0 };
+  let backgroundImageNaturalSize = null;
+  let backgroundImageNaturalSizeSource = '';
 
   const getConversationTitleApiOptions = () => {
     const options = [{ label: '跟随当前 API', value: 'follow_current' }];
@@ -408,6 +413,32 @@ export function createSettingsManager(appContext) {
       defaultValue: DEFAULT_SETTINGS.backgroundOverallOpacity,
       apply: (v) => applyBackgroundOverallOpacity(v),
       formatValue: (value) => `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`
+    },
+    {
+      key: 'backgroundPageBleedStrength',
+      type: 'range',
+      id: 'background-page-bleed-strength',
+      label: '网页渗色强度',
+      group: 'background',
+      min: 0,
+      max: 0.6,
+      step: 0.01,
+      defaultValue: DEFAULT_SETTINGS.backgroundPageBleedStrength,
+      apply: (v) => applyBackgroundPageBleedStrength(v),
+      formatValue: (value) => `${Math.round(Math.max(0, Math.min(0.6, Number(value) || 0)) * 100)}%`
+    },
+    {
+      key: 'backgroundPageBleedBlur',
+      type: 'range',
+      id: 'background-page-bleed-blur',
+      label: '网页渗色模糊',
+      group: 'background',
+      min: 24,
+      max: 140,
+      step: 2,
+      defaultValue: DEFAULT_SETTINGS.backgroundPageBleedBlur,
+      apply: (v) => applyBackgroundPageBleedBlur(v),
+      formatValue: (value) => `${Math.round(Math.max(24, Math.min(140, Number(value) || 72)))}px`
     },
     {
       key: 'fullscreenBackgroundCover',
@@ -763,6 +794,12 @@ export function createSettingsManager(appContext) {
   function normalizeSettingValue(key, value) {
     if (key === 'backgroundOpacity' || key === 'elementOpacity') {
       return clamp01(value, DEFAULT_SETTINGS[key]);
+    }
+    if (key === 'backgroundPageBleedStrength') {
+      return clampBackgroundPageBleedStrength(value);
+    }
+    if (key === 'backgroundPageBleedBlur') {
+      return clampBackgroundPageBleedBlur(value);
     }
     if (key === 'enableCustomThemeColors') {
       return !!value;
@@ -1490,6 +1527,12 @@ export function createSettingsManager(appContext) {
       '--cerebr-chat-background-color',
       composeRgbaFromCssColor(bgColor, backgroundOpacity, '#262b33')
     );
+    // 背景图与氛围层做“同一底板”合成时使用的实色，不跟随背景透明度，
+    // 以避免 backgroundImageOpacity 降低时出现网页清晰内容透出。
+    root.style.setProperty(
+      '--cerebr-background-compose-color',
+      composeRgbaFromCssColor(bgColor, 1, '#262b33')
+    );
     // 元素透明度单独控制 UI 组件层，包括消息气泡、输入框、面板等。
     root.style.setProperty('--cerebr-bg-color', composeRgbaFromCssColor(bgColor, elementOpacity, '#262b33'));
     root.style.setProperty('--cerebr-message-user-bg', composeRgbaFromCssColor(userColor, elementOpacity, '#3e4451'));
@@ -1967,10 +2010,10 @@ export function createSettingsManager(appContext) {
       attempts += 1;
       if (!candidate) continue;
       try {
-        await ensureImageLoad(candidate);
+        const imageMeta = await ensureImageLoad(candidate);
         if (token !== backgroundImageLoadToken) return;
         const cssValue = createCssUrlValue(candidate);
-        updateBackgroundImageCss(cssValue, true, token, candidate);
+        updateBackgroundImageCss(cssValue, true, token, candidate, imageMeta);
         return;
       } catch (error) {
         console.warn('背景图片加载失败，尝试下一张:', candidate, error);
@@ -2060,6 +2103,122 @@ export function createSettingsManager(appContext) {
     }
   }
 
+  function clearContainEdgeMaskGeometry() {
+    const root = document.documentElement;
+    const body = document.body;
+    if (!root?.style) return;
+    // 兼容早期实现：同时清理 html/body 上同名 class，避免遗留状态干扰。
+    root.classList.remove('fullscreen-contain-bars-x', 'fullscreen-contain-bars-y');
+    body?.classList?.remove?.('fullscreen-contain-bars-x', 'fullscreen-contain-bars-y');
+    root.style.setProperty('--cerebr-contain-image-left', '0%');
+    root.style.setProperty('--cerebr-contain-image-right', '100%');
+    root.style.setProperty('--cerebr-contain-image-top', '0%');
+    root.style.setProperty('--cerebr-contain-image-bottom', '100%');
+    root.style.setProperty('--cerebr-contain-edge-fade-x', '2%');
+    root.style.setProperty('--cerebr-contain-edge-fade-y', '2%');
+  }
+
+  function updateContainEdgeMaskGeometry() {
+    const root = document.documentElement;
+    const body = document.body;
+    if (!root?.style) return;
+    if (!backgroundImageNaturalSize?.width || !backgroundImageNaturalSize?.height) {
+      clearContainEdgeMaskGeometry();
+      return;
+    }
+
+    const viewportWidth = Math.max(
+      0,
+      window.innerWidth || 0,
+      document.documentElement?.clientWidth || 0
+    );
+    const viewportHeight = Math.max(
+      0,
+      window.innerHeight || 0,
+      document.documentElement?.clientHeight || 0
+    );
+    if (viewportWidth <= 0 || viewportHeight <= 0) {
+      clearContainEdgeMaskGeometry();
+      return;
+    }
+
+    const imageRatio = backgroundImageNaturalSize.width / backgroundImageNaturalSize.height;
+    const viewportRatio = viewportWidth / viewportHeight;
+    let renderWidth = viewportWidth;
+    let renderHeight = viewportHeight;
+
+    if (viewportRatio > imageRatio) {
+      renderHeight = viewportHeight;
+      renderWidth = viewportHeight * imageRatio;
+    } else {
+      renderWidth = viewportWidth;
+      renderHeight = viewportWidth / imageRatio;
+    }
+
+    const left = Math.max(0, (viewportWidth - renderWidth) / 2);
+    const top = Math.max(0, (viewportHeight - renderHeight) / 2);
+    const right = viewportWidth - left;
+    const bottom = viewportHeight - top;
+    const toPercent = (value, total) => `${((Math.max(0, Math.min(total, value)) / total) * 100).toFixed(4)}%`;
+
+    root.style.setProperty('--cerebr-contain-image-left', toPercent(left, viewportWidth));
+    root.style.setProperty('--cerebr-contain-image-right', toPercent(right, viewportWidth));
+    root.style.setProperty('--cerebr-contain-image-top', toPercent(top, viewportHeight));
+    root.style.setProperty('--cerebr-contain-image-bottom', toPercent(bottom, viewportHeight));
+
+    // 边缘羽化宽度与面板 blur 半径联动：
+    // - 保证“原图边缘淡出带”至少覆盖玻璃模糊的主要扩散范围；
+    // - 同时保留一个与视口尺寸相关的最小值，避免超宽屏下看起来过窄。
+    let panelBlurRadius = 26;
+    try {
+      const rootStyle = getComputedStyle(root);
+      const blurRaw = String(rootStyle.getPropertyValue('--cerebr-panel-blur-radius') || '').trim();
+      const blurParsed = Number.parseFloat(blurRaw);
+      if (Number.isFinite(blurParsed) && blurParsed > 0) {
+        panelBlurRadius = blurParsed;
+      }
+    } catch (_) {}
+    const blurDrivenFadePx = Math.round(panelBlurRadius * 1.35);
+    const viewportDrivenFadePx = Math.round(Math.min(viewportWidth, viewportHeight) * 0.02);
+    const fadePx = Math.max(14, Math.min(96, Math.max(blurDrivenFadePx, viewportDrivenFadePx)));
+    root.style.setProperty('--cerebr-contain-edge-fade-x', `${((fadePx / viewportWidth) * 100).toFixed(4)}%`);
+    root.style.setProperty('--cerebr-contain-edge-fade-y', `${((fadePx / viewportHeight) * 100).toFixed(4)}%`);
+
+    body?.classList?.toggle?.('fullscreen-contain-bars-x', left >= 1);
+    body?.classList?.toggle?.('fullscreen-contain-bars-y', top >= 1);
+  }
+
+  function setBackgroundImageNaturalSize(width, height, sourceUrl = '') {
+    const w = Number(width);
+    const h = Number(height);
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+      backgroundImageNaturalSize = null;
+      backgroundImageNaturalSizeSource = '';
+      clearContainEdgeMaskGeometry();
+      return;
+    }
+    backgroundImageNaturalSize = { width: w, height: h };
+    backgroundImageNaturalSizeSource = String(sourceUrl || '');
+    updateContainEdgeMaskGeometry();
+  }
+
+  function probeBackgroundImageNaturalSize(imageUrl, token) {
+    if (!imageUrl) {
+      setBackgroundImageNaturalSize(0, 0);
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      if (token !== backgroundImageLoadToken) return;
+      setBackgroundImageNaturalSize(img.naturalWidth, img.naturalHeight, imageUrl);
+    };
+    img.onerror = () => {
+      if (token !== backgroundImageLoadToken) return;
+      setBackgroundImageNaturalSize(0, 0, '');
+    };
+    img.src = imageUrl;
+  }
+
   function ensureImageLoad(url) {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -2069,9 +2228,13 @@ export function createSettingsManager(appContext) {
       };
       img.onload = () => {
         cleanup();
-        resolve(url);
+        resolve({
+          url,
+          width: img.naturalWidth,
+          height: img.naturalHeight
+        });
       };
-      img.onerror = (event) => {
+      img.onerror = () => {
         cleanup();
         reject(new Error(`无法加载图片: ${url}`));
       };
@@ -2090,7 +2253,7 @@ export function createSettingsManager(appContext) {
     return match ? match[2] : '';
   }
 
-  function updateBackgroundImageCss(cssValue, hasImage, token, debugUrl) {
+  function updateBackgroundImageCss(cssValue, hasImage, token, debugUrl, imageMeta = null) {
     if (token !== backgroundImageLoadToken) return;
     document.documentElement.style.setProperty('--cerebr-background-image', cssValue || 'none');
 
@@ -2103,6 +2266,26 @@ export function createSettingsManager(appContext) {
         node.classList.remove('has-custom-background-image');
       }
     });
+
+    if (!hasImage) {
+      setBackgroundImageNaturalSize(0, 0, '');
+    } else if (imageMeta?.width && imageMeta?.height) {
+      const source = imageMeta?.url || debugUrl || '';
+      setBackgroundImageNaturalSize(imageMeta.width, imageMeta.height, source);
+    } else if (debugUrl) {
+      if (
+        backgroundImageNaturalSize?.width
+        && backgroundImageNaturalSize?.height
+        && backgroundImageNaturalSizeSource === debugUrl
+      ) {
+        updateContainEdgeMaskGeometry();
+      } else {
+        probeBackgroundImageNaturalSize(debugUrl, token);
+      }
+    } else {
+      // 未知尺寸时先保持当前几何；后续若拿到真实尺寸会再刷新。
+      updateContainEdgeMaskGeometry();
+    }
 
     if (hasImage && debugUrl) {
       console.log('[Cerebr] 已加载背景图片:', debugUrl);
@@ -2117,9 +2300,21 @@ export function createSettingsManager(appContext) {
 
   function applyBackgroundOverallOpacity(value) {
     const numeric = clamp01(value, DEFAULT_SETTINGS.backgroundOverallOpacity);
-    // 控制背景图片“可见度”：CSS 层会用遮罩混合而非直接降低采样源不透明度，
-    // 以避免 backdrop-filter 在低可见度时出现“清晰底图透出”。
+    // 控制背景图片主层可见度（仅作用于原图层）；
+    // 透明像素透出区域由“合成底板 + 网页渗色层”兜底，避免出现清晰网页漏光。
     document.documentElement.style.setProperty('--cerebr-background-image-opacity', numeric);
+  }
+
+  function applyBackgroundPageBleedStrength(value) {
+    const numeric = clampBackgroundPageBleedStrength(value);
+    // 网页渗色层：只借网页“色感”，不追求看见网页细节。
+    document.documentElement.style.setProperty('--cerebr-page-bleed-strength', numeric);
+  }
+
+  function applyBackgroundPageBleedBlur(value) {
+    const blurPx = clampBackgroundPageBleedBlur(value);
+    // 以较大 blur 半径把网页细节打散成色块，避免清晰结构透出。
+    document.documentElement.style.setProperty('--cerebr-page-bleed-blur', `${blurPx}px`);
   }
 
   /**
@@ -2130,8 +2325,12 @@ export function createSettingsManager(appContext) {
    */
   function applyFullscreenBackgroundCover(enabled) {
     const useCover = !!enabled;
-    document.documentElement.style.setProperty('--cerebr-fullscreen-bg-size', useCover ? 'cover' : 'contain');
-    document.documentElement.style.setProperty('--cerebr-fullscreen-blur-opacity', useCover ? '0' : '1');
+    const root = document.documentElement;
+    root.style.setProperty('--cerebr-fullscreen-bg-size', useCover ? 'cover' : 'contain');
+    root.style.setProperty('--cerebr-fullscreen-blur-opacity', useCover ? '0' : '1');
+    // 供 CSS 区分 cover / contain。contain 模式下会给图片边缘做羽化，避免出现清晰硬边。
+    root.classList.toggle('fullscreen-bg-cover-enabled', useCover);
+    updateContainEdgeMaskGeometry();
   }
 
   function refreshBackgroundImage(options = {}) {
@@ -2169,6 +2368,18 @@ export function createSettingsManager(appContext) {
     const n = Number(input);
     if (Number.isNaN(n)) return fallback;
     return Math.min(1, Math.max(0, n));
+  }
+
+  function clampBackgroundPageBleedStrength(input) {
+    const n = Number(input);
+    if (!Number.isFinite(n)) return DEFAULT_SETTINGS.backgroundPageBleedStrength;
+    return Math.min(0.6, Math.max(0, n));
+  }
+
+  function clampBackgroundPageBleedBlur(input) {
+    const n = Number(input);
+    if (!Number.isFinite(n)) return DEFAULT_SETTINGS.backgroundPageBleedBlur;
+    return Math.round(Math.min(140, Math.max(24, n)));
   }
 
   function getScrollMinimapWidthBounds() {
@@ -2560,6 +2771,7 @@ export function createSettingsManager(appContext) {
       }
       syncFullscreenWidthControlBounds();
       applyFullscreenWidth(currentSettings.fullscreenWidth);
+      updateContainEdgeMaskGeometry();
     });
     return initSettings();
   }

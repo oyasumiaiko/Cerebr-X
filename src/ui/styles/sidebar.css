@@ -29,12 +29,21 @@ input, textarea, select {
     --cerebr-background-image-intensity: 0;
     --cerebr-background-image-opacity: 1;
     --cerebr-chat-background-color: var(--cerebr-bg-color);
+    --cerebr-background-compose-color: #262b33;
+    --cerebr-page-bleed-strength: 0.16;
+    --cerebr-page-bleed-blur: 72px;
     --cerebr-panel-blur-radius: 26px;
     --cerebr-panel-surface-bg: var(--cerebr-bg-color);
     --cerebr-panel-surface-bg-strong: var(--cerebr-bg-color);
     --cerebr-panel-inline-bg: var(--cerebr-input-bg);
     --cerebr-fullscreen-bg-size: contain;
     --cerebr-fullscreen-blur-opacity: 1;
+    --cerebr-contain-image-left: 0%;
+    --cerebr-contain-image-right: 100%;
+    --cerebr-contain-image-top: 0%;
+    --cerebr-contain-image-bottom: 100%;
+    --cerebr-contain-edge-fade-x: 2%;
+    --cerebr-contain-edge-fade-y: 2%;
     --cerebr-scroll-minimap-enabled: 1;
     --cerebr-scroll-minimap-width: 24px;
     --cerebr-scroll-minimap-opacity: 0.94;
@@ -230,58 +239,78 @@ body {
     box-sizing: border-box;
 }
 
-html::before {
-    content: '';
+/* 背景层栈：把底板 / 网页渗色 / 图片氛围 / 图片主层拆成独立图层，避免相互串扰。 */
+#cerebr-background-stack {
     position: fixed;
     inset: 0;
     pointer-events: none;
+    z-index: 0;
+}
+
+#cerebr-background-base,
+#cerebr-background-web-bleed,
+#cerebr-background-atmosphere,
+#cerebr-background-main {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+#cerebr-background-base {
+    background-color: var(--cerebr-background-compose-color, #262b33);
+    /* 底板不再固定全不透明；让“网页渗色强度”能直接影响最终可见度。 */
+    opacity: clamp(0.28, calc(0.96 - var(--cerebr-page-bleed-strength, 0.16) * 1.1), 0.96);
+    z-index: 1;
+    transition: opacity 0.25s ease;
+}
+
+#cerebr-background-web-bleed {
+    /* 放在最底层直接采样页面，再由上层底板做稳定化，避免“清晰漏光”。 */
+    background-color: color-mix(in srgb, var(--cerebr-background-compose-color, #262b33) 12%, transparent);
+    backdrop-filter: blur(var(--cerebr-page-bleed-blur, 72px)) saturate(calc(1 + var(--cerebr-page-bleed-strength, 0.16) * 0.8));
+    -webkit-backdrop-filter: blur(var(--cerebr-page-bleed-blur, 72px)) saturate(calc(1 + var(--cerebr-page-bleed-strength, 0.16) * 0.8));
+    opacity: 1;
+    z-index: 0;
+    transition: backdrop-filter 0.3s ease, -webkit-backdrop-filter 0.3s ease;
+}
+
+#cerebr-background-atmosphere {
     background-image: var(--cerebr-background-image);
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    opacity: calc(var(--cerebr-background-image-intensity) * var(--cerebr-background-image-opacity, 1) * 0.6);
-    z-index: -3;
+    opacity: calc(var(--cerebr-background-image-intensity) * 0.85);
     filter: blur(calc(24px + var(--cerebr-background-image-intensity) * 120px));
     transform: scale(calc(1.02 + var(--cerebr-background-image-intensity) * 0.18));
     transform-origin: center;
+    z-index: 2;
     will-change: opacity, filter, transform;
     transition: opacity 0.3s ease, filter 0.3s ease, transform 0.3s ease;
 }
 
-body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
+#cerebr-background-main {
     background-image: var(--cerebr-background-image);
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    opacity: 1;
-    z-index: -2;
-    transition: none;
+    /* 让“图片氛围(模糊)”在主图不降到很低透明度时也能有可见反馈。 */
+    opacity: calc(var(--cerebr-background-image-opacity, 1) * (1 - var(--cerebr-background-image-intensity, 0) * 0.18));
+    z-index: 3;
+    transition: opacity 0.25s ease;
 }
 
-body::after {
-    content: '';
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    background-color: var(--cerebr-chat-background-color, var(--cerebr-bg-color));
-    opacity: calc(1 - var(--cerebr-background-image-opacity, 1));
-    z-index: -1;
-    transition: opacity 0.3s ease, box-shadow 0.3s ease;
+/* 浏览器不支持 backdrop-filter 时，回退为纯色底板，避免出现不可控的透明穿透。 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    #cerebr-background-base {
+        opacity: 1;
+    }
+
+    #cerebr-background-web-bleed {
+        opacity: 0;
+    }
 }
 
-body:not(.has-custom-background-image)::before {
-    display: none;
-}
-
-body:not(.has-custom-background-image)::after {
-    display: none;
-}
-
-html:not(.has-custom-background-image)::before {
+html:not(.has-custom-background-image) #cerebr-background-stack {
     display: none;
 }
 
@@ -6736,14 +6765,78 @@ html.fullscreen-mode {
   --cerebr-input-bg: rgba(248, 248, 248, 1) !important; */
 }
 
-html.fullscreen-mode body::before {
+html.fullscreen-mode #cerebr-background-main {
   background-size: var(--cerebr-fullscreen-bg-size, contain);
   background-position: center;
   background-repeat: no-repeat;
 }
 
-html.fullscreen-mode::before {
-  opacity: calc(var(--cerebr-fullscreen-blur-opacity, 1) * var(--cerebr-background-image-intensity) * var(--cerebr-background-image-opacity, 1) * 0.8);
+/* contain 模式只做边缘羽化，不直接模糊主图本体，保证前景清晰。
+   羽化位置由 JS 按“图片在 contain 下的实际投影区域”实时计算，避免改错位置。 */
+html.fullscreen-mode:not(.fullscreen-bg-cover-enabled) #cerebr-background-main {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* 图片在左右出现留边时（最常见），仅对左右边缘做过渡。 */
+html.fullscreen-mode:not(.fullscreen-bg-cover-enabled) body.fullscreen-contain-bars-x #cerebr-background-main {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    transparent var(--cerebr-contain-image-left),
+    #000 min(100%, calc(var(--cerebr-contain-image-left) + var(--cerebr-contain-edge-fade-x))),
+    #000 max(0%, calc(var(--cerebr-contain-image-right) - var(--cerebr-contain-edge-fade-x))),
+    transparent var(--cerebr-contain-image-right),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    transparent var(--cerebr-contain-image-left),
+    #000 min(100%, calc(var(--cerebr-contain-image-left) + var(--cerebr-contain-edge-fade-x))),
+    #000 max(0%, calc(var(--cerebr-contain-image-right) - var(--cerebr-contain-edge-fade-x))),
+    transparent var(--cerebr-contain-image-right),
+    transparent 100%
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+
+/* 若图片在上下出现留边，则改为上下方向羽化。 */
+html.fullscreen-mode:not(.fullscreen-bg-cover-enabled) body.fullscreen-contain-bars-y #cerebr-background-main {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent var(--cerebr-contain-image-top),
+    #000 min(100%, calc(var(--cerebr-contain-image-top) + var(--cerebr-contain-edge-fade-y))),
+    #000 max(0%, calc(var(--cerebr-contain-image-bottom) - var(--cerebr-contain-edge-fade-y))),
+    transparent var(--cerebr-contain-image-bottom),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent var(--cerebr-contain-image-top),
+    #000 min(100%, calc(var(--cerebr-contain-image-top) + var(--cerebr-contain-edge-fade-y))),
+    #000 max(0%, calc(var(--cerebr-contain-image-bottom) - var(--cerebr-contain-edge-fade-y))),
+    transparent var(--cerebr-contain-image-bottom),
+    transparent 100%
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+
+html.fullscreen-mode.fullscreen-bg-cover-enabled #cerebr-background-main {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+html.fullscreen-mode #cerebr-background-atmosphere {
+  opacity: calc(var(--cerebr-fullscreen-blur-opacity, 1) * var(--cerebr-background-image-intensity));
 }
 
 /* 全屏下：让容器占满宽度，但用内边距把视觉内容限制在中心列。
