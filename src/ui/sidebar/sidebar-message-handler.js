@@ -632,6 +632,9 @@
       const innerWidth = Math.max(2, width - innerPadding * 2);
       const messageGap = 1;
       const messageCornerRadius = 2;
+      const isDarkTheme = document.documentElement.classList.contains('dark-theme');
+      const minimapUserMessageColor = isDarkTheme ? 'rgba(90, 156, 246, 0.62)' : 'rgba(98, 165, 255, 0.66)';
+      const minimapAiMessageColor = isDarkTheme ? 'rgba(132, 140, 154, 0.32)' : 'rgba(162, 166, 178, 0.42)';
       let previousBarBottom = -messageGap;
 
       function fillRoundedRect(x, y, w, h, radius) {
@@ -675,21 +678,34 @@
         const x = innerPadding;
         const w = innerWidth;
 
-        // 统一加 1px 竖向间距，且通过“减小本条高度”而不是“整体下推”避免累计漂移。
+        const minimumReadableHeight = isUser ? 2 : 1;
+        // 优先保证短消息可见性：只有在不压缩到最小可读高度以下时，才强制 1px 间距。
         if (index > 0) {
           const minTop = previousBarBottom + messageGap;
           if (y < minTop) {
             const overlap = minTop - y;
-            y = minTop;
-            h = Math.max(1, h - overlap);
+            const shrinkedHeight = h - overlap;
+            if (shrinkedHeight >= minimumReadableHeight) {
+              y = minTop;
+              h = shrinkedHeight;
+            } else {
+              // 间距不够时允许贴边，避免把原本就短的消息压成几乎不可见的细线。
+              y = Math.max(previousBarBottom, y);
+              h = Math.max(minimumReadableHeight, h);
+            }
           }
         }
         if (y >= height) break;
-        h = Math.max(1, Math.min(height - y, h));
+        const availableHeight = Math.max(0, height - y);
+        if (availableHeight <= 0) break;
+        h = Math.max(1, Math.min(availableHeight, h));
+        if (h < minimumReadableHeight && availableHeight >= minimumReadableHeight) {
+          h = minimumReadableHeight;
+        }
 
         ctx.fillStyle = isError
           ? 'rgba(245, 87, 87, 0.78)'
-          : (isUser ? 'rgba(98, 165, 255, 0.66)' : 'rgba(182, 182, 196, 0.52)');
+          : (isUser ? minimapUserMessageColor : minimapAiMessageColor);
         const radius = Math.min(messageCornerRadius, Math.floor((Math.min(w, h) - 1) / 2));
         fillRoundedRect(x, y, w, h, radius);
         previousBarBottom = y + h;
