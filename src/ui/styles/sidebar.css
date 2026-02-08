@@ -471,8 +471,12 @@ body.standalone-mode #empty-state-repomix {
     opacity: var(--cerebr-scroll-minimap-opacity, 0.94);
 }
 
+.chat-scroll-minimap.chat-scroll-minimap--active:active {
+    opacity: 1;
+}
+
 .chat-scroll-minimap.chat-scroll-minimap--dragging {
-    opacity: var(--cerebr-scroll-minimap-opacity, 0.94);
+    opacity: 1;
 }
 
 .chat-scroll-minimap .chat-scroll-minimap__canvas {

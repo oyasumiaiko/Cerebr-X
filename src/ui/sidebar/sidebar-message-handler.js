@@ -274,7 +274,7 @@
 
     function getConfiguredMinimapWidth() {
       const width = readRootCssNumericVar('--cerebr-scroll-minimap-width', MINIMAP_WIDTH);
-      return Math.round(clampNumber(width, 12, 96));
+      return Math.round(clampNumber(width, 12, 100));
     }
 
     function isMinimapAutoHideEnabled() {
@@ -590,8 +590,9 @@
         }
         const isUser = el.classList.contains('user-message');
         const isError = el.classList.contains('error-message');
-        const x = isUser ? innerPadding + 2 : innerPadding;
-        const w = Math.max(2, innerWidth - (isUser ? 2 : 0));
+        // 消息块不再通过左右缩进区分角色，只用颜色区分，避免画面左右节奏过于杂乱。
+        const x = innerPadding;
+        const w = innerWidth;
 
         // 统一加 1px 竖向间距，确保连续同类型消息也有分界。
         if (index > 0) {

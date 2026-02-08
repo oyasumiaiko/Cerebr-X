@@ -429,7 +429,7 @@ export function createSettingsManager(appContext) {
       group: 'layout',
       label: '缩略图宽度',
       min: 14,
-      max: 52,
+      max: 100,
       step: 1,
       unit: 'px',
       defaultValue: DEFAULT_SETTINGS.scrollMinimapWidth,
@@ -1685,7 +1685,7 @@ export function createSettingsManager(appContext) {
     const configuredMin = Number(def?.min);
     const configuredMax = Number(def?.max);
     const min = Number.isFinite(configuredMin) ? Math.max(8, Math.round(configuredMin)) : 14;
-    const max = Number.isFinite(configuredMax) ? Math.max(min, Math.round(configuredMax)) : 52;
+    const max = Number.isFinite(configuredMax) ? Math.max(min, Math.round(configuredMax)) : 100;
     return { min, max };
   }
 
