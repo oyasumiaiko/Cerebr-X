@@ -809,6 +809,46 @@ export function createSelectionThreadManager(appContext) {
     return summarizePreviewText(stripHtmlToText(normalized || ''));
   }
 
+  function formatRelativeTimeFallback(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    if (seconds < 60) return `${seconds}秒前`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}分钟前`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}小时前`;
+    const days = Math.floor(hours / 24);
+    return `${days}天前`;
+  }
+
+  function formatRelativeTimeWithHistoryLogic(date) {
+    const formatter = (chatHistoryUI && typeof chatHistoryUI.formatRelativeTime === 'function')
+      ? chatHistoryUI.formatRelativeTime
+      : formatRelativeTimeFallback;
+    try {
+      return formatter(date);
+    } catch (_) {
+      return formatRelativeTimeFallback(date);
+    }
+  }
+
+  function formatThreadRelativeTimeSpan(annotation, chain = []) {
+    const validChain = Array.isArray(chain) && chain.length ? chain : collectThreadChain(annotation);
+    const timestamps = validChain
+      .map(node => Number(node?.timestamp))
+      .filter(ts => Number.isFinite(ts) && ts > 0);
+    const fallbackTs = Number(annotation?.createdAt) || 0;
+    const startTs = timestamps.length ? Math.min(...timestamps) : fallbackTs;
+    const endTs = timestamps.length ? Math.max(...timestamps) : fallbackTs;
+    if (!startTs && !endTs) return '';
+    const startDate = new Date(startTs || endTs);
+    const endDate = new Date(endTs || startTs);
+    const startText = formatRelativeTimeWithHistoryLogic(startDate);
+    const endText = formatRelativeTimeWithHistoryLogic(endDate);
+    return startText === endText ? startText : `${startText} - ${endText}`;
+  }
+
   function getThreadActivityTimestamp(annotation) {
     if (!annotation) return 0;
     const candidateId = annotation.lastMessageId || annotation.rootMessageId || '';
@@ -831,6 +871,7 @@ export function createSelectionThreadManager(appContext) {
       const chain = collectThreadChain(annotation)
         .filter(node => !node?.threadHiddenSelection);
       const count = chain.length;
+      const timeSpan = formatThreadRelativeTimeSpan(annotation, chain);
       let lastUserText = '';
       for (let i = chain.length - 1; i >= 0; i--) {
         const node = chain[i];
@@ -842,10 +883,15 @@ export function createSelectionThreadManager(appContext) {
       if (!lastUserText) {
         lastUserText = '(暂无用户提问)';
       }
+      const summaryParts = [`共 ${count} 条`];
+      if (timeSpan) {
+        summaryParts.push(timeSpan);
+      }
+      summaryParts.push(lastUserText);
       return {
         threadId: annotation.id,
         variant: 'thread',
-        text: `共 ${count} 条 · ${lastUserText}`
+        text: summaryParts.join(' · ')
       };
     });
   }

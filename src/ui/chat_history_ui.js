@@ -11267,6 +11267,7 @@ export function createChatHistoryUI(appContext) {
     getActiveConversationSummary,
     updateConversationSummary,
     clearMemoryCache,
+    formatRelativeTime,
     createForkConversation,
     restartAutoBackupScheduler,
     repairRecentImages,
