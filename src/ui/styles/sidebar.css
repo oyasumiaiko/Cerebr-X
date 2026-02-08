@@ -433,6 +433,55 @@ body.standalone-mode #empty-state-repomix {
     padding-right: calc(15px - var(--scrollbar-width, 0px));
 }
 
+/* 全屏滚动缩略图（MiniMap）：
+   - 仅在全屏布局下由脚本按需激活；
+   - 默认放在主对话列左侧，便于快速定位长对话。 */
+#chat-scroll-minimap {
+    position: absolute;
+    width: 24px;
+    pointer-events: none;
+    z-index: 5;
+    opacity: 0;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 55%, transparent);
+    background: color-mix(in srgb, var(--cerebr-bg-color) 72%, transparent);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    transition: opacity 0.16s ease;
+    overflow: hidden;
+}
+
+#chat-scroll-minimap.chat-scroll-minimap--active {
+    pointer-events: auto;
+    opacity: 0.94;
+}
+
+#chat-scroll-minimap.chat-scroll-minimap--dragging {
+    opacity: 1;
+}
+
+#chat-scroll-minimap .chat-scroll-minimap__canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+#chat-scroll-minimap .chat-scroll-minimap__thumb {
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    top: 0;
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 75%, transparent);
+    background: color-mix(in srgb, var(--cerebr-bg-color) 34%, transparent);
+    box-shadow: 0 1px 6px color-mix(in srgb, #000 24%, transparent);
+    cursor: grab;
+}
+
+#chat-scroll-minimap.chat-scroll-minimap--dragging .chat-scroll-minimap__thumb {
+    cursor: grabbing;
+}
+
 /* 线程面板容器 */
 #thread-panel {
     display: none;
