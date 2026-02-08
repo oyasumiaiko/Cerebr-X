@@ -33,6 +33,9 @@ input, textarea, select {
     --cerebr-scroll-minimap-enabled: 1;
     --cerebr-scroll-minimap-width: 24px;
     --cerebr-scroll-minimap-opacity: 0.94;
+    --cerebr-scroll-minimap-idle-opacity: 0;
+    --cerebr-scroll-minimap-autohide: 0;
+    --cerebr-scroll-minimap-message-mode: proportional;
     
     --cerebr-bg-color: rgba(255, 255, 255, var(--cerebr-opacity));
     --cerebr-text-color: #222;
@@ -459,8 +462,17 @@ body.standalone-mode #empty-state-repomix {
     opacity: var(--cerebr-scroll-minimap-opacity, 0.94);
 }
 
+.chat-scroll-minimap.chat-scroll-minimap--active.chat-scroll-minimap--auto-hide {
+    opacity: var(--cerebr-scroll-minimap-idle-opacity, 0);
+}
+
+.chat-scroll-minimap.chat-scroll-minimap--active.chat-scroll-minimap--auto-hide:hover,
+.chat-scroll-minimap.chat-scroll-minimap--active.chat-scroll-minimap--auto-hide:focus-within {
+    opacity: var(--cerebr-scroll-minimap-opacity, 0.94);
+}
+
 .chat-scroll-minimap.chat-scroll-minimap--dragging {
-    opacity: 1;
+    opacity: var(--cerebr-scroll-minimap-opacity, 0.94);
 }
 
 .chat-scroll-minimap .chat-scroll-minimap__canvas {

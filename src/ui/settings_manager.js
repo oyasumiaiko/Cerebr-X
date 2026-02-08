@@ -122,6 +122,8 @@ export function createSettingsManager(appContext) {
     enableScrollMinimap: true,
     scrollMinimapWidth: 24,
     scrollMinimapOpacity: 0.94,
+    scrollMinimapAutoHide: false,
+    scrollMinimapMessageMode: 'proportional',
     // 是否启用 $ / $$ 作为数学公式分隔符（默认开启以保持兼容）
     enableDollarMath: true,
     // 是否在输入框 placeholder 中显示当前模型名
@@ -446,6 +448,28 @@ export function createSettingsManager(appContext) {
       formatValue: (v) => `${Math.round(Number(v) * 100)}%`,
       apply: (v) => applyScrollMinimapOpacity(v)
     },
+    {
+      key: 'scrollMinimapAutoHide',
+      type: 'toggle',
+      menu: 'quick',
+      group: 'display',
+      label: '缩略图自动隐藏',
+      defaultValue: DEFAULT_SETTINGS.scrollMinimapAutoHide,
+      apply: (v) => applyScrollMinimapAutoHide(v)
+    },
+    {
+      key: 'scrollMinimapMessageMode',
+      type: 'select',
+      menu: 'quick',
+      group: 'display',
+      label: '缩略图消息模式',
+      options: [
+        { label: '按实际高度比例', value: 'proportional' },
+        { label: '固定消息高度', value: 'fixed' }
+      ],
+      defaultValue: DEFAULT_SETTINGS.scrollMinimapMessageMode,
+      apply: (v) => applyScrollMinimapMessageMode(v)
+    },
     // 字体大小
     {
       key: 'fontSize',
@@ -565,6 +589,12 @@ export function createSettingsManager(appContext) {
     }
     if (key === 'scrollMinimapOpacity') {
       return clamp01(value, DEFAULT_SETTINGS.scrollMinimapOpacity);
+    }
+    if (key === 'scrollMinimapAutoHide') {
+      return !!value;
+    }
+    if (key === 'scrollMinimapMessageMode') {
+      return normalizeScrollMinimapMessageMode(value);
     }
     return value;
   }
@@ -1666,6 +1696,17 @@ export function createSettingsManager(appContext) {
     return Math.round(Math.min(max, Math.max(min, numeric)));
   }
 
+  function normalizeScrollMinimapMessageMode(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'fixed') return 'fixed';
+    return 'proportional';
+  }
+
+  function computeMinimapIdleOpacity(_opacity) {
+    // 自动隐藏语义：非悬停时完全透明，仅在 hover/focus/drag 时恢复可见。
+    return 0;
+  }
+
   function applyScrollMinimapEnabled(enabled) {
     const useMinimap = !!enabled;
     document.documentElement.style.setProperty('--cerebr-scroll-minimap-enabled', useMinimap ? '1' : '0');
@@ -1679,6 +1720,20 @@ export function createSettingsManager(appContext) {
   function applyScrollMinimapOpacity(value) {
     const opacity = clamp01(value, DEFAULT_SETTINGS.scrollMinimapOpacity);
     document.documentElement.style.setProperty('--cerebr-scroll-minimap-opacity', String(opacity));
+    document.documentElement.style.setProperty(
+      '--cerebr-scroll-minimap-idle-opacity',
+      String(computeMinimapIdleOpacity(opacity))
+    );
+  }
+
+  function applyScrollMinimapAutoHide(enabled) {
+    const autoHide = !!enabled;
+    document.documentElement.style.setProperty('--cerebr-scroll-minimap-autohide', autoHide ? '1' : '0');
+  }
+
+  function applyScrollMinimapMessageMode(value) {
+    const mode = normalizeScrollMinimapMessageMode(value);
+    document.documentElement.style.setProperty('--cerebr-scroll-minimap-message-mode', mode);
   }
 
   // 应用自动滚动设置

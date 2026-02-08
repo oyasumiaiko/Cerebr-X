@@ -48,6 +48,8 @@
     const MINIMAP_VERTICAL_GAP = 10;
     const MINIMAP_MIN_HEIGHT = 96;
     const MINIMAP_THUMB_MIN_HEIGHT = 28;
+    const MINIMAP_MESSAGE_MODE_PROPORTIONAL = 'proportional';
+    const MINIMAP_MESSAGE_MODE_FIXED = 'fixed';
 
     function createMinimapState(key, container, side) {
       if (!container) return null;
@@ -62,7 +64,9 @@
         lastScrollHeight: 0,
         lastClientHeight: 0,
         lastMessageCount: 0,
-        dragSession: null
+        lastMessageMode: MINIMAP_MESSAGE_MODE_PROPORTIONAL,
+        dragSession: null,
+        renderContext: null
       };
     }
 
@@ -255,6 +259,15 @@
       return fallback;
     }
 
+    function readRootCssStringVar(name, fallback = '') {
+      try {
+        const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
+        const normalized = String(raw || '').trim();
+        if (normalized) return normalized;
+      } catch (_) {}
+      return fallback;
+    }
+
     function isMinimapFeatureEnabled() {
       return readRootCssNumericVar('--cerebr-scroll-minimap-enabled', 1) > 0.5;
     }
@@ -262,6 +275,18 @@
     function getConfiguredMinimapWidth() {
       const width = readRootCssNumericVar('--cerebr-scroll-minimap-width', MINIMAP_WIDTH);
       return Math.round(clampNumber(width, 12, 96));
+    }
+
+    function isMinimapAutoHideEnabled() {
+      return readRootCssNumericVar('--cerebr-scroll-minimap-autohide', 0) > 0.5;
+    }
+
+    function getMinimapMessageDisplayMode() {
+      const mode = readRootCssStringVar('--cerebr-scroll-minimap-message-mode', MINIMAP_MESSAGE_MODE_PROPORTIONAL)
+        .toLowerCase();
+      return mode === MINIMAP_MESSAGE_MODE_FIXED
+        ? MINIMAP_MESSAGE_MODE_FIXED
+        : MINIMAP_MESSAGE_MODE_PROPORTIONAL;
     }
 
     function isThreadModeActive() {
@@ -316,6 +341,147 @@
       return result;
     }
 
+    function buildMinimapRenderContext(messages, scrollHeight, clientHeight, messageDisplayMode) {
+      const safeScrollHeight = Math.max(1, Number(scrollHeight) || 0);
+      const safeClientHeight = Math.max(0, Number(clientHeight) || 0);
+      const mode = messageDisplayMode === MINIMAP_MESSAGE_MODE_FIXED
+        ? MINIMAP_MESSAGE_MODE_FIXED
+        : MINIMAP_MESSAGE_MODE_PROPORTIONAL;
+      const messageLayout = [];
+      for (const el of messages) {
+        if (!el) continue;
+        const top = Math.max(0, Number(el.offsetTop) || 0);
+        const height = Math.max(1, Number(el.offsetHeight) || 0);
+        messageLayout.push({
+          top,
+          height,
+          bottom: top + height
+        });
+      }
+      return {
+        mode,
+        scrollHeight: safeScrollHeight,
+        clientHeight: safeClientHeight,
+        maxScroll: Math.max(0, safeScrollHeight - safeClientHeight),
+        messageLayout,
+        messageCount: messageLayout.length
+      };
+    }
+
+    function resolveProgressFromContentOffset(context, offset) {
+      if (!context) return 0;
+      const safeOffset = clampNumber(offset, 0, context.scrollHeight);
+      if (context.mode !== MINIMAP_MESSAGE_MODE_FIXED || context.messageCount <= 0) {
+        return clampNumber(safeOffset / Math.max(1, context.scrollHeight), 0, 1);
+      }
+
+      const items = context.messageLayout;
+      const total = context.messageCount;
+      const first = items[0];
+      const last = items[total - 1];
+      if (!first || !last) return 0;
+      if (safeOffset <= first.top) return 0;
+      if (safeOffset >= last.bottom) return 1;
+
+      let low = 0;
+      let high = total - 1;
+      let idx = total - 1;
+      while (low <= high) {
+        const mid = (low + high) >> 1;
+        if (items[mid].bottom <= safeOffset) {
+          low = mid + 1;
+        } else {
+          idx = mid;
+          high = mid - 1;
+        }
+      }
+
+      const current = items[idx];
+      if (!current) return 0;
+      if (safeOffset < current.top && idx > 0) {
+        // 落在两条消息之间的间隙时，归入上一条消息末尾，避免拖拽时跳变。
+        return clampNumber(idx / total, 0, 1);
+      }
+
+      const inMessageRatio = clampNumber(
+        (safeOffset - current.top) / Math.max(1, current.height),
+        0,
+        1
+      );
+      return clampNumber((idx + inMessageRatio) / total, 0, 1);
+    }
+
+    function resolveContentOffsetFromProgress(context, progress) {
+      if (!context) return 0;
+      const safeProgress = clampNumber(progress, 0, 1);
+      if (context.mode !== MINIMAP_MESSAGE_MODE_FIXED || context.messageCount <= 0) {
+        return safeProgress * context.scrollHeight;
+      }
+
+      const total = context.messageCount;
+      const scaled = safeProgress * total;
+      let idx = Math.floor(scaled);
+      let ratio = scaled - idx;
+      if (idx >= total) {
+        idx = total - 1;
+        ratio = 1;
+      }
+      const current = context.messageLayout[idx];
+      if (!current) return safeProgress * context.scrollHeight;
+      return clampNumber(
+        current.top + ratio * Math.max(1, current.height),
+        0,
+        context.scrollHeight
+      );
+    }
+
+    function resolveScrollTopFromProgress(context, progress, options = {}) {
+      if (!context) return 0;
+      const centerViewport = options.centerViewport === true;
+      const contentOffset = resolveContentOffsetFromProgress(context, progress);
+      const target = centerViewport
+        ? (contentOffset - context.clientHeight / 2)
+        : contentOffset;
+      return clampNumber(target, 0, context.maxScroll);
+    }
+
+    function resolveViewportProgressRange(context, scrollTop) {
+      if (!context) {
+        return {
+          topProgress: 0,
+          visibleSpan: 1
+        };
+      }
+      const safeTop = clampNumber(scrollTop, 0, context.maxScroll);
+      const viewportBottom = safeTop + context.clientHeight;
+      const topProgress = resolveProgressFromContentOffset(context, safeTop);
+      const bottomProgress = resolveProgressFromContentOffset(context, viewportBottom);
+      let visibleSpan = Math.max(0, bottomProgress - topProgress);
+
+      if (visibleSpan <= 0 && context.mode === MINIMAP_MESSAGE_MODE_FIXED && context.messageCount > 0) {
+        let visibleMessageCount = 0;
+        const items = context.messageLayout;
+        for (const item of items) {
+          if (!item) continue;
+          if (item.bottom > safeTop && item.top < viewportBottom) {
+            visibleMessageCount += 1;
+          }
+        }
+        if (visibleMessageCount > 0) {
+          visibleSpan = visibleMessageCount / context.messageCount;
+        }
+      }
+
+      if (visibleSpan <= 0) {
+        visibleSpan = context.clientHeight / Math.max(1, context.scrollHeight);
+      }
+
+      return {
+        topProgress: clampNumber(topProgress, 0, 1),
+        visibleSpan: clampNumber(visibleSpan, 0, 1)
+      };
+    }
+
     function syncMinimapGeometry(state, minimapWidth) {
       if (!state?.root || !state?.container) return { trackHeight: 0 };
       const layoutRect = chatLayout.getBoundingClientRect();
@@ -352,7 +518,7 @@
       return { trackHeight: height };
     }
 
-    function drawMinimapOverview(state, messages, trackHeight, scrollHeight) {
+    function drawMinimapOverview(state, messages, trackHeight, scrollHeight, messageDisplayMode) {
       if (!state?.canvas || !state?.root) return;
       const width = Math.max(1, state.root.clientWidth);
       const height = Math.max(1, trackHeight);
@@ -373,12 +539,28 @@
       const contentHeight = Math.max(1, scrollHeight);
       const innerPadding = 3;
       const innerWidth = Math.max(2, width - innerPadding * 2);
+      const useFixedMessageHeight = messageDisplayMode === MINIMAP_MESSAGE_MODE_FIXED;
+      const safeMessageCount = Math.max(1, messages.length);
 
-      for (const el of messages) {
-        const topRatio = (el.offsetTop || 0) / contentHeight;
-        const heightRatio = (el.offsetHeight || 0) / contentHeight;
-        const y = Math.max(0, Math.floor(topRatio * height));
-        const h = Math.max(1, Math.ceil(heightRatio * height));
+      for (let index = 0; index < messages.length; index += 1) {
+        const el = messages[index];
+        let y = 0;
+        let h = 1;
+        if (useFixedMessageHeight) {
+          // 固定消息高度模式：每条消息占据等长槽位，仅保留 1px 间隙提升可读性。
+          const slotTop = Math.floor((index / safeMessageCount) * height);
+          const slotBottom = Math.ceil(((index + 1) / safeMessageCount) * height);
+          const slotHeight = Math.max(1, slotBottom - slotTop);
+          const barHeight = Math.max(1, slotHeight - 1);
+          const barTop = slotTop + Math.floor((slotHeight - barHeight) / 2);
+          y = Math.max(0, Math.min(height - 1, barTop));
+          h = Math.max(1, Math.min(height - y, barHeight));
+        } else {
+          const topRatio = (el.offsetTop || 0) / contentHeight;
+          const heightRatio = (el.offsetHeight || 0) / contentHeight;
+          y = Math.max(0, Math.floor(topRatio * height));
+          h = Math.max(1, Math.ceil(heightRatio * height));
+        }
         const isUser = el.classList.contains('user-message');
         const isError = el.classList.contains('error-message');
         const x = isUser ? innerPadding + 2 : innerPadding;
@@ -391,22 +573,29 @@
       }
     }
 
-    function updateMinimapThumb(state, trackHeight, scrollHeight, clientHeight) {
+    function updateMinimapThumb(state, trackHeight, renderContext) {
       if (!state?.thumb) return;
       const safeTrackHeight = Math.max(1, trackHeight);
-      const safeClientHeight = Math.max(0, clientHeight);
-      const maxScroll = Math.max(0, scrollHeight - safeClientHeight);
-      const thumbHeight = Math.max(
+      const context = renderContext || state.renderContext;
+      const scrollTop = state.container?.scrollTop || 0;
+      const range = resolveViewportProgressRange(context, scrollTop);
+      const visibleSpan = clampNumber(range.visibleSpan, 0, 1);
+      const rawThumbHeight = Math.max(
         MINIMAP_THUMB_MIN_HEIGHT,
-        Math.round((safeClientHeight / Math.max(1, scrollHeight)) * safeTrackHeight)
+        Math.round(visibleSpan * safeTrackHeight)
       );
+      const thumbHeight = Math.min(safeTrackHeight, rawThumbHeight);
       const maxThumbTop = Math.max(0, safeTrackHeight - thumbHeight);
-      const ratio = maxScroll > 0 ? (state.container.scrollTop || 0) / maxScroll : 0;
-      const thumbTop = Math.round(maxThumbTop * clampNumber(ratio, 0, 1));
+      const maxTopProgress = Math.max(0, 1 - visibleSpan);
+      const normalizedTop = maxTopProgress > 0
+        ? clampNumber(range.topProgress / maxTopProgress, 0, 1)
+        : 0;
+      const thumbTop = Math.round(maxThumbTop * normalizedTop);
 
       state.thumb.style.height = `${thumbHeight}px`;
       state.thumb.style.transform = `translateY(${thumbTop}px)`;
       state.thumb.dataset.maxThumbTop = String(maxThumbTop);
+      state.thumb.dataset.viewportSpan = String(visibleSpan);
     }
 
     function setMinimapVisible(state, visible) {
@@ -415,6 +604,7 @@
       if (!visible) {
         state.root.classList.remove('chat-scroll-minimap--dragging');
         state.dragSession = null;
+        state.renderContext = null;
       }
     }
 
@@ -423,15 +613,19 @@
       const centerViewport = options.centerViewport !== false;
       const rect = state.root.getBoundingClientRect();
       const y = clampNumber(clientY - rect.top, 0, Math.max(1, rect.height));
+      const progress = clampNumber(y / Math.max(1, rect.height), 0, 1);
+      const context = state.renderContext;
+      if (context && context.maxScroll > 0) {
+        state.container.scrollTop = resolveScrollTopFromProgress(context, progress, { centerViewport });
+        return;
+      }
+
       const scrollHeight = state.container.scrollHeight || 0;
       const clientHeight = state.container.clientHeight || 0;
       const maxScroll = Math.max(0, scrollHeight - clientHeight);
       if (maxScroll <= 0) return;
-
-      let target = (y / Math.max(1, rect.height)) * scrollHeight;
-      if (centerViewport) {
-        target -= clientHeight / 2;
-      }
+      let target = progress * scrollHeight;
+      if (centerViewport) target -= clientHeight / 2;
       state.container.scrollTop = clampNumber(target, 0, maxScroll);
     }
 
@@ -443,6 +637,15 @@
       const ratio = maxThumbTop > 0
         ? clampNumber(thumbTop / maxThumbTop, 0, 1)
         : 0;
+      const context = state.renderContext;
+      if (context && context.maxScroll > 0) {
+        const viewportSpan = clampNumber(Number.parseFloat(state.thumb.dataset.viewportSpan), 0, 1);
+        const maxTopProgress = Math.max(0, 1 - viewportSpan);
+        const topProgress = ratio * maxTopProgress;
+        state.container.scrollTop = resolveScrollTopFromProgress(context, topProgress, { centerViewport: false });
+        return;
+      }
+
       const maxScroll = Math.max(0, (state.container.scrollHeight || 0) - (state.container.clientHeight || 0));
       if (maxScroll <= 0) return;
       state.container.scrollTop = ratio * maxScroll;
@@ -500,8 +703,9 @@
       }
     }
 
-    function renderMinimapState(state, minimapWidth, featureEnabled, fullscreenEnabled) {
+    function renderMinimapState(state, minimapWidth, featureEnabled, fullscreenEnabled, autoHideEnabled, messageDisplayMode) {
       if (!ensureMinimapElements(state)) return;
+      state.root.classList.toggle('chat-scroll-minimap--auto-hide', !!autoHideEnabled);
       const container = state.container;
       const isThreadState = state.key === 'thread';
       const threadModeActive = isThreadModeActive();
@@ -512,6 +716,8 @@
       const messageCount = messages.length;
       const scrollHeight = Math.max(0, container.scrollHeight || 0);
       const clientHeight = Math.max(0, container.clientHeight || 0);
+      const renderContext = buildMinimapRenderContext(messages, scrollHeight, clientHeight, messageDisplayMode);
+      state.renderContext = renderContext;
       const hasOverflow = scrollHeight > clientHeight + 1;
       const shouldShow = featureEnabled
         && fullscreenEnabled
@@ -526,26 +732,30 @@
 
       const metricsChanged = scrollHeight !== state.lastScrollHeight
         || clientHeight !== state.lastClientHeight
-        || messageCount !== state.lastMessageCount;
+        || messageCount !== state.lastMessageCount
+        || messageDisplayMode !== state.lastMessageMode;
       if (metricsChanged) state.needsMapRedraw = true;
 
       if (state.needsMapRedraw) {
-        drawMinimapOverview(state, messages, trackHeight, scrollHeight);
+        drawMinimapOverview(state, messages, trackHeight, scrollHeight, messageDisplayMode);
         state.needsMapRedraw = false;
         state.lastScrollHeight = scrollHeight;
         state.lastClientHeight = clientHeight;
         state.lastMessageCount = messageCount;
+        state.lastMessageMode = messageDisplayMode;
       }
 
-      updateMinimapThumb(state, trackHeight, scrollHeight, clientHeight);
+      updateMinimapThumb(state, trackHeight, renderContext);
     }
 
     function renderMinimap() {
       const featureEnabled = isMinimapFeatureEnabled();
       const fullscreenEnabled = isFullscreenLayoutActive();
       const minimapWidth = getConfiguredMinimapWidth();
+      const autoHideEnabled = isMinimapAutoHideEnabled();
+      const messageDisplayMode = getMinimapMessageDisplayMode();
       for (const state of minimapStates) {
-        renderMinimapState(state, minimapWidth, featureEnabled, fullscreenEnabled);
+        renderMinimapState(state, minimapWidth, featureEnabled, fullscreenEnabled, autoHideEnabled, messageDisplayMode);
       }
     }
 
@@ -955,6 +1165,7 @@
         state.canvas = null;
         state.thumb = null;
         state.dragSession = null;
+        state.renderContext = null;
       });
       window.removeEventListener('resize', handleWindowResize);
       window.removeEventListener('message', handleWindowMessage);
