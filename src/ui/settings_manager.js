@@ -118,6 +118,10 @@ export function createSettingsManager(appContext) {
     backgroundImageIntensity: 0.6,
     fullscreenBackgroundCover: false,
     backgroundOverallOpacity: 1,
+    // 全屏滚动缩略图（MiniMap）：显示开关、宽度与透明度
+    enableScrollMinimap: true,
+    scrollMinimapWidth: 24,
+    scrollMinimapOpacity: 0.94,
     // 是否启用 $ / $$ 作为数学公式分隔符（默认开启以保持兼容）
     enableDollarMath: true,
     // 是否在输入框 placeholder 中显示当前模型名
@@ -407,6 +411,41 @@ export function createSettingsManager(appContext) {
       defaultValue: DEFAULT_SETTINGS.fullscreenWidth,
       apply: (v) => applyFullscreenWidth(v)
     },
+    {
+      key: 'enableScrollMinimap',
+      type: 'toggle',
+      menu: 'quick',
+      group: 'layout',
+      label: '启用滚动缩略图',
+      defaultValue: DEFAULT_SETTINGS.enableScrollMinimap,
+      apply: (v) => applyScrollMinimapEnabled(v)
+    },
+    {
+      key: 'scrollMinimapWidth',
+      type: 'range',
+      menu: 'quick',
+      group: 'layout',
+      label: '缩略图宽度',
+      min: 14,
+      max: 52,
+      step: 1,
+      unit: 'px',
+      defaultValue: DEFAULT_SETTINGS.scrollMinimapWidth,
+      apply: (v) => applyScrollMinimapWidth(v)
+    },
+    {
+      key: 'scrollMinimapOpacity',
+      type: 'range',
+      menu: 'quick',
+      group: 'display',
+      label: '缩略图透明度',
+      min: 0.2,
+      max: 1,
+      step: 0.05,
+      defaultValue: DEFAULT_SETTINGS.scrollMinimapOpacity,
+      formatValue: (v) => `${Math.round(Number(v) * 100)}%`,
+      apply: (v) => applyScrollMinimapOpacity(v)
+    },
     // 字体大小
     {
       key: 'fontSize',
@@ -517,12 +556,22 @@ export function createSettingsManager(appContext) {
    * @param {string} key - 设置键
    * @param {any} value - 新值
    */
+  function normalizeSettingValue(key, value) {
+    if (key === 'fullscreenWidth') {
+      return clampFullscreenWidth(value);
+    }
+    if (key === 'scrollMinimapWidth') {
+      return clampScrollMinimapWidth(value);
+    }
+    if (key === 'scrollMinimapOpacity') {
+      return clamp01(value, DEFAULT_SETTINGS.scrollMinimapOpacity);
+    }
+    return value;
+  }
+
   function setSetting(key, value) {
     if (!(key in DEFAULT_SETTINGS)) return;
-    let normalizedValue = value;
-    if (key === 'fullscreenWidth') {
-      normalizedValue = clampFullscreenWidth(value);
-    }
+    const normalizedValue = normalizeSettingValue(key, value);
     currentSettings[key] = normalizedValue;
     // 应用
     const schema = getSchemaMap();
@@ -998,17 +1047,18 @@ export function createSettingsManager(appContext) {
           const { newValue } = changes[key] || {};
           // 仅在值确实变化时应用
           if (typeof newValue === 'undefined') return;
-          if (currentSettings[key] === newValue) return;
-          currentSettings[key] = newValue;
-          queueStoragePrime(areaName, { [key]: newValue });
+          const normalizedValue = normalizeSettingValue(key, newValue);
+          if (currentSettings[key] === normalizedValue) return;
+          currentSettings[key] = normalizedValue;
+          queueStoragePrime(areaName, { [key]: normalizedValue });
           // 按注册项 apply 与 UI 同步
           const def = getActiveRegistry().find(d => d.key === key);
           if (def) {
-            try { if (typeof def.apply === 'function') def.apply(newValue); } catch (e) { console.warn('应用存储变更失败', key, e); }
+            try { if (typeof def.apply === 'function') def.apply(normalizedValue); } catch (e) { console.warn('应用存储变更失败', key, e); }
             const el = dynamicElements.get(key);
             try {
               const entry = generatedSchema[key];
-              if (el && entry?.writeToUI) entry.writeToUI(el, newValue);
+              if (el && entry?.writeToUI) entry.writeToUI(el, normalizedValue);
             } catch (_) {}
           }
           mutated = true;
@@ -1039,9 +1089,7 @@ export function createSettingsManager(appContext) {
     // 应用所有注册项设置（有 apply 的会被调用），并同步 UI
     getActiveRegistry().forEach(def => {
       const value = currentSettings[def.key] ?? def.defaultValue;
-      const effectiveValue = def.key === 'fullscreenWidth'
-        ? clampFullscreenWidth(value)
-        : value;
+      const effectiveValue = normalizeSettingValue(def.key, value);
       if (typeof def.apply === 'function') {
         try { def.apply(effectiveValue); } catch (e) { console.error('应用设置失败', def.key, e); }
       }
@@ -1600,6 +1648,37 @@ export function createSettingsManager(appContext) {
     const n = Number(input);
     if (Number.isNaN(n)) return fallback;
     return Math.min(1, Math.max(0, n));
+  }
+
+  function getScrollMinimapWidthBounds() {
+    const def = SETTINGS_REGISTRY.find((item) => item.key === 'scrollMinimapWidth') || null;
+    const configuredMin = Number(def?.min);
+    const configuredMax = Number(def?.max);
+    const min = Number.isFinite(configuredMin) ? Math.max(8, Math.round(configuredMin)) : 14;
+    const max = Number.isFinite(configuredMax) ? Math.max(min, Math.round(configuredMax)) : 52;
+    return { min, max };
+  }
+
+  function clampScrollMinimapWidth(value) {
+    const { min, max } = getScrollMinimapWidthBounds();
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return DEFAULT_SETTINGS.scrollMinimapWidth;
+    return Math.round(Math.min(max, Math.max(min, numeric)));
+  }
+
+  function applyScrollMinimapEnabled(enabled) {
+    const useMinimap = !!enabled;
+    document.documentElement.style.setProperty('--cerebr-scroll-minimap-enabled', useMinimap ? '1' : '0');
+  }
+
+  function applyScrollMinimapWidth(value) {
+    const width = clampScrollMinimapWidth(value);
+    document.documentElement.style.setProperty('--cerebr-scroll-minimap-width', `${width}px`);
+  }
+
+  function applyScrollMinimapOpacity(value) {
+    const opacity = clamp01(value, DEFAULT_SETTINGS.scrollMinimapOpacity);
+    document.documentElement.style.setProperty('--cerebr-scroll-minimap-opacity', String(opacity));
   }
 
   // 应用自动滚动设置

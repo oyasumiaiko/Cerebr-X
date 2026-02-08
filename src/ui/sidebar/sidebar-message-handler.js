@@ -19,6 +19,7 @@
   function init() {
     const chatLayout = document.getElementById('chat-layout');
     const chatContainer = document.getElementById('chat-container');
+    const threadContainer = document.getElementById('thread-container');
     const input = document.getElementById('message-input');
     clearChatButtonRef = document.getElementById('clear-chat');
 
@@ -36,22 +37,39 @@
     let scrollbarRaf = null;
     let minimapRaf = null;
     let chatResizeObserver = null;
+    let threadResizeObserver = null;
+    let threadObserver = null;
     let rootAttrObserver = null;
     let fontsDoneHandler = null;
-    let minimapRoot = null;
-    let minimapCanvas = null;
-    let minimapThumb = null;
-    let minimapNeedsMapRedraw = true;
-    let minimapLastScrollHeight = 0;
-    let minimapLastClientHeight = 0;
-    let minimapLastMessageCount = 0;
-    let minimapDragSession = null;
+    const minimapStates = [];
 
     const MINIMAP_WIDTH = 24;
     const MINIMAP_OUTER_GAP = 10;
     const MINIMAP_VERTICAL_GAP = 10;
     const MINIMAP_MIN_HEIGHT = 96;
     const MINIMAP_THUMB_MIN_HEIGHT = 28;
+
+    function createMinimapState(key, container, side) {
+      if (!container) return null;
+      return {
+        key,
+        side, // 'left' | 'right'
+        container,
+        root: null,
+        canvas: null,
+        thumb: null,
+        needsMapRedraw: true,
+        lastScrollHeight: 0,
+        lastClientHeight: 0,
+        lastMessageCount: 0,
+        dragSession: null
+      };
+    }
+
+    const chatMinimapState = createMinimapState('chat', chatContainer, 'left');
+    if (chatMinimapState) minimapStates.push(chatMinimapState);
+    const threadMinimapState = createMinimapState('thread', threadContainer, 'right');
+    if (threadMinimapState) minimapStates.push(threadMinimapState);
 
     // --- 阅读位置保持（宽度变化时） ---
     // 需求背景：侧栏宽度变化 / 切换全屏布局会导致消息重新换行，进而改变消息高度；
@@ -228,11 +246,35 @@
         || document.body.classList.contains('standalone-mode');
     }
 
-    function ensureMinimapElements() {
-      if (minimapRoot && minimapCanvas && minimapThumb) return true;
+    function readRootCssNumericVar(name, fallback) {
+      try {
+        const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
+        const parsed = Number.parseFloat(raw);
+        if (Number.isFinite(parsed)) return parsed;
+      } catch (_) {}
+      return fallback;
+    }
+
+    function isMinimapFeatureEnabled() {
+      return readRootCssNumericVar('--cerebr-scroll-minimap-enabled', 1) > 0.5;
+    }
+
+    function getConfiguredMinimapWidth() {
+      const width = readRootCssNumericVar('--cerebr-scroll-minimap-width', MINIMAP_WIDTH);
+      return Math.round(clampNumber(width, 12, 96));
+    }
+
+    function isThreadModeActive() {
+      return document.body.classList.contains('thread-mode-active');
+    }
+
+    function ensureMinimapElements(state) {
+      if (!state) return false;
+      if (state.root && state.canvas && state.thumb) return true;
+
       const root = document.createElement('div');
-      root.id = 'chat-scroll-minimap';
-      root.className = 'chat-scroll-minimap';
+      root.id = `chat-scroll-minimap-${state.key}`;
+      root.className = `chat-scroll-minimap chat-scroll-minimap--${state.key} chat-scroll-minimap--${state.side}`;
       root.setAttribute('aria-hidden', 'true');
 
       const canvas = document.createElement('canvas');
@@ -247,22 +289,23 @@
       root.appendChild(thumb);
       chatLayout.appendChild(root);
 
-      root.addEventListener('pointerdown', handleMinimapPointerDown);
-      thumb.addEventListener('pointerdown', handleMinimapThumbPointerDown);
-      thumb.addEventListener('pointermove', handleMinimapThumbPointerMove);
-      thumb.addEventListener('pointerup', finishMinimapThumbDrag);
-      thumb.addEventListener('pointercancel', finishMinimapThumbDrag);
-      thumb.addEventListener('lostpointercapture', finishMinimapThumbDrag);
+      root.addEventListener('pointerdown', (event) => handleMinimapPointerDown(state, event));
+      thumb.addEventListener('pointerdown', (event) => handleMinimapThumbPointerDown(state, event));
+      thumb.addEventListener('pointermove', (event) => handleMinimapThumbPointerMove(state, event));
+      thumb.addEventListener('pointerup', (event) => finishMinimapThumbDrag(state, event));
+      thumb.addEventListener('pointercancel', (event) => finishMinimapThumbDrag(state, event));
+      thumb.addEventListener('lostpointercapture', (event) => finishMinimapThumbDrag(state, event));
 
-      minimapRoot = root;
-      minimapCanvas = canvas;
-      minimapThumb = thumb;
+      state.root = root;
+      state.canvas = canvas;
+      state.thumb = thumb;
       return true;
     }
 
-    function collectDirectMessageElements() {
+    function collectDirectMessageElements(container) {
       const result = [];
-      const children = chatContainer.children;
+      if (!container) return result;
+      const children = container.children;
       const total = children ? children.length : 0;
       for (let i = 0; i < total; i += 1) {
         const el = children[i];
@@ -273,46 +316,56 @@
       return result;
     }
 
-    function syncMinimapGeometry() {
-      if (!minimapRoot) return { trackHeight: 0 };
+    function syncMinimapGeometry(state, minimapWidth) {
+      if (!state?.root || !state?.container) return { trackHeight: 0 };
       const layoutRect = chatLayout.getBoundingClientRect();
-      const chatRect = chatContainer.getBoundingClientRect();
+      const containerRect = state.container.getBoundingClientRect();
       let paddingLeft = 0;
+      let paddingRight = 0;
       try {
-        const style = window.getComputedStyle(chatContainer);
+        const style = window.getComputedStyle(state.container);
         paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
+        paddingRight = Number.parseFloat(style.paddingRight) || 0;
       } catch (_) {}
 
-      // 关键：全屏非线程模式下，chatContainer 会通过较大的 padding-left 居中内容列。
-      // 缩略图应锚定在“内容列左侧”，而不是容器左边缘，否则会在非线程模式下被挤出可见区域。
-      const contentLeft = chatRect.left + paddingLeft;
-      const availableLeft = contentLeft - layoutRect.left;
-      const preferredLeft = availableLeft - MINIMAP_WIDTH - MINIMAP_OUTER_GAP;
-      const fallbackLeft = (chatRect.left - layoutRect.left) + 4;
-      const left = Math.round(Math.max(4, (preferredLeft >= 4 ? preferredLeft : fallbackLeft)));
-      const top = Math.round(Math.max(0, chatRect.top - layoutRect.top + MINIMAP_VERTICAL_GAP));
-      const height = Math.round(Math.max(MINIMAP_MIN_HEIGHT, chatRect.height - MINIMAP_VERTICAL_GAP * 2));
+      const minLeft = 4;
+      const maxLeft = Math.max(minLeft, layoutRect.width - minimapWidth - 4);
+      let left = minLeft;
+      if (state.side === 'right') {
+        const contentRight = containerRect.right - paddingRight;
+        const preferredLeft = (contentRight - layoutRect.left) + MINIMAP_OUTER_GAP;
+        left = Math.round(clampNumber(preferredLeft, minLeft, maxLeft));
+      } else {
+        // 左侧缩略图锚定在“内容列左边界”，确保全屏单列（大内边距）下不会跑出可视区域。
+        const contentLeft = containerRect.left + paddingLeft;
+        const preferredLeft = (contentLeft - layoutRect.left) - minimapWidth - MINIMAP_OUTER_GAP;
+        const fallbackLeft = (containerRect.left - layoutRect.left) + 4;
+        left = Math.round(clampNumber((preferredLeft >= minLeft ? preferredLeft : fallbackLeft), minLeft, maxLeft));
+      }
+      const top = Math.round(Math.max(0, containerRect.top - layoutRect.top + MINIMAP_VERTICAL_GAP));
+      const height = Math.round(Math.max(MINIMAP_MIN_HEIGHT, containerRect.height - MINIMAP_VERTICAL_GAP * 2));
 
-      minimapRoot.style.left = `${left}px`;
-      minimapRoot.style.top = `${top}px`;
-      minimapRoot.style.height = `${height}px`;
+      state.root.style.width = `${minimapWidth}px`;
+      state.root.style.left = `${left}px`;
+      state.root.style.top = `${top}px`;
+      state.root.style.height = `${height}px`;
       return { trackHeight: height };
     }
 
-    function drawMinimapOverview(messages, trackHeight, scrollHeight) {
-      if (!minimapCanvas || !minimapRoot) return;
-      const width = Math.max(1, minimapRoot.clientWidth);
+    function drawMinimapOverview(state, messages, trackHeight, scrollHeight) {
+      if (!state?.canvas || !state?.root) return;
+      const width = Math.max(1, state.root.clientWidth);
       const height = Math.max(1, trackHeight);
       const dpr = Math.max(1, window.devicePixelRatio || 1);
       const targetWidth = Math.max(1, Math.round(width * dpr));
       const targetHeight = Math.max(1, Math.round(height * dpr));
 
-      if (minimapCanvas.width !== targetWidth || minimapCanvas.height !== targetHeight) {
-        minimapCanvas.width = targetWidth;
-        minimapCanvas.height = targetHeight;
+      if (state.canvas.width !== targetWidth || state.canvas.height !== targetHeight) {
+        state.canvas.width = targetWidth;
+        state.canvas.height = targetHeight;
       }
 
-      const ctx = minimapCanvas.getContext('2d');
+      const ctx = state.canvas.getContext('2d');
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
@@ -338,8 +391,8 @@
       }
     }
 
-    function updateMinimapThumb(trackHeight, scrollHeight, clientHeight) {
-      if (!minimapThumb) return;
+    function updateMinimapThumb(state, trackHeight, scrollHeight, clientHeight) {
+      if (!state?.thumb) return;
       const safeTrackHeight = Math.max(1, trackHeight);
       const safeClientHeight = Math.max(0, clientHeight);
       const maxScroll = Math.max(0, scrollHeight - safeClientHeight);
@@ -348,30 +401,30 @@
         Math.round((safeClientHeight / Math.max(1, scrollHeight)) * safeTrackHeight)
       );
       const maxThumbTop = Math.max(0, safeTrackHeight - thumbHeight);
-      const ratio = maxScroll > 0 ? (chatContainer.scrollTop || 0) / maxScroll : 0;
+      const ratio = maxScroll > 0 ? (state.container.scrollTop || 0) / maxScroll : 0;
       const thumbTop = Math.round(maxThumbTop * clampNumber(ratio, 0, 1));
 
-      minimapThumb.style.height = `${thumbHeight}px`;
-      minimapThumb.style.transform = `translateY(${thumbTop}px)`;
-      minimapThumb.dataset.maxThumbTop = String(maxThumbTop);
+      state.thumb.style.height = `${thumbHeight}px`;
+      state.thumb.style.transform = `translateY(${thumbTop}px)`;
+      state.thumb.dataset.maxThumbTop = String(maxThumbTop);
     }
 
-    function setMinimapVisible(visible) {
-      if (!minimapRoot) return;
-      minimapRoot.classList.toggle('chat-scroll-minimap--active', !!visible);
+    function setMinimapVisible(state, visible) {
+      if (!state?.root) return;
+      state.root.classList.toggle('chat-scroll-minimap--active', !!visible);
       if (!visible) {
-        minimapRoot.classList.remove('chat-scroll-minimap--dragging');
-        minimapDragSession = null;
+        state.root.classList.remove('chat-scroll-minimap--dragging');
+        state.dragSession = null;
       }
     }
 
-    function scrollChatFromMinimapClientY(clientY, options = {}) {
-      if (!minimapRoot) return;
+    function scrollContainerFromMinimapClientY(state, clientY, options = {}) {
+      if (!state?.root || !state?.container) return;
       const centerViewport = options.centerViewport !== false;
-      const rect = minimapRoot.getBoundingClientRect();
+      const rect = state.root.getBoundingClientRect();
       const y = clampNumber(clientY - rect.top, 0, Math.max(1, rect.height));
-      const scrollHeight = chatContainer.scrollHeight || 0;
-      const clientHeight = chatContainer.clientHeight || 0;
+      const scrollHeight = state.container.scrollHeight || 0;
+      const clientHeight = state.container.clientHeight || 0;
       const maxScroll = Math.max(0, scrollHeight - clientHeight);
       if (maxScroll <= 0) return;
 
@@ -379,105 +432,129 @@
       if (centerViewport) {
         target -= clientHeight / 2;
       }
-      chatContainer.scrollTop = clampNumber(target, 0, maxScroll);
+      state.container.scrollTop = clampNumber(target, 0, maxScroll);
     }
 
-    function scrollChatByThumbTop(thumbTop) {
-      if (!minimapRoot || !minimapThumb) return;
-      const trackHeight = Math.max(1, minimapRoot.clientHeight || 0);
-      const thumbHeight = Math.max(0, minimapThumb.offsetHeight || 0);
+    function scrollContainerByThumbTop(state, thumbTop) {
+      if (!state?.root || !state?.thumb || !state?.container) return;
+      const trackHeight = Math.max(1, state.root.clientHeight || 0);
+      const thumbHeight = Math.max(0, state.thumb.offsetHeight || 0);
       const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
       const ratio = maxThumbTop > 0
         ? clampNumber(thumbTop / maxThumbTop, 0, 1)
         : 0;
-      const maxScroll = Math.max(0, (chatContainer.scrollHeight || 0) - (chatContainer.clientHeight || 0));
+      const maxScroll = Math.max(0, (state.container.scrollHeight || 0) - (state.container.clientHeight || 0));
       if (maxScroll <= 0) return;
-      chatContainer.scrollTop = ratio * maxScroll;
+      state.container.scrollTop = ratio * maxScroll;
     }
 
-    function handleMinimapPointerDown(event) {
-      if (!minimapRoot || !minimapRoot.classList.contains('chat-scroll-minimap--active')) return;
+    function handleMinimapPointerDown(state, event) {
+      if (!state?.root || !state.root.classList.contains('chat-scroll-minimap--active')) return;
       if (event.button !== 0) return;
-      if (event.target === minimapThumb) return;
+      if (event.target === state.thumb) return;
       event.preventDefault();
-      scrollChatFromMinimapClientY(event.clientY, { centerViewport: true });
-      scheduleReadingAnchorCapture();
+      scrollContainerFromMinimapClientY(state, event.clientY, { centerViewport: true });
+      if (state.key === 'chat') scheduleReadingAnchorCapture();
       scheduleMinimapRender();
     }
 
-    function handleMinimapThumbPointerDown(event) {
-      if (!minimapRoot || !minimapThumb || !minimapRoot.classList.contains('chat-scroll-minimap--active')) return;
+    function handleMinimapThumbPointerDown(state, event) {
+      if (!state?.root || !state?.thumb || !state.root.classList.contains('chat-scroll-minimap--active')) return;
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
-      const thumbRect = minimapThumb.getBoundingClientRect();
-      minimapDragSession = {
+      const thumbRect = state.thumb.getBoundingClientRect();
+      state.dragSession = {
         pointerId: event.pointerId,
         offsetY: event.clientY - thumbRect.top
       };
-      minimapRoot.classList.add('chat-scroll-minimap--dragging');
+      state.root.classList.add('chat-scroll-minimap--dragging');
       try {
-        minimapThumb.setPointerCapture(event.pointerId);
+        state.thumb.setPointerCapture(event.pointerId);
       } catch (_) {}
     }
 
-    function handleMinimapThumbPointerMove(event) {
-      if (!minimapRoot || !minimapThumb || !minimapDragSession) return;
-      if (event.pointerId !== minimapDragSession.pointerId) return;
+    function handleMinimapThumbPointerMove(state, event) {
+      if (!state?.root || !state?.thumb || !state.dragSession) return;
+      if (event.pointerId !== state.dragSession.pointerId) return;
       event.preventDefault();
-      const rootRect = minimapRoot.getBoundingClientRect();
-      const thumbHeight = Math.max(0, minimapThumb.offsetHeight || 0);
+      const rootRect = state.root.getBoundingClientRect();
+      const thumbHeight = Math.max(0, state.thumb.offsetHeight || 0);
       const maxTop = Math.max(0, rootRect.height - thumbHeight);
-      const rawTop = event.clientY - rootRect.top - minimapDragSession.offsetY;
+      const rawTop = event.clientY - rootRect.top - state.dragSession.offsetY;
       const clampedTop = clampNumber(rawTop, 0, maxTop);
-      scrollChatByThumbTop(clampedTop);
-      scheduleReadingAnchorCapture();
+      scrollContainerByThumbTop(state, clampedTop);
+      if (state.key === 'chat') scheduleReadingAnchorCapture();
       scheduleMinimapRender();
     }
 
-    function finishMinimapThumbDrag(event) {
-      if (!minimapRoot || !minimapThumb || !minimapDragSession) return;
-      if (event && event.pointerId != null && event.pointerId !== minimapDragSession.pointerId) return;
-      minimapDragSession = null;
-      minimapRoot.classList.remove('chat-scroll-minimap--dragging');
+    function finishMinimapThumbDrag(state, event) {
+      if (!state?.root || !state?.thumb || !state.dragSession) return;
+      if (event && event.pointerId != null && event.pointerId !== state.dragSession.pointerId) return;
+      state.dragSession = null;
+      state.root.classList.remove('chat-scroll-minimap--dragging');
       if (event && event.pointerId != null) {
         try {
-          minimapThumb.releasePointerCapture(event.pointerId);
+          state.thumb.releasePointerCapture(event.pointerId);
         } catch (_) {}
       }
     }
 
-    function renderMinimap() {
-      if (!ensureMinimapElements()) return;
-      const isFullscreen = isFullscreenLayoutActive();
-      const { trackHeight } = syncMinimapGeometry();
-      const messages = collectDirectMessageElements();
+    function renderMinimapState(state, minimapWidth, featureEnabled, fullscreenEnabled) {
+      if (!ensureMinimapElements(state)) return;
+      const container = state.container;
+      const isThreadState = state.key === 'thread';
+      const threadModeActive = isThreadModeActive();
+      const containerRect = container.getBoundingClientRect();
+      const containerVisible = containerRect.width > 1 && containerRect.height > 1;
+      const { trackHeight } = syncMinimapGeometry(state, minimapWidth);
+      const messages = collectDirectMessageElements(container);
       const messageCount = messages.length;
-      const scrollHeight = Math.max(0, chatContainer.scrollHeight || 0);
-      const clientHeight = Math.max(0, chatContainer.clientHeight || 0);
+      const scrollHeight = Math.max(0, container.scrollHeight || 0);
+      const clientHeight = Math.max(0, container.clientHeight || 0);
       const hasOverflow = scrollHeight > clientHeight + 1;
-      const shouldShow = isFullscreen && hasOverflow && messageCount > 0 && trackHeight >= MINIMAP_MIN_HEIGHT;
-      setMinimapVisible(shouldShow);
+      const shouldShow = featureEnabled
+        && fullscreenEnabled
+        && containerVisible
+        && (!isThreadState || threadModeActive)
+        && hasOverflow
+        && messageCount > 0
+        && trackHeight >= MINIMAP_MIN_HEIGHT;
+
+      setMinimapVisible(state, shouldShow);
       if (!shouldShow) return;
 
-      const metricsChanged = scrollHeight !== minimapLastScrollHeight
-        || clientHeight !== minimapLastClientHeight
-        || messageCount !== minimapLastMessageCount;
-      if (metricsChanged) minimapNeedsMapRedraw = true;
+      const metricsChanged = scrollHeight !== state.lastScrollHeight
+        || clientHeight !== state.lastClientHeight
+        || messageCount !== state.lastMessageCount;
+      if (metricsChanged) state.needsMapRedraw = true;
 
-      if (minimapNeedsMapRedraw) {
-        drawMinimapOverview(messages, trackHeight, scrollHeight);
-        minimapNeedsMapRedraw = false;
-        minimapLastScrollHeight = scrollHeight;
-        minimapLastClientHeight = clientHeight;
-        minimapLastMessageCount = messageCount;
+      if (state.needsMapRedraw) {
+        drawMinimapOverview(state, messages, trackHeight, scrollHeight);
+        state.needsMapRedraw = false;
+        state.lastScrollHeight = scrollHeight;
+        state.lastClientHeight = clientHeight;
+        state.lastMessageCount = messageCount;
       }
 
-      updateMinimapThumb(trackHeight, scrollHeight, clientHeight);
+      updateMinimapThumb(state, trackHeight, scrollHeight, clientHeight);
+    }
+
+    function renderMinimap() {
+      const featureEnabled = isMinimapFeatureEnabled();
+      const fullscreenEnabled = isFullscreenLayoutActive();
+      const minimapWidth = getConfiguredMinimapWidth();
+      for (const state of minimapStates) {
+        renderMinimapState(state, minimapWidth, featureEnabled, fullscreenEnabled);
+      }
     }
 
     function scheduleMinimapRender(options = {}) {
-      if (options.rebuildMap) minimapNeedsMapRedraw = true;
+      if (options.rebuildMap) {
+        minimapStates.forEach((state) => {
+          state.needsMapRedraw = true;
+        });
+      }
       if (minimapRaf) return;
       minimapRaf = requestAnimationFrame(() => {
         minimapRaf = null;
@@ -582,7 +659,7 @@
 
     function handleContentLoad(event) {
       const target = event?.target;
-      if (!target || target === chatContainer) return;
+      if (!target || target === chatContainer || target === threadContainer) return;
 
       // 图片/视频等资源加载完成会改变消息高度，但不会触发 MutationObserver。
       // 用捕获阶段监听 load 来兜底，确保滚动条占位变化时右侧 padding 能及时同步。
@@ -686,6 +763,29 @@
       attributeFilter: ['class', 'style']
     });
 
+    if (threadContainer) {
+      threadObserver = new MutationObserver((mutations) => {
+        let shouldRefreshMinimap = false;
+        for (const mutation of mutations) {
+          if (mutation.type === 'childList' || mutation.type === 'characterData' || mutation.type === 'attributes') {
+            shouldRefreshMinimap = true;
+            break;
+          }
+        }
+        if (shouldRefreshMinimap) {
+          scheduleMinimapRender({ rebuildMap: true });
+        }
+      });
+
+      threadObserver.observe(threadContainer, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['class', 'style']
+      });
+    }
+
     rebuildHistory();
     updateScrollbarPadding();
     scheduleMinimapRender({ rebuildMap: true });
@@ -698,6 +798,12 @@
       scheduleMinimapRender();
     }
     chatContainer.addEventListener('scroll', handleChatScroll, { passive: true });
+    function handleThreadScroll() {
+      scheduleMinimapRender();
+    }
+    if (threadContainer) {
+      threadContainer.addEventListener('scroll', handleThreadScroll, { passive: true });
+    }
 
     function handleWindowResize() {
       scheduleLayoutUpdate({ checkWrapWidth: true });
@@ -732,8 +838,26 @@
       chatResizeObserver = null;
     }
 
+    if (threadContainer) {
+      try {
+        threadResizeObserver = new ResizeObserver(() => {
+          scheduleMinimapRender({ rebuildMap: true });
+        });
+        try {
+          threadResizeObserver.observe(threadContainer, { box: 'border-box' });
+        } catch (_) {
+          threadResizeObserver.observe(threadContainer);
+        }
+      } catch (_) {
+        threadResizeObserver = null;
+      }
+    }
+
     // 监听 <img> 等资源加载完成（load 不冒泡，需 capture）
     chatContainer.addEventListener('load', handleContentLoad, true);
+    if (threadContainer) {
+      threadContainer.addEventListener('load', handleContentLoad, true);
+    }
 
     // 监听主题/全屏等通过切换根节点 class/style 引起的布局变化
     try {
@@ -776,6 +900,18 @@
         } catch (_) {}
         chatResizeObserver = null;
       }
+      if (threadResizeObserver) {
+        try {
+          threadResizeObserver.disconnect();
+        } catch (_) {}
+        threadResizeObserver = null;
+      }
+      if (threadObserver) {
+        try {
+          threadObserver.disconnect();
+        } catch (_) {}
+        threadObserver = null;
+      }
       if (rootAttrObserver) {
         try {
           rootAttrObserver.disconnect();
@@ -791,6 +927,10 @@
       }
       chatContainer.removeEventListener('load', handleContentLoad, true);
       chatContainer.removeEventListener('scroll', handleChatScroll);
+      if (threadContainer) {
+        threadContainer.removeEventListener('load', handleContentLoad, true);
+        threadContainer.removeEventListener('scroll', handleThreadScroll);
+      }
       if (rebuildTimer) {
         clearTimeout(rebuildTimer);
         rebuildTimer = null;
@@ -807,14 +947,15 @@
         cancelAnimationFrame(minimapRaf);
         minimapRaf = null;
       }
-      if (minimapRoot) {
+      minimapStates.forEach((state) => {
         try {
-          minimapRoot.remove();
+          state.root?.remove?.();
         } catch (_) {}
-        minimapRoot = null;
-        minimapCanvas = null;
-        minimapThumb = null;
-      }
+        state.root = null;
+        state.canvas = null;
+        state.thumb = null;
+        state.dragSession = null;
+      });
       window.removeEventListener('resize', handleWindowResize);
       window.removeEventListener('message', handleWindowMessage);
     });
