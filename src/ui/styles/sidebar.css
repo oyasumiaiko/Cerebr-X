@@ -439,6 +439,23 @@ body.standalone-mode #empty-state-repomix {
     padding-right: calc(15px - var(--scrollbar-width, 0px));
 }
 
+/* 可选：在全屏/独立页面布局隐藏原生滚动条（保留滚动能力），由设置项驱动 root class */
+:root.hide-native-scrollbar-fullscreen.fullscreen-mode #chat-container,
+:root.hide-native-scrollbar-fullscreen.fullscreen-mode #thread-container,
+:root.hide-native-scrollbar-fullscreen body.standalone-mode #chat-container,
+:root.hide-native-scrollbar-fullscreen body.standalone-mode #thread-container {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+:root.hide-native-scrollbar-fullscreen.fullscreen-mode #chat-container::-webkit-scrollbar,
+:root.hide-native-scrollbar-fullscreen.fullscreen-mode #thread-container::-webkit-scrollbar,
+:root.hide-native-scrollbar-fullscreen body.standalone-mode #chat-container::-webkit-scrollbar,
+:root.hide-native-scrollbar-fullscreen body.standalone-mode #thread-container::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
 /* 全屏滚动缩略图（MiniMap）：
    - 仅在全屏布局下由脚本按需激活；
    - 默认放在主对话列左侧，便于快速定位长对话。 */

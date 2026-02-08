@@ -124,6 +124,8 @@ export function createSettingsManager(appContext) {
     scrollMinimapOpacity: 0.94,
     scrollMinimapAutoHide: false,
     scrollMinimapMessageMode: 'proportional',
+    // 在全屏/独立页面布局中隐藏原生滚动条（保留滚动能力）
+    hideNativeScrollbarInFullscreen: false,
     // 是否启用 $ / $$ 作为数学公式分隔符（默认开启以保持兼容）
     enableDollarMath: true,
     // 是否在输入框 placeholder 中显示当前模型名
@@ -470,6 +472,15 @@ export function createSettingsManager(appContext) {
       defaultValue: DEFAULT_SETTINGS.scrollMinimapMessageMode,
       apply: (v) => applyScrollMinimapMessageMode(v)
     },
+    {
+      key: 'hideNativeScrollbarInFullscreen',
+      type: 'toggle',
+      menu: 'quick',
+      group: 'layout',
+      label: '全屏隐藏原生滚动条',
+      defaultValue: DEFAULT_SETTINGS.hideNativeScrollbarInFullscreen,
+      apply: (v) => applyHideNativeScrollbarInFullscreen(v)
+    },
     // 字体大小
     {
       key: 'fontSize',
@@ -595,6 +606,9 @@ export function createSettingsManager(appContext) {
     }
     if (key === 'scrollMinimapMessageMode') {
       return normalizeScrollMinimapMessageMode(value);
+    }
+    if (key === 'hideNativeScrollbarInFullscreen') {
+      return !!value;
     }
     return value;
   }
@@ -1734,6 +1748,10 @@ export function createSettingsManager(appContext) {
   function applyScrollMinimapMessageMode(value) {
     const mode = normalizeScrollMinimapMessageMode(value);
     document.documentElement.style.setProperty('--cerebr-scroll-minimap-message-mode', mode);
+  }
+
+  function applyHideNativeScrollbarInFullscreen(enabled) {
+    document.documentElement.classList.toggle('hide-native-scrollbar-fullscreen', !!enabled);
   }
 
   // 应用自动滚动设置
