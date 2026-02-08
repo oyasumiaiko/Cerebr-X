@@ -54,6 +54,17 @@
     const MINIMAP_WHEEL_IDLE_RESET_MS = 180;
     const MINIMAP_WHEEL_ANIMATION_MS = 120;
     const MINIMAP_INTERACTION_VISIBLE_MS = 1500;
+    // 颜色解析探针：通过 1x1 canvas 把任意 CSS 颜色转换为稳定的 RGBA 通道，
+    // 避免在脚本里硬编码 dark/light 两套颜色，便于缩略图自动适配所有主题。
+    const minimapColorProbeCanvas = document.createElement('canvas');
+    minimapColorProbeCanvas.width = 1;
+    minimapColorProbeCanvas.height = 1;
+    let minimapColorProbeCtx = null;
+    try {
+      minimapColorProbeCtx = minimapColorProbeCanvas.getContext('2d', { willReadFrequently: true });
+    } catch (_) {
+      minimapColorProbeCtx = minimapColorProbeCanvas.getContext('2d');
+    }
 
     function createMinimapState(key, container, side) {
       if (!container) return null;
@@ -278,6 +289,88 @@
         if (normalized) return normalized;
       } catch (_) {}
       return fallback;
+    }
+
+    function parseCssColorChannels(colorValue, fallbackColor = '#000000') {
+      const fallback = {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 1
+      };
+      if (!minimapColorProbeCtx) return fallback;
+      const safeFallback = String(fallbackColor || '#000000').trim() || '#000000';
+      minimapColorProbeCtx.clearRect(0, 0, 1, 1);
+      try {
+        minimapColorProbeCtx.fillStyle = safeFallback;
+      } catch (_) {
+        minimapColorProbeCtx.fillStyle = '#000000';
+      }
+      const candidate = String(colorValue || '').trim();
+      if (candidate) {
+        try {
+          minimapColorProbeCtx.fillStyle = candidate;
+        } catch (_) {
+          // 解析失败时保留 fallback 颜色。
+        }
+      }
+      minimapColorProbeCtx.fillRect(0, 0, 1, 1);
+      const imageData = minimapColorProbeCtx.getImageData(0, 0, 1, 1).data;
+      return {
+        r: imageData[0],
+        g: imageData[1],
+        b: imageData[2],
+        a: imageData[3] / 255
+      };
+    }
+
+    function mixColorAlpha(colorValue, alpha, fallbackColor = '#000000') {
+      const channels = parseCssColorChannels(colorValue, fallbackColor);
+      const safeAlpha = clampNumber(alpha, 0, 1);
+      // 原色可能本身带透明度，这里做乘算以尊重主题原始透明语义。
+      const composedAlpha = clampNumber((channels.a || 1) * safeAlpha, 0, 1);
+      return `rgba(${channels.r}, ${channels.g}, ${channels.b}, ${composedAlpha.toFixed(3)})`;
+    }
+
+    function computeRelativeLuminance(channels) {
+      if (!channels) return 1;
+      const toLinear = (channel) => {
+        const normalized = clampNumber((Number(channel) || 0) / 255, 0, 1);
+        if (normalized <= 0.04045) return normalized / 12.92;
+        return ((normalized + 0.055) / 1.055) ** 2.4;
+      };
+      return (
+        0.2126 * toLinear(channels.r)
+        + 0.7152 * toLinear(channels.g)
+        + 0.0722 * toLinear(channels.b)
+      );
+    }
+
+    function readMinimapThemePalette() {
+      const rootStyle = getComputedStyle(document.documentElement);
+      const backgroundColor = rootStyle.getPropertyValue('--cerebr-bg-color').trim() || '#ffffff';
+      const backgroundChannels = parseCssColorChannels(backgroundColor, '#ffffff');
+      const isDarkBackground = computeRelativeLuminance(backgroundChannels) < 0.48;
+      const userBase = rootStyle.getPropertyValue('--cerebr-highlight').trim() || '#5f9eff';
+      const aiBase = rootStyle.getPropertyValue('--cerebr-text-color').trim() || '#8d96a5';
+      const errorBase = rootStyle.getPropertyValue('--cerebr-red').trim() || '#f55757';
+
+      const userAlphaVar = Number.parseFloat(rootStyle.getPropertyValue('--cerebr-scroll-minimap-user-alpha'));
+      const aiAlphaVar = Number.parseFloat(rootStyle.getPropertyValue('--cerebr-scroll-minimap-ai-alpha'));
+      const errorAlphaVar = Number.parseFloat(rootStyle.getPropertyValue('--cerebr-scroll-minimap-error-alpha'));
+      const userAlpha = Number.isFinite(userAlphaVar)
+        ? userAlphaVar
+        : (isDarkBackground ? 0.62 : 0.56);
+      const aiAlpha = Number.isFinite(aiAlphaVar)
+        ? aiAlphaVar
+        : (isDarkBackground ? 0.32 : 0.22);
+      const errorAlpha = Number.isFinite(errorAlphaVar) ? errorAlphaVar : 0.78;
+
+      return {
+        userMessageColor: mixColorAlpha(userBase, userAlpha, '#5f9eff'),
+        aiMessageColor: mixColorAlpha(aiBase, aiAlpha, '#8d96a5'),
+        errorMessageColor: mixColorAlpha(errorBase, errorAlpha, '#f55757')
+      };
     }
 
     function isMinimapFeatureEnabled() {
@@ -635,10 +728,7 @@
       const innerWidth = Math.max(2, width - innerPadding * 2);
       const messageGap = 1;
       const messageCornerRadius = 2;
-      const isDarkTheme = document.documentElement.classList.contains('dark-theme');
-      const minimapUserMessageColor = isDarkTheme ? 'rgba(90, 156, 246, 0.62)' : 'rgba(98, 165, 255, 0.66)';
-      const minimapAiMessageColor = isDarkTheme ? 'rgba(132, 140, 154, 0.32)' : 'rgba(162, 166, 178, 0.42)';
-      let previousBarBottom = -messageGap;
+      const themePalette = readMinimapThemePalette();
 
       function fillRoundedRect(x, y, w, h, radius) {
         const safeRadius = Math.max(0, Math.min(radius, w / 2, h / 2));
@@ -667,6 +757,7 @@
         ctx.fill();
       }
 
+      const bars = [];
       for (let index = 0; index < messages.length; index += 1) {
         const el = messages[index];
         const messageTop = Math.max(0, Number(el.offsetTop) || 0);
@@ -682,22 +773,6 @@
         const w = innerWidth;
 
         const minimumReadableHeight = isUser ? 2 : 1;
-        // 优先保证短消息可见性：只有在不压缩到最小可读高度以下时，才强制 1px 间距。
-        if (index > 0) {
-          const minTop = previousBarBottom + messageGap;
-          if (y < minTop) {
-            const overlap = minTop - y;
-            const shrinkedHeight = h - overlap;
-            if (shrinkedHeight >= minimumReadableHeight) {
-              y = minTop;
-              h = shrinkedHeight;
-            } else {
-              // 间距不够时允许贴边，避免把原本就短的消息压成几乎不可见的细线。
-              y = Math.max(previousBarBottom, y);
-              h = Math.max(minimumReadableHeight, h);
-            }
-          }
-        }
         if (y >= height) break;
         const availableHeight = Math.max(0, height - y);
         if (availableHeight <= 0) break;
@@ -705,13 +780,72 @@
         if (h < minimumReadableHeight && availableHeight >= minimumReadableHeight) {
           h = minimumReadableHeight;
         }
+        bars.push({
+          x,
+          w,
+          y,
+          h,
+          minimumReadableHeight,
+          isUser,
+          isError
+        });
+      }
 
-        ctx.fillStyle = isError
-          ? 'rgba(245, 87, 87, 0.78)'
-          : (isUser ? minimapUserMessageColor : minimapAiMessageColor);
-        const radius = Math.min(messageCornerRadius, Math.floor((Math.min(w, h) - 1) / 2));
-        fillRoundedRect(x, y, w, h, radius);
-        previousBarBottom = y + h;
+      // 两阶段布局：
+      // 1) 先按原比例得到每条消息的像素条带；
+      // 2) 再做“碰撞消解 + 间距修正”，优先压缩较高条带，把 1px gap 留给更重要的可读边界。
+      for (let index = 1; index < bars.length; index += 1) {
+        const previousBar = bars[index - 1];
+        const currentBar = bars[index];
+        if (!previousBar || !currentBar) continue;
+        if (previousBar.h <= 0 || currentBar.h <= 0) continue;
+
+        let requiredTop = previousBar.y + previousBar.h + messageGap;
+        if (currentBar.y >= requiredTop) continue;
+
+        const previousSlack = Math.max(0, previousBar.h - previousBar.minimumReadableHeight);
+        if (previousSlack > 0) {
+          const shrinkPrevious = Math.min(requiredTop - currentBar.y, previousSlack);
+          previousBar.h -= shrinkPrevious;
+          requiredTop -= shrinkPrevious;
+        }
+
+        currentBar.y = requiredTop;
+        let overflow = currentBar.y + currentBar.h - height;
+        if (overflow > 0) {
+          const currentSlack = Math.max(0, currentBar.h - currentBar.minimumReadableHeight);
+          if (currentSlack > 0) {
+            const shrinkCurrent = Math.min(overflow, currentSlack);
+            currentBar.h -= shrinkCurrent;
+            overflow -= shrinkCurrent;
+          }
+        }
+
+        if (overflow > 0) {
+          // 当底部空间不足时，允许局部吃掉 gap（但仍不重叠），避免把短消息压到不可见。
+          const maxShiftUp = Math.max(0, currentBar.y - (previousBar.y + previousBar.h));
+          const shiftUp = Math.min(overflow, maxShiftUp);
+          currentBar.y -= shiftUp;
+          overflow -= shiftUp;
+        }
+
+        if (overflow > 0) {
+          currentBar.h = Math.max(1, currentBar.h - overflow);
+        }
+      }
+
+      for (const bar of bars) {
+        if (!bar || bar.h <= 0) continue;
+        const safeY = Math.max(0, Math.min(height - 1, Math.round(bar.y)));
+        const maxDrawableHeight = Math.max(0, height - safeY);
+        if (maxDrawableHeight <= 0) continue;
+        const safeH = Math.max(1, Math.min(maxDrawableHeight, Math.round(bar.h)));
+
+        ctx.fillStyle = bar.isError
+          ? themePalette.errorMessageColor
+          : (bar.isUser ? themePalette.userMessageColor : themePalette.aiMessageColor);
+        const radius = Math.min(messageCornerRadius, Math.floor((Math.min(bar.w, safeH) - 1) / 2));
+        fillRoundedRect(bar.x, safeY, bar.w, safeH, radius);
       }
     }
 

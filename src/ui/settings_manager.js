@@ -1144,6 +1144,76 @@ export function createSettingsManager(appContext) {
       }
     });
   }
+
+  function getThemeType(themeId) {
+    const theme = themeManager.getThemeById?.(themeId);
+    if (theme?.type) return theme.type;
+    return '';
+  }
+
+  function isDarkThemeId(themeId) {
+    const themeType = getThemeType(themeId);
+    if (themeType === 'dark') return true;
+    if (themeType === 'light') return false;
+    if (themeType === 'auto') {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    // 兜底：兼容历史自定义主题 ID（未注册在主题管理器中）。
+    const normalized = String(themeId || '').toLowerCase();
+    return normalized.includes('dark')
+      || normalized.includes('night')
+      || normalized.includes('black')
+      || normalized.includes('monokai')
+      || normalized.includes('dracula');
+  }
+
+  function resolveThemeIdForTargetType(currentThemeId, targetType) {
+    const normalizedTargetType = targetType === 'dark' ? 'dark' : 'light';
+    const currentTheme = themeManager.getThemeById?.(currentThemeId);
+    const allThemes = themeManager.getAvailableThemes?.() || [];
+    const themeById = new Map(allThemes.map((theme) => [theme.id, theme]));
+    if (!currentTheme) {
+      return normalizedTargetType === 'dark' ? 'dark' : 'light';
+    }
+    if (currentTheme.type === normalizedTargetType) {
+      return currentTheme.id;
+    }
+
+    // 优先按“同前缀 + light/dark 后缀”寻找配对主题。
+    const candidateIds = [];
+    const themeId = currentTheme.id;
+    if (themeId.endsWith('-light')) {
+      candidateIds.push(`${themeId.slice(0, -6)}-dark`);
+    }
+    if (themeId.endsWith('-dark')) {
+      candidateIds.push(`${themeId.slice(0, -5)}-light`);
+    }
+    if (themeId.includes('-light-')) {
+      candidateIds.push(themeId.replace('-light-', '-dark-'));
+    }
+    if (themeId.includes('-dark-')) {
+      candidateIds.push(themeId.replace('-dark-', '-light-'));
+    }
+
+    // 对诸如 tokyo-night / tokyo-night-light 这类命名做“去后缀后匹配”。
+    const baseId = themeId.replace(/-(light|dark)$/i, '');
+    allThemes.forEach((theme) => {
+      if (!theme || theme.type !== normalizedTargetType) return;
+      const candidateBaseId = String(theme.id || '').replace(/-(light|dark)$/i, '');
+      if (candidateBaseId === baseId) {
+        candidateIds.push(theme.id);
+      }
+    });
+
+    for (const candidateId of candidateIds) {
+      const candidateTheme = themeById.get(candidateId);
+      if (candidateTheme?.type === normalizedTargetType) {
+        return candidateTheme.id;
+      }
+    }
+
+    return normalizedTargetType === 'dark' ? 'dark' : 'light';
+  }
   
   // 应用主题
   function applyTheme(themeValue) {
@@ -1155,15 +1225,8 @@ export function createSettingsManager(appContext) {
       themeSelect.value = themeValue;
     }
     
-    // 更新开关状态 - 仅当使用dark主题或其变种时才打开开关
+    // 更新开关状态：基于主题元数据判断深浅色，避免硬编码主题 ID 列表。
     if (themeSwitch) {
-      const isDark = themeValue === 'dark' || 
-                     themeValue.includes('dark') || 
-                     themeValue === 'monokai' || 
-                     themeValue === 'nord' || 
-                     themeValue === 'vscode-dark' || 
-                     themeValue === 'night-blue';
-      
       const isAuto = themeValue === 'auto';
       
       if (isAuto) {
@@ -1171,7 +1234,7 @@ export function createSettingsManager(appContext) {
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         themeSwitch.checked = prefersDark;
       } else {
-        themeSwitch.checked = isDark;
+        themeSwitch.checked = isDarkThemeId(themeValue);
       }
     }
     
@@ -1877,30 +1940,13 @@ export function createSettingsManager(appContext) {
           applyTheme('auto');
           return;
         }
-        
-        // 查找是否存在对应的亮色/暗色主题对
-        const isCurrentlyDark = currentTheme.includes('dark') || 
-                               currentTheme === 'monokai' || 
-                               currentTheme === 'nord' || 
-                               currentTheme === 'vscode-dark' || 
-                               currentTheme === 'night-blue';
-        
-        let newTheme = currentTheme;
-        
-        // 尝试切换到对应的明暗主题
-        if (this.checked && !isCurrentlyDark) {
-          // 切换到暗色
-          if (currentTheme === 'light') newTheme = 'dark';
-          else if (currentTheme === 'github-light') newTheme = 'github-dark';
-          else if (currentTheme === 'solarized-light') newTheme = 'solarized-dark';
-          else newTheme = 'dark'; // 默认暗色
-        } else if (!this.checked && isCurrentlyDark) {
-          // 切换到亮色
-          if (currentTheme === 'dark') newTheme = 'light';
-          else if (currentTheme === 'github-dark') newTheme = 'github-light';
-          else if (currentTheme === 'solarized-dark') newTheme = 'solarized-light';
-          else newTheme = 'light'; // 默认亮色
-        }
+        const currentIsDark = isDarkThemeId(currentTheme);
+        const targetType = this.checked ? 'dark' : 'light';
+        const shouldSwitch = (targetType === 'dark' && !currentIsDark)
+          || (targetType === 'light' && currentIsDark);
+        const newTheme = shouldSwitch
+          ? resolveThemeIdForTargetType(currentTheme, targetType)
+          : currentTheme;
         
         if (newTheme !== currentTheme) {
           setTheme(newTheme);

@@ -42,6 +42,9 @@ input, textarea, select {
     --cerebr-scroll-minimap-track-opacity: clamp(0.10, calc(var(--cerebr-scroll-minimap-opacity, 0.94) * 0.32), 0.30);
     --cerebr-scroll-minimap-canvas-opacity: clamp(0.20, calc(var(--cerebr-scroll-minimap-opacity, 0.94) * 0.62), 0.70);
     --cerebr-scroll-minimap-interaction-opacity: 0.94;
+    --cerebr-scroll-minimap-user-alpha: 0.56;
+    --cerebr-scroll-minimap-ai-alpha: 0.22;
+    --cerebr-scroll-minimap-error-alpha: 0.78;
     --cerebr-reading-tail-space: 85vh;
     
     --cerebr-bg-color: rgba(255, 255, 255, var(--cerebr-opacity));
@@ -124,6 +127,8 @@ input, textarea, select {
     --cerebr-scroll-minimap-track-border: color-mix(in srgb, var(--cerebr-border-color) 72%, transparent);
     --cerebr-scroll-minimap-track-opacity: clamp(0.06, calc(var(--cerebr-scroll-minimap-opacity, 0.94) * 0.22), 0.22);
     --cerebr-scroll-minimap-canvas-opacity: clamp(0.16, calc(var(--cerebr-scroll-minimap-opacity, 0.94) * 0.52), 0.56);
+    --cerebr-scroll-minimap-user-alpha: 0.62;
+    --cerebr-scroll-minimap-ai-alpha: 0.32;
 
     --cerebr-button-bg: color-mix(in srgb, var(--cerebr-highlight) 70%, rgba(0, 0, 0, 0.35));
     --cerebr-button-hover-bg: color-mix(in srgb, var(--cerebr-highlight) 82%, rgba(0, 0, 0, 0.25));

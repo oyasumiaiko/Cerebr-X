@@ -1478,6 +1478,30 @@ export function createThemeManager() {
     }
   ];
 
+  // 汇总所有由主题系统管理的 CSS 变量，避免切换主题后残留旧主题变量。
+  // 说明：仅清理主题管理器自己维护的变量，不影响其它设置项写入的 root 变量。
+  const MANAGED_THEME_VARIABLES = Array.from(
+    PREDEFINED_THEMES.reduce((result, theme) => {
+      const vars = theme?.variables || {};
+      Object.keys(vars).forEach((key) => result.add(key));
+      return result;
+    }, new Set())
+  );
+
+  function clearManagedThemeVariables(root) {
+    if (!root || !root.style) return;
+    MANAGED_THEME_VARIABLES.forEach((key) => {
+      root.style.removeProperty(key);
+    });
+  }
+
+  function applyThemeVariables(root, variables) {
+    if (!root || !root.style) return;
+    Object.entries(variables || {}).forEach(([key, value]) => {
+      root.style.setProperty(key, value);
+    });
+  }
+
   /**
    * 获取所有可用主题
    * @returns {Array<Object>} 主题列表
@@ -1511,6 +1535,8 @@ export function createThemeManager() {
     
     // 清除所有主题相关的类
     root.classList.remove('dark-theme', 'light-theme');
+    // 先清除旧主题变量，防止“主题 A 有、主题 B 无”的变量残留。
+    clearManagedThemeVariables(root);
     
     // 应用主题类和变量
     if (theme.type === 'auto') {
@@ -1520,17 +1546,13 @@ export function createThemeManager() {
       
       // 应用对应主题的CSS变量
       const systemTheme = getThemeById(prefersDark ? 'dark' : 'light');
-      Object.entries(systemTheme.variables).forEach(([key, value]) => {
-        root.style.setProperty(key, value);
-      });
+      applyThemeVariables(root, systemTheme?.variables);
     } else {
       // 根据主题类型添加对应的类
       root.classList.add(theme.type === 'dark' ? 'dark-theme' : 'light-theme');
       
       // 应用主题CSS变量
-      Object.entries(theme.variables).forEach(([key, value]) => {
-        root.style.setProperty(key, value);
-      });
+      applyThemeVariables(root, theme.variables);
     }
     
     // 更新主题选择器标题，显示当前主题名称
