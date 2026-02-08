@@ -3767,6 +3767,35 @@ input:checked + .slider::before {
     transform: scale(1.2);
 }
 
+.menu-item--color {
+    gap: 10px;
+}
+
+.menu-item--color input[type="color"] {
+    width: 34px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+}
+
+.menu-item--color input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.menu-item--color input[type="color"]::-webkit-color-swatch {
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+    border-radius: 6px;
+}
+
+.menu-item--color .setting-value {
+    min-width: 68px;
+    text-transform: uppercase;
+    letter-spacing: 0.2px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
 .menu-item span:last-child {
     min-width: 45px;
     text-align: right;
@@ -5398,6 +5427,18 @@ body.temporary-mode::after {
     justify-self: end;
 }
 
+#chat-history-panel .settings-tab-content .menu-item--color {
+    grid-template-columns: minmax(160px, 1fr) auto auto;
+}
+
+#chat-history-panel .settings-tab-content .menu-item--color input[type="color"] {
+    justify-self: end;
+}
+
+#chat-history-panel .settings-tab-content .menu-item--color .setting-value {
+    justify-self: end;
+}
+
 #chat-history-panel .settings-tab-content .menu-item--select {
     grid-template-columns: minmax(160px, 1fr) minmax(200px, 2fr);
 }
@@ -5961,6 +6002,34 @@ body.temporary-mode::after {
 
 .theme-preview-card.active {
     border-color: var(--cerebr-highlight);
+}
+
+/* 默认只展示精选主题，更多主题由“展开”状态控制。 */
+.theme-preview-card--extra {
+    display: none;
+}
+
+.theme-preview-grid.theme-preview-grid--show-all .theme-preview-card--extra {
+    display: flex;
+}
+
+.theme-preview-more-toggle {
+    grid-column: 1 / -1;
+    height: 30px;
+    border-radius: 6px;
+    border: 1px dashed color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+    background: color-mix(in srgb, var(--cerebr-bg-color) 72%, transparent);
+    color: var(--cerebr-text-color);
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease;
+}
+
+.theme-preview-more-toggle:hover,
+.theme-preview-more-toggle:focus-visible {
+    border-color: color-mix(in srgb, var(--cerebr-highlight) 55%, var(--cerebr-border-color));
+    background: color-mix(in srgb, var(--cerebr-bg-color) 55%, transparent);
+    outline: none;
 }
 
 .theme-preview-content {

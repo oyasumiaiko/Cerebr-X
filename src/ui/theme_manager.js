@@ -1478,6 +1478,26 @@ export function createThemeManager() {
     }
   ];
 
+  // 精选主题：优先覆盖“明/暗、低对比/高对比、冷暖色系、纯黑系”等差异明显的风格。
+  // 其余主题在预览区收纳到“更多主题”，降低“看起来都差不多”的选择负担。
+  const FEATURED_THEME_IDS = [
+    'auto',
+    'light',
+    'dark',
+    'github-light',
+    'github-dark',
+    'vscode-dark',
+    'solarized-light',
+    'solarized-dark',
+    'tokyo-night',
+    'tokyo-night-light',
+    'nord',
+    'catppuccin-mocha',
+    'catppuccin-latte',
+    'true-black',
+    'alabaster'
+  ];
+
   // 汇总所有由主题系统管理的 CSS 变量，避免切换主题后残留旧主题变量。
   // 说明：仅清理主题管理器自己维护的变量，不影响其它设置项写入的 root 变量。
   const MANAGED_THEME_VARIABLES = Array.from(
@@ -1500,6 +1520,29 @@ export function createThemeManager() {
     Object.entries(variables || {}).forEach(([key, value]) => {
       root.style.setProperty(key, value);
     });
+  }
+
+  function splitThemesForPreview(currentThemeId) {
+    const featuredSet = new Set(FEATURED_THEME_IDS);
+    const normalizedCurrentThemeId = String(currentThemeId || '').trim();
+    if (normalizedCurrentThemeId) {
+      featuredSet.add(normalizedCurrentThemeId);
+    }
+
+    const featuredThemes = [];
+    const extraThemes = [];
+    PREDEFINED_THEMES.forEach((theme) => {
+      if (featuredSet.has(theme.id)) {
+        featuredThemes.push(theme);
+      } else {
+        extraThemes.push(theme);
+      }
+    });
+
+    return {
+      featuredThemes,
+      extraThemes
+    };
   }
 
   /**
@@ -1608,20 +1651,44 @@ export function createThemeManager() {
     
     // 清空容器
     container.innerHTML = '';
+    container.classList.remove('theme-preview-grid--show-all');
+    container.dataset.themePreviewExpanded = '0';
     
     // 获取当前主题ID
     const currentThemeId = document.documentElement.getAttribute('data-theme') || 'auto';
     
     // 检测系统深浅色模式，用于auto主题的预览
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    
-    // 为所有预设主题创建预览卡片
-    PREDEFINED_THEMES.forEach(theme => {
+    const { featuredThemes, extraThemes } = splitThemesForPreview(currentThemeId);
+    const hasExtraThemes = extraThemes.length > 0;
+    // 默认收起“更多主题”，避免首次打开就被大量相近主题淹没。
+    let showAllThemes = false;
+    let moreToggleButton = null;
+
+    function updatePreviewExpandedState(expanded) {
+      showAllThemes = !!expanded;
+      container.classList.toggle('theme-preview-grid--show-all', showAllThemes);
+      container.dataset.themePreviewExpanded = showAllThemes ? '1' : '0';
+      container.querySelectorAll('.theme-preview-card--extra').forEach((card) => {
+        card.style.display = showAllThemes ? 'flex' : 'none';
+      });
+      if (!moreToggleButton) return;
+      moreToggleButton.setAttribute('aria-expanded', showAllThemes ? 'true' : 'false');
+      moreToggleButton.textContent = showAllThemes
+        ? (moreToggleButton.dataset.labelExpanded || '收起更多主题')
+        : (moreToggleButton.dataset.labelCollapsed || '显示更多主题');
+    }
+
+    function createPreviewCard(theme, isExtraCard = false) {
       const themeId = theme.id;
       
       // 创建预览卡片
       const previewCard = document.createElement('div');
       previewCard.className = 'theme-preview-card';
+      if (isExtraCard) {
+        previewCard.classList.add('theme-preview-card--extra');
+        previewCard.style.display = showAllThemes ? 'flex' : 'none';
+      }
       previewCard.setAttribute('data-theme-id', themeId);
       
       if (themeId === currentThemeId) {
@@ -1644,8 +1711,8 @@ export function createThemeManager() {
 
       // 移除透明度，确保预览卡片中的颜色是不透明的
       const removeOpacity = (colorValue) => {
-        colorValue = colorValue.replace('rgba', 'rgb').replace('var(--cerebr-opacity)', '1');
-        return colorValue;
+        const raw = String(colorValue || '');
+        return raw.replace('rgba', 'rgb').replace('var(--cerebr-opacity)', '1');
       };
       
       previewCard.style.setProperty('--preview-header', themeVars['--cerebr-border-color'] || '#ffffff');
@@ -1735,22 +1802,48 @@ export function createThemeManager() {
       // 添加点击事件
       previewCard.addEventListener('click', () => {
         // 移除其他卡片的active类
-        document.querySelectorAll('.theme-preview-card.active').forEach(card => {
+        container.querySelectorAll('.theme-preview-card.active').forEach(card => {
           card.classList.remove('active');
         });
         
         // 为当前卡片添加active类
         previewCard.classList.add('active');
+        if (isExtraCard && !showAllThemes) {
+          // 选中“更多主题”中的卡片后自动展开，避免活动项被隐藏。
+          updatePreviewExpandedState(true);
+        }
         
         // 调用回调函数
         if (typeof onThemeSelect === 'function') {
           onThemeSelect(themeId);
         }
       });
-      
-      // 添加到容器
-      container.appendChild(previewCard);
+
+      return previewCard;
+    }
+
+    featuredThemes.forEach((theme) => {
+      container.appendChild(createPreviewCard(theme, false));
     });
+    extraThemes.forEach((theme) => {
+      container.appendChild(createPreviewCard(theme, true));
+    });
+
+    if (hasExtraThemes) {
+      moreToggleButton = document.createElement('button');
+      moreToggleButton.type = 'button';
+      moreToggleButton.className = 'theme-preview-more-toggle';
+      moreToggleButton.dataset.labelCollapsed = `显示其余 ${extraThemes.length} 个主题`;
+      moreToggleButton.dataset.labelExpanded = `收起其余 ${extraThemes.length} 个主题`;
+      moreToggleButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        updatePreviewExpandedState(!showAllThemes);
+      });
+      container.appendChild(moreToggleButton);
+    }
+
+    updatePreviewExpandedState(showAllThemes);
   }
 
   /**

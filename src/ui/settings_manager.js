@@ -129,10 +129,51 @@ export function createSettingsManager(appContext) {
     // 是否启用 $ / $$ 作为数学公式分隔符（默认开启以保持兼容）
     enableDollarMath: true,
     // 是否在输入框 placeholder 中显示当前模型名
-    showModelNameInPlaceholder: true
+    showModelNameInPlaceholder: true,
+    // 是否启用“自定义配色覆盖主题”
+    enableCustomThemeColors: false,
+    customThemeBgColor: '#262b33',
+    customThemeTextColor: '#abb2bf',
+    customThemeUserMessageColor: '#3e4451',
+    customThemeAiMessageColor: '#2c313c',
+    customThemeInputColor: '#21252b',
+    customThemeBorderColor: '#30363d',
+    customThemeIconColor: '#abb2bf',
+    customThemeHighlightColor: '#61afef',
+    customThemeCodeBgColor: '#282c34',
+    customThemeCodeTextColor: '#abb2bf'
   };
   // 不需要持久化到 sync 的设置（大文本/临时值）
   const NON_SYNC_SETTINGS_KEYS = new Set(['backgroundImageUrl']);
+
+  const CUSTOM_THEME_COLOR_SETTING_KEYS = new Set([
+    'customThemeBgColor',
+    'customThemeTextColor',
+    'customThemeUserMessageColor',
+    'customThemeAiMessageColor',
+    'customThemeInputColor',
+    'customThemeBorderColor',
+    'customThemeIconColor',
+    'customThemeHighlightColor',
+    'customThemeCodeBgColor',
+    'customThemeCodeTextColor'
+  ]);
+
+  const CUSTOM_THEME_OVERRIDE_VARIABLES = [
+    '--cerebr-bg-color',
+    '--cerebr-text-color',
+    '--cerebr-message-user-bg',
+    '--cerebr-message-ai-bg',
+    '--cerebr-input-bg',
+    '--cerebr-icon-color',
+    '--cerebr-border-color',
+    '--cerebr-hover-color',
+    '--cerebr-tooltip-bg',
+    '--cerebr-highlight',
+    '--cerebr-code-bg',
+    '--cerebr-code-color',
+    '--cerebr-code-border'
+  ];
 
   // 当前设置
   let currentSettings = {...DEFAULT_SETTINGS};
@@ -182,7 +223,7 @@ export function createSettingsManager(appContext) {
   }
 
   // 动态设置注册表：新增设置仅需在此处登记即可自动渲染与持久化
-  // type: 'toggle' | 'range' | 'select'
+  // type: 'toggle' | 'range' | 'select' | 'color' | 'text' | 'textarea'
   const SETTINGS_REGISTRY = [
     // 主题（复用现有隐藏下拉框，不额外渲染）
     {
@@ -194,6 +235,105 @@ export function createSettingsManager(appContext) {
       options: () => (themeManager.getAvailableThemes?.() || []).map(t => ({ label: t.name, value: t.id })),
       defaultValue: DEFAULT_SETTINGS.theme,
       apply: (v) => applyTheme(v)
+    },
+    {
+      key: 'enableCustomThemeColors',
+      type: 'toggle',
+      id: 'enable-custom-theme-colors',
+      label: '启用自定义配色（覆盖主题）',
+      group: 'theme',
+      defaultValue: DEFAULT_SETTINGS.enableCustomThemeColors,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeBgColor',
+      type: 'color',
+      id: 'custom-theme-bg-color',
+      label: '主背景色',
+      group: 'theme',
+      defaultValue: DEFAULT_SETTINGS.customThemeBgColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeTextColor',
+      type: 'color',
+      id: 'custom-theme-text-color',
+      label: '文本颜色',
+      group: 'theme',
+      defaultValue: DEFAULT_SETTINGS.customThemeTextColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeUserMessageColor',
+      type: 'color',
+      id: 'custom-theme-user-message-color',
+      label: '用户消息色',
+      group: 'theme',
+      defaultValue: DEFAULT_SETTINGS.customThemeUserMessageColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeAiMessageColor',
+      type: 'color',
+      id: 'custom-theme-ai-message-color',
+      label: 'AI消息色',
+      group: 'theme',
+      defaultValue: DEFAULT_SETTINGS.customThemeAiMessageColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeInputColor',
+      type: 'color',
+      id: 'custom-theme-input-color',
+      label: '输入框底色',
+      group: 'theme',
+      defaultValue: DEFAULT_SETTINGS.customThemeInputColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeBorderColor',
+      type: 'color',
+      id: 'custom-theme-border-color',
+      label: '边框颜色',
+      group: 'theme',
+      defaultValue: DEFAULT_SETTINGS.customThemeBorderColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeIconColor',
+      type: 'color',
+      id: 'custom-theme-icon-color',
+      label: '图标颜色',
+      group: 'theme',
+      defaultValue: DEFAULT_SETTINGS.customThemeIconColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeHighlightColor',
+      type: 'color',
+      id: 'custom-theme-highlight-color',
+      label: '强调色',
+      group: 'theme',
+      defaultValue: DEFAULT_SETTINGS.customThemeHighlightColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeCodeBgColor',
+      type: 'color',
+      id: 'custom-theme-code-bg-color',
+      label: '代码背景色',
+      group: 'theme',
+      defaultValue: DEFAULT_SETTINGS.customThemeCodeBgColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeCodeTextColor',
+      type: 'color',
+      id: 'custom-theme-code-text-color',
+      label: '代码文字色',
+      group: 'theme',
+      defaultValue: DEFAULT_SETTINGS.customThemeCodeTextColor,
+      apply: () => applyCustomThemeColorOverrides()
     },
     {
       key: 'backgroundImageUrl',
@@ -592,6 +732,12 @@ export function createSettingsManager(appContext) {
    * @param {any} value - 新值
    */
   function normalizeSettingValue(key, value) {
+    if (key === 'enableCustomThemeColors') {
+      return !!value;
+    }
+    if (CUSTOM_THEME_COLOR_SETTING_KEYS.has(key)) {
+      return normalizeHexColor(value, DEFAULT_SETTINGS[key] || '#000000');
+    }
     if (key === 'fullscreenWidth') {
       return clampFullscreenWidth(value);
     }
@@ -638,15 +784,24 @@ export function createSettingsManager(appContext) {
    */
   function bindSettingsFromSchema() {
     const schema = getSchemaMap();
+    const registryMap = new Map(getActiveRegistry().map((item) => [item.key, item]));
     Object.keys(schema).forEach((key) => {
       const def = schema[key];
       const el = def.element?.();
       if (!el) return;
+      const registryDef = registryMap.get(key);
       // 避免重复绑定：先移除已存在的监听（若实现上无此需求，可忽略）
       el.addEventListener('change', (e) => {
         const newValue = def.readFromUI ? def.readFromUI(el) : e.target?.value;
         setSetting(key, newValue);
       });
+      if (registryDef?.type === 'color') {
+        // 颜色选择器在拖动/取色时持续触发 input，使用实时应用可明显提升调色反馈。
+        el.addEventListener('input', (e) => {
+          const newValue = def.readFromUI ? def.readFromUI(el) : e.target?.value;
+          setSetting(key, newValue);
+        });
+      }
       // 初始 UI 同步
       if (def.writeToUI) def.writeToUI(el, currentSettings[key]);
     });
@@ -727,6 +882,7 @@ export function createSettingsManager(appContext) {
       return autoSection;
     };
     const GROUP_LABELS = {
+      theme: '主题与配色',
       background: '背景',
       display: '显示',
       layout: '布局',
@@ -834,6 +990,28 @@ export function createSettingsManager(appContext) {
         input.addEventListener('input', (e) => {
           valueSpan.textContent = formatDisplayValue(def, parseFloat(input.value));
         });
+        item.appendChild(input);
+        item.appendChild(valueSpan);
+        targetSection.appendChild(item);
+        dynamicElements.set(def.key, input);
+      } else if (def.type === 'color') {
+        item.classList.add('menu-item--color');
+        const input = document.createElement('input');
+        input.type = 'color';
+        input.id = def.id || `setting-${def.key}`;
+        const initialValue = normalizeHexColor(
+          currentSettings[def.key] ?? def.defaultValue,
+          '#000000'
+        );
+        input.value = initialValue;
+
+        const valueSpan = document.createElement('span');
+        valueSpan.className = 'setting-value';
+        valueSpan.textContent = initialValue.toUpperCase();
+        input.addEventListener('input', () => {
+          valueSpan.textContent = String(input.value || '').toUpperCase();
+        });
+
         item.appendChild(input);
         item.appendChild(valueSpan);
         targetSection.appendChild(item);
@@ -1020,6 +1198,9 @@ export function createSettingsManager(appContext) {
   }
 
   function formatDisplayValue(def, value) {
+    if (def.type === 'color') {
+      return String(value || '').toUpperCase();
+    }
     if (typeof def.formatValue === 'function') {
       try {
         return def.formatValue(value);
@@ -1145,6 +1326,95 @@ export function createSettingsManager(appContext) {
     });
   }
 
+  function normalizeHexColor(value, fallback = '#000000') {
+    const fallbackColor = String(fallback || '#000000').trim().toLowerCase();
+    const raw = String(value || '').trim().toLowerCase();
+    const candidate = raw.startsWith('#') ? raw : `#${raw}`;
+    if (/^#[0-9a-f]{6}$/.test(candidate)) return candidate;
+    if (/^#[0-9a-f]{3}$/.test(candidate)) {
+      return `#${candidate[1]}${candidate[1]}${candidate[2]}${candidate[2]}${candidate[3]}${candidate[3]}`;
+    }
+    return /^#[0-9a-f]{6}$/.test(fallbackColor) ? fallbackColor : '#000000';
+  }
+
+  function hexToRgbChannels(hexColor) {
+    const normalized = normalizeHexColor(hexColor, '#000000');
+    const intVal = Number.parseInt(normalized.slice(1), 16);
+    return {
+      r: (intVal >> 16) & 255,
+      g: (intVal >> 8) & 255,
+      b: intVal & 255
+    };
+  }
+
+  function toOpacityColor(hexColor, alphaToken = 'var(--cerebr-opacity)') {
+    const { r, g, b } = hexToRgbChannels(hexColor);
+    return `rgba(${r}, ${g}, ${b}, ${alphaToken})`;
+  }
+
+  function computeRelativeLuminanceFromHex(hexColor) {
+    const { r, g, b } = hexToRgbChannels(hexColor);
+    const toLinear = (channel) => {
+      const normalized = Math.max(0, Math.min(1, channel / 255));
+      if (normalized <= 0.04045) return normalized / 12.92;
+      return ((normalized + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+  }
+
+  function clearCustomThemeColorOverrides() {
+    const root = document.documentElement;
+    if (!root || !root.style) return;
+    CUSTOM_THEME_OVERRIDE_VARIABLES.forEach((variableName) => {
+      root.style.removeProperty(variableName);
+    });
+    root.classList.remove('custom-theme-colors-enabled');
+  }
+
+  function applyCustomThemeColorOverrides() {
+    const root = document.documentElement;
+    if (!root || !root.style) return;
+    if (!currentSettings.enableCustomThemeColors) {
+      const hadCustomOverrides = root.classList.contains('custom-theme-colors-enabled');
+      if (hadCustomOverrides) {
+        clearCustomThemeColorOverrides();
+        // 关闭自定义配色后立即恢复当前主题变量，避免出现“透明度变化了但主题色没回来”。
+        themeManager.applyTheme(currentSettings.theme || DEFAULT_SETTINGS.theme);
+      }
+      return;
+    }
+
+    const bgColor = normalizeHexColor(currentSettings.customThemeBgColor, DEFAULT_SETTINGS.customThemeBgColor);
+    const textColor = normalizeHexColor(currentSettings.customThemeTextColor, DEFAULT_SETTINGS.customThemeTextColor);
+    const userMessageColor = normalizeHexColor(currentSettings.customThemeUserMessageColor, DEFAULT_SETTINGS.customThemeUserMessageColor);
+    const aiMessageColor = normalizeHexColor(currentSettings.customThemeAiMessageColor, DEFAULT_SETTINGS.customThemeAiMessageColor);
+    const inputColor = normalizeHexColor(currentSettings.customThemeInputColor, DEFAULT_SETTINGS.customThemeInputColor);
+    const borderColor = normalizeHexColor(currentSettings.customThemeBorderColor, DEFAULT_SETTINGS.customThemeBorderColor);
+    const iconColor = normalizeHexColor(currentSettings.customThemeIconColor, DEFAULT_SETTINGS.customThemeIconColor);
+    const highlightColor = normalizeHexColor(currentSettings.customThemeHighlightColor, DEFAULT_SETTINGS.customThemeHighlightColor);
+    const codeBgColor = normalizeHexColor(currentSettings.customThemeCodeBgColor, DEFAULT_SETTINGS.customThemeCodeBgColor);
+    const codeTextColor = normalizeHexColor(currentSettings.customThemeCodeTextColor, DEFAULT_SETTINGS.customThemeCodeTextColor);
+
+    const isDarkPalette = computeRelativeLuminanceFromHex(bgColor) < 0.45;
+    const { r: textR, g: textG, b: textB } = hexToRgbChannels(textColor);
+    const hoverAlpha = isDarkPalette ? 0.08 : 0.05;
+
+    root.classList.add('custom-theme-colors-enabled');
+    root.style.setProperty('--cerebr-bg-color', toOpacityColor(bgColor));
+    root.style.setProperty('--cerebr-text-color', textColor);
+    root.style.setProperty('--cerebr-message-user-bg', toOpacityColor(userMessageColor));
+    root.style.setProperty('--cerebr-message-ai-bg', toOpacityColor(aiMessageColor));
+    root.style.setProperty('--cerebr-input-bg', toOpacityColor(inputColor));
+    root.style.setProperty('--cerebr-icon-color', iconColor);
+    root.style.setProperty('--cerebr-border-color', borderColor);
+    root.style.setProperty('--cerebr-hover-color', `rgba(${textR}, ${textG}, ${textB}, ${hoverAlpha})`);
+    root.style.setProperty('--cerebr-tooltip-bg', inputColor);
+    root.style.setProperty('--cerebr-highlight', highlightColor);
+    root.style.setProperty('--cerebr-code-bg', codeBgColor);
+    root.style.setProperty('--cerebr-code-color', codeTextColor);
+    root.style.setProperty('--cerebr-code-border', borderColor);
+  }
+
   function getThemeType(themeId) {
     const theme = themeManager.getThemeById?.(themeId);
     if (theme?.type) return theme.type;
@@ -1237,6 +1507,9 @@ export function createSettingsManager(appContext) {
         themeSwitch.checked = isDarkThemeId(themeValue);
       }
     }
+
+    // 若启用了“自定义配色覆盖主题”，需要在主题切换后再次覆盖关键变量。
+    applyCustomThemeColorOverrides();
     
     // 通知主题管理器主题变更
     themeManager.notifyThemeChange(themeValue);
