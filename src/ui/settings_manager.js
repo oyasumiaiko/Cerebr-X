@@ -1497,12 +1497,11 @@ export function createSettingsManager(appContext) {
     root.style.setProperty('--cerebr-input-bg', composeRgbaFromCssColor(inputColor, elementOpacity, '#21252b'));
     // 玻璃态面板使用单独的“稳定底色”变量，避免 backdrop-filter 在明暗背景图上出现
     // “亮区过实 / 暗区过透”的视觉漂移。
-    // 这里不再用“固定最小值”硬钳制，而是按 elementOpacity 做线性抬升：
-    // - elementOpacity 越低，越需要一点保底遮罩来稳定观感；
-    // - elementOpacity 越高，面板透明度越接近用户原始设置，保证“跟手”。
-    const panelSurfaceOpacity = clamp01(elementOpacity + (1 - elementOpacity) * 0.35, elementOpacity);
-    const panelSurfaceStrongOpacity = clamp01(elementOpacity + (1 - elementOpacity) * 0.45, elementOpacity);
-    const panelInlineOpacity = clamp01(elementOpacity + (1 - elementOpacity) * 0.28, elementOpacity);
+    // 面板底色遵循“元素透明度”设置，不额外叠加隐藏偏置，
+    // 保持 ESC 面板与用户滑条的感知一致。
+    const panelSurfaceOpacity = elementOpacity;
+    const panelSurfaceStrongOpacity = elementOpacity;
+    const panelInlineOpacity = elementOpacity;
     root.style.setProperty('--cerebr-panel-surface-bg', composeRgbaFromCssColor(bgColor, panelSurfaceOpacity, '#262b33'));
     root.style.setProperty('--cerebr-panel-surface-bg-strong', composeRgbaFromCssColor(bgColor, panelSurfaceStrongOpacity, '#262b33'));
     root.style.setProperty('--cerebr-panel-inline-bg', composeRgbaFromCssColor(inputColor, panelInlineOpacity, '#21252b'));
@@ -2118,7 +2117,8 @@ export function createSettingsManager(appContext) {
 
   function applyBackgroundOverallOpacity(value) {
     const numeric = clamp01(value, DEFAULT_SETTINGS.backgroundOverallOpacity);
-    // 仅控制“背景图片层”透明度，避免与主题面板里的“背景透明度”语义重叠。
+    // 控制背景图片“可见度”：CSS 层会用遮罩混合而非直接降低采样源不透明度，
+    // 以避免 backdrop-filter 在低可见度时出现“清晰底图透出”。
     document.documentElement.style.setProperty('--cerebr-background-image-opacity', numeric);
   }
 

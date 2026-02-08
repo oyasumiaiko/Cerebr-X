@@ -29,7 +29,7 @@ input, textarea, select {
     --cerebr-background-image-intensity: 0;
     --cerebr-background-image-opacity: 1;
     --cerebr-chat-background-color: var(--cerebr-bg-color);
-    --cerebr-panel-blur-radius: 18px;
+    --cerebr-panel-blur-radius: 26px;
     --cerebr-panel-surface-bg: var(--cerebr-bg-color);
     --cerebr-panel-surface-bg-strong: var(--cerebr-bg-color);
     --cerebr-panel-inline-bg: var(--cerebr-input-bg);
@@ -240,7 +240,7 @@ html::before {
     background-position: center;
     background-repeat: no-repeat;
     opacity: calc(var(--cerebr-background-image-intensity) * var(--cerebr-background-image-opacity, 1) * 0.6);
-    z-index: -2;
+    z-index: -3;
     filter: blur(calc(24px + var(--cerebr-background-image-intensity) * 120px));
     transform: scale(calc(1.02 + var(--cerebr-background-image-intensity) * 0.18));
     transform-origin: center;
@@ -257,12 +257,27 @@ body::before {
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    opacity: var(--cerebr-background-image-opacity, 1);
+    opacity: 1;
+    z-index: -2;
+    transition: none;
+}
+
+body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-color: var(--cerebr-chat-background-color, var(--cerebr-bg-color));
+    opacity: calc(1 - var(--cerebr-background-image-opacity, 1));
     z-index: -1;
-    transition: opacity 0.3s ease;
+    transition: opacity 0.3s ease, box-shadow 0.3s ease;
 }
 
 body:not(.has-custom-background-image)::before {
+    display: none;
+}
+
+body:not(.has-custom-background-image)::after {
     display: none;
 }
 
@@ -3903,19 +3918,6 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 }
 
 /* 临时模式样式 */
-body::after {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(255, 255, 255, 0);
-    pointer-events: none;
-    transition: box-shadow 0.3s ease;
-    /* z-index: -1; */
-}
-
 body.temporary-mode::after {
     /* background: rgba(255, 255, 255, 0.2); */
     /* box-shadow: 0 0 50px 0 rgba(255, 255, 255, 0.1) inset; */
@@ -4639,12 +4641,13 @@ body.temporary-mode::after {
     width: 50rem;          /* 或者指定具体宽度 */
     max-width: 80%;
     height: 85%;        /* 明确高度 */
-    background-color: var(--cerebr-bg-color);
+    background-color: transparent;
     border: 1px solid var(--cerebr-border-color);
     border-radius: 8px;
     padding: 16px;
     /* z-index: 9999; */
-    backdrop-filter: blur(var(--cerebr-panel-blur-radius));
+    backdrop-filter: blur(var(--cerebr-panel-blur-radius)) saturate(1.08);
+    -webkit-backdrop-filter: blur(var(--cerebr-panel-blur-radius)) saturate(1.08);
     box-shadow: 0 0px 20px 4px rgba(0, 0, 0, 0.2);
     overflow: hidden;
     display: flex;
@@ -4653,6 +4656,23 @@ body.temporary-mode::after {
     opacity: 0;
     transform: translateY(4px);
     transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#chat-history-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    z-index: 0;
+    background-color: var(--cerebr-panel-surface-bg-strong, var(--cerebr-bg-color));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+#chat-history-panel > * {
+    position: relative;
+    z-index: 1;
 }
 
 #chat-history-panel.visible {
@@ -5351,7 +5371,7 @@ body.temporary-mode::after {
 #chat-history-panel .settings-tab-content {
     padding: 12px;
     gap: 10px;
-    background: var(--cerebr-bg-color);
+    background: var(--cerebr-panel-surface-bg, var(--cerebr-bg-color));
     border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 85%, transparent);
     border-radius: 10px;
 }
