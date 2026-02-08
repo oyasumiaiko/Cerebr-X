@@ -79,7 +79,7 @@
       };
     }
 
-    const chatMinimapState = createMinimapState('chat', chatContainer, 'left');
+    const chatMinimapState = createMinimapState('chat', chatContainer, 'right');
     if (chatMinimapState) minimapStates.push(chatMinimapState);
     const threadMinimapState = createMinimapState('thread', threadContainer, 'right');
     if (threadMinimapState) minimapStates.push(threadMinimapState);
@@ -492,8 +492,12 @@
       };
     }
 
-    function syncMinimapGeometry(state, minimapWidth) {
+    function syncMinimapGeometry(state, minimapWidth, side) {
       if (!state?.root || !state?.container) return { trackHeight: 0 };
+      const effectiveSide = side === 'left' || side === 'right' ? side : state.side;
+      // 侧别可能随模式切换（主聊天在普通模式右侧、线程模式左侧），这里同步 class 便于样式扩展。
+      state.root.classList.toggle('chat-scroll-minimap--left', effectiveSide === 'left');
+      state.root.classList.toggle('chat-scroll-minimap--right', effectiveSide === 'right');
       const layoutRect = chatLayout.getBoundingClientRect();
       const containerRect = state.container.getBoundingClientRect();
       let paddingLeft = 0;
@@ -507,7 +511,7 @@
       const minLeft = 4;
       const maxLeft = Math.max(minLeft, layoutRect.width - minimapWidth - 4);
       let left = minLeft;
-      if (state.side === 'right') {
+      if (effectiveSide === 'right') {
         const contentRight = containerRect.right - paddingRight;
         const preferredLeft = (contentRight - layoutRect.left) + MINIMAP_OUTER_GAP;
         left = Math.round(clampNumber(preferredLeft, minLeft, maxLeft));
@@ -526,6 +530,15 @@
       state.root.style.top = `${top}px`;
       state.root.style.height = `${height}px`;
       return { trackHeight: height };
+    }
+
+    function resolveMinimapSide(state, threadModeActive) {
+      if (!state) return 'right';
+      // 主聊天缩略图：普通模式放右侧；进入线程模式后放左侧，给线程侧缩略图让出右侧。
+      if (state.key === 'chat') {
+        return threadModeActive ? 'left' : 'right';
+      }
+      return state.side || 'right';
     }
 
     function drawMinimapOverview(state, messages, trackHeight, scrollHeight, messageDisplayMode) {
@@ -954,9 +967,10 @@
       const container = state.container;
       const isThreadState = state.key === 'thread';
       const threadModeActive = isThreadModeActive();
+      const minimapSide = resolveMinimapSide(state, threadModeActive);
       const containerRect = container.getBoundingClientRect();
       const containerVisible = containerRect.width > 1 && containerRect.height > 1;
-      const { trackHeight } = syncMinimapGeometry(state, minimapWidth);
+      const { trackHeight } = syncMinimapGeometry(state, minimapWidth, minimapSide);
       const messages = collectDirectMessageElements(container);
       const messageCount = messages.length;
       const scrollHeight = Math.max(0, container.scrollHeight || 0);
