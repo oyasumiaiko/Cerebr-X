@@ -614,8 +614,18 @@ export function createSelectionThreadManager(appContext) {
     threadPanel.setAttribute('aria-hidden', 'false');
     const parent = threadPanelHome.parent || chatLayout;
     if (!parent) return;
-    if (threadPanelHome.nextSibling && threadPanelHome.nextSibling.parentNode === parent) {
-      parent.insertBefore(threadPanel, threadPanelHome.nextSibling);
+    const expectedNextSibling = (threadPanelHome.nextSibling && threadPanelHome.nextSibling.parentNode === parent)
+      ? threadPanelHome.nextSibling
+      : null;
+    // 仅在位置确实变化时再移动节点，避免无意义 DOM 重排导致线程面板滚动位置抖动。
+    const alreadyAtHome = threadPanel.parentNode === parent
+      && (
+        (expectedNextSibling && threadPanel.nextSibling === expectedNextSibling)
+        || (!expectedNextSibling && threadPanel === parent.lastElementChild)
+      );
+    if (alreadyAtHome) return;
+    if (expectedNextSibling) {
+      parent.insertBefore(threadPanel, expectedNextSibling);
     } else {
       parent.appendChild(threadPanel);
     }
@@ -625,8 +635,16 @@ export function createSelectionThreadManager(appContext) {
     if (!threadPanel || !chatContainer || !anchorElement) return;
     threadPanel.classList.add('thread-panel-inline');
     threadPanel.setAttribute('aria-hidden', 'false');
-    if (anchorElement.nextSibling) {
-      chatContainer.insertBefore(threadPanel, anchorElement.nextSibling);
+    const expectedNextSibling = anchorElement.nextSibling;
+    // 线程面板已经在锚点后方时不再重复插入，避免设置切换时滚动条意外回跳。
+    const alreadyInline = threadPanel.parentNode === chatContainer
+      && (
+        (expectedNextSibling && threadPanel === expectedNextSibling)
+        || (!expectedNextSibling && threadPanel === chatContainer.lastElementChild)
+      );
+    if (alreadyInline) return;
+    if (expectedNextSibling) {
+      chatContainer.insertBefore(threadPanel, expectedNextSibling);
     } else {
       chatContainer.appendChild(threadPanel);
     }
@@ -2925,7 +2943,12 @@ export function createSelectionThreadManager(appContext) {
       threadPanel.setAttribute('aria-hidden', 'true');
     }
     if (document.documentElement) {
+      let lastFullscreenLayoutState = isFullscreenLayout();
       layoutObserver = new MutationObserver(() => {
+        const currentFullscreenLayoutState = isFullscreenLayout();
+        // 仅在“全屏状态”变化时重排线程布局，避免主题等无关 class 变更触发滚动回顶。
+        if (currentFullscreenLayoutState === lastFullscreenLayoutState) return;
+        lastFullscreenLayoutState = currentFullscreenLayoutState;
         if (state.activeThreadId) {
           applyThreadLayout();
         }
