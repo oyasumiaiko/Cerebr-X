@@ -29,6 +29,8 @@ input, textarea, select {
     --cerebr-background-image-intensity: 0;
     --cerebr-background-image-opacity: 1;
     --cerebr-chat-background-color: var(--cerebr-bg-color);
+    /* 始终不透明的聊天底板色，用于彻底隔离 iframe 后网页内容。 */
+    --cerebr-chat-background-solid-color: #262b33;
     --cerebr-panel-blur-radius: 18px;
     --cerebr-panel-surface-bg: var(--cerebr-bg-color);
     --cerebr-panel-surface-bg-strong: var(--cerebr-bg-color);
@@ -221,34 +223,50 @@ body {
     flex-direction: column;
     position: relative;
     z-index: 0;
-    background-color: var(--cerebr-chat-background-color, var(--cerebr-bg-color));
+    background-color: var(--cerebr-chat-background-solid-color, #262b33);
     color: var(--cerebr-text-color);
     font-size: var(--cerebr-ui-font-size);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
     overflow: hidden;
     transform-origin: top left;
     box-sizing: border-box;
+    /* 把背景伪元素限制在 body 自己的层叠上下文内，避免负 z-index 穿透到宿主网页。 */
+    isolation: isolate;
 }
 
-html::before {
+body::before {
+    --cerebr-atmosphere-strength: clamp(
+      0,
+      calc(var(--cerebr-background-image-intensity, 0) * var(--cerebr-fullscreen-blur-opacity, 1)),
+      1
+    );
+    --cerebr-atmosphere-mask: color-mix(
+      in srgb,
+      var(--cerebr-chat-background-solid-color, #262b33) calc((1 - var(--cerebr-atmosphere-strength)) * 100%),
+      transparent
+    );
     content: '';
     position: fixed;
     inset: 0;
     pointer-events: none;
-    background-image: var(--cerebr-background-image);
+    /* 氛围层用“底色遮罩 + 图片”合成强度，不再依赖 opacity。 */
+    background-image:
+      linear-gradient(var(--cerebr-atmosphere-mask), var(--cerebr-atmosphere-mask)),
+      var(--cerebr-background-image);
+    background-blend-mode: normal;
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    opacity: calc(var(--cerebr-background-image-intensity) * var(--cerebr-background-image-opacity, 1) * 0.6);
     z-index: -2;
-    filter: blur(calc(24px + var(--cerebr-background-image-intensity) * 120px));
-    transform: scale(calc(1.02 + var(--cerebr-background-image-intensity) * 0.18));
+    filter: blur(calc(20px + var(--cerebr-atmosphere-strength) * 124px))
+            saturate(calc(0.92 + var(--cerebr-atmosphere-strength) * 0.36));
+    transform: scale(calc(1.02 + var(--cerebr-atmosphere-strength) * 0.18));
     transform-origin: center;
-    will-change: opacity, filter, transform;
-    transition: opacity 0.3s ease, filter 0.3s ease, transform 0.3s ease;
+    will-change: filter, transform;
+    transition: filter 0.3s ease, transform 0.3s ease, background-image 0.3s ease;
 }
 
-body::before {
+body::after {
     content: '';
     position: fixed;
     inset: 0;
@@ -262,17 +280,14 @@ body::before {
     transition: opacity 0.3s ease;
 }
 
-body:not(.has-custom-background-image)::before {
-    display: none;
-}
-
-html:not(.has-custom-background-image)::before {
+body:not(.has-custom-background-image)::before,
+body:not(.has-custom-background-image)::after {
     display: none;
 }
 
 html.standalone-mode,
 body.standalone-mode {
-    background-color: var(--cerebr-chat-background-color, var(--cerebr-bg-color));
+    background-color: var(--cerebr-chat-background-solid-color, #262b33);
 }
 
 /* 全局控件统一样式 */
@@ -3902,34 +3917,6 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     opacity: 0.5;
 }
 
-/* 临时模式样式 */
-body::after {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(255, 255, 255, 0);
-    pointer-events: none;
-    transition: box-shadow 0.3s ease;
-    /* z-index: -1; */
-}
-
-body.temporary-mode::after {
-    /* background: rgba(255, 255, 255, 0.2); */
-    /* box-shadow: 0 0 50px 0 rgba(255, 255, 255, 0.1) inset; */
-    /* background: linear-gradient(to bottom, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.0)); */
-    /* box-shadow: 0 0 2vh -0.5vh color-mix(in srgb, var(--cerebr-icon-color) 100%, transparent) inset; */
-    /* transition: box-shadow 0.3s ease; */
-}
-
-:root.dark-theme body.temporary-mode::after {
-    /* background: rgba(255, 255, 255, 0.05); */
-    /* box-shadow: 0 0 50px 0 rgba(255, 255, 255, 0.025) inset; */
-    /* background: linear-gradient(to bottom, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.0)); */
-}
-
 /* 重新生成中：在目标消息右上角显示一个不影响布局的轻量旋转指示 */
 .message.regenerating {
     position: relative;
@@ -6717,13 +6704,16 @@ html.fullscreen-mode {
 }
 
 html.fullscreen-mode body::before {
-  background-size: var(--cerebr-fullscreen-bg-size, contain);
+  /* 全屏氛围固定铺满 cover，由 filter 负责“模糊氛围”。 */
+  background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
 }
 
-html.fullscreen-mode::before {
-  opacity: calc(var(--cerebr-fullscreen-blur-opacity, 1) * var(--cerebr-background-image-intensity) * var(--cerebr-background-image-opacity, 1) * 0.8);
+html.fullscreen-mode body::after {
+  background-size: var(--cerebr-fullscreen-bg-size, contain);
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 /* 全屏下：让容器占满宽度，但用内边距把视觉内容限制在中心列。

@@ -243,7 +243,7 @@ export function createSettingsManager(appContext) {
       key: 'backgroundOpacity',
       type: 'range',
       id: 'theme-background-opacity',
-      label: '背景透明度',
+      label: '背景底色强度',
       group: 'theme',
       min: 0.2,
       max: 1,
@@ -1446,6 +1446,26 @@ export function createSettingsManager(appContext) {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
+  function computeRelativeLuminanceFromRgbChannels(r, g, b) {
+    const toLinear = (channel) => {
+      const normalized = Math.max(0, Math.min(1, Number(channel) / 255));
+      if (normalized <= 0.04045) return normalized / 12.92;
+      return ((normalized + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+  }
+
+  function composeOpaqueBaseColor(colorValue, strengthValue, fallbackColor = '#000000') {
+    const { r, g, b } = parseCssColorChannels(colorValue, fallbackColor);
+    const strength = clamp01(strengthValue, 1);
+    // 底色保持不透明：用同明暗方向的锚点色（黑/白）与主题色做混合，
+    // 强度越高越接近主题原色，越低越接近锚点色，但 alpha 始终为 1。
+    const luminance = computeRelativeLuminanceFromRgbChannels(r, g, b);
+    const anchor = luminance >= 0.5 ? 255 : 0;
+    const mix = (channel) => Math.round(anchor + (channel - anchor) * strength);
+    return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+  }
+
   function computeRelativeLuminanceFromHex(hexColor) {
     const { r, g, b } = hexToRgbChannels(hexColor);
     const toLinear = (channel) => {
@@ -1484,12 +1504,11 @@ export function createSettingsManager(appContext) {
     const aiColor = computed.getPropertyValue('--cerebr-message-ai-bg').trim() || '#2c313c';
     const inputColor = computed.getPropertyValue('--cerebr-input-bg').trim() || '#21252b';
 
-    // 背景透明度仅控制“整张聊天背景底板”（可透出 iframe 后网页），
-    // 不直接影响消息/输入框等前景 UI 元素。
-    root.style.setProperty(
-      '--cerebr-chat-background-color',
-      composeRgbaFromCssColor(bgColor, backgroundOpacity, '#262b33')
-    );
+    // 背景底色改为“始终不透明”，避免 iframe 后网页参与合成导致的清晰透出问题。
+    // 该滑条语义调整为“底色强度”：控制主题底色的显著程度，不再控制 alpha 透出。
+    const opaqueBaseColor = composeOpaqueBaseColor(bgColor, backgroundOpacity, '#262b33');
+    root.style.setProperty('--cerebr-chat-background-color', opaqueBaseColor);
+    root.style.setProperty('--cerebr-chat-background-solid-color', opaqueBaseColor);
     // 元素透明度单独控制 UI 组件层，包括消息气泡、输入框、面板等。
     root.style.setProperty('--cerebr-bg-color', composeRgbaFromCssColor(bgColor, elementOpacity, '#262b33'));
     root.style.setProperty('--cerebr-message-user-bg', composeRgbaFromCssColor(userColor, elementOpacity, '#3e4451'));
@@ -2112,7 +2131,8 @@ export function createSettingsManager(appContext) {
 
   function applyBackgroundImageIntensity(value) {
     const numeric = clamp01(value, DEFAULT_SETTINGS.backgroundImageIntensity);
-    // 语义：控制背景图“模糊氛围层”的强度，而非主体图片透明度。
+    // 语义：控制背景图“模糊氛围层”的浓度（遮罩混合 + filter），
+    // 不直接改氛围层 opacity，也不影响主体图片层透明度。
     document.documentElement.style.setProperty('--cerebr-background-image-intensity', numeric);
   }
 
@@ -2124,14 +2144,15 @@ export function createSettingsManager(appContext) {
 
   /**
    * 全屏模式背景铺满开关：
-   * - 关闭：保持 contain + 模糊填充（当前默认行为）
-   * - 开启：使用 cover，取消模糊填充
+   * - 关闭：主图保持 contain
+   * - 开启：主图使用 cover
+   * 说明：氛围层现在固定走 cover + filter，不再被该开关直接关闭。
    * @param {boolean} enabled
    */
   function applyFullscreenBackgroundCover(enabled) {
     const useCover = !!enabled;
     document.documentElement.style.setProperty('--cerebr-fullscreen-bg-size', useCover ? 'cover' : 'contain');
-    document.documentElement.style.setProperty('--cerebr-fullscreen-blur-opacity', useCover ? '0' : '1');
+    document.documentElement.style.setProperty('--cerebr-fullscreen-blur-opacity', '1');
   }
 
   function refreshBackgroundImage(options = {}) {
