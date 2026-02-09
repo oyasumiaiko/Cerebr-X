@@ -507,6 +507,11 @@ body.standalone-mode #empty-state-repomix {
     scrollbar-gutter: stable;
 }
 
+/* 侧栏模式也保留阅读尾部留白，确保最后一段内容可滚到更舒适位置。 */
+html:not(.fullscreen-mode) #chat-container {
+    padding-bottom: calc(15px + var(--cerebr-reading-tail-space, 90vh));
+}
+
 /* 当有滚动条时，动态调整右侧padding */
 #chat-container.has-scrollbar {
     padding-right: calc(15px - var(--scrollbar-width, 0px));
@@ -839,6 +844,11 @@ body.fullscreen-width-resize-active * {
     overflow-y: auto;
     padding: 12px 12px 14px 12px;
     scrollbar-gutter: auto;
+}
+
+/* 侧栏线程面板同样保留尾部留白，避免阅读末尾贴着输入区。 */
+html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
+    padding-bottom: calc(14px + var(--cerebr-reading-tail-space, 90vh));
 }
 
 #thread-container.thread-container--static .message,
