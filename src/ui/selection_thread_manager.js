@@ -2203,6 +2203,60 @@ export function createSelectionThreadManager(appContext) {
     });
   }
 
+  function findHighlightElementForThread(anchorElement, threadId) {
+    if (!anchorElement || !threadId) return null;
+    const highlightNodes = anchorElement.querySelectorAll('.thread-highlight');
+    for (const node of highlightNodes) {
+      const threadIds = parseThreadIdsFromHighlight(node);
+      if (threadIds.includes(threadId)) {
+        return node;
+      }
+    }
+    return null;
+  }
+
+  function scrollMainChatToThreadAnchor(threadId, anchorMessageId) {
+    if (!chatContainer || !anchorMessageId) return;
+    const selector = buildMessageSelector(anchorMessageId);
+    const anchorElement = selector ? chatContainer.querySelector(selector) : null;
+    if (!anchorElement) return;
+
+    // 进入线程时让左侧主聊天尽量对齐到“线程对应的高亮位置”，找不到高亮时回退到锚点消息。
+    const targetElement = findHighlightElementForThread(anchorElement, threadId) || anchorElement;
+    const applyScroll = () => {
+      if (!chatContainer || !targetElement) return;
+      const containerRect = chatContainer.getBoundingClientRect();
+      const targetRect = targetElement.getBoundingClientRect();
+      const style = window.getComputedStyle(chatContainer);
+      const paddingTop = parseFloat(style.paddingTop) || 0;
+      const delta = targetRect.top - containerRect.top;
+      const rawTop = chatContainer.scrollTop + delta - paddingTop;
+      const maxTop = Math.max(0, chatContainer.scrollHeight - chatContainer.clientHeight);
+      const nextTop = Math.max(0, Math.min(rawTop, maxTop));
+      chatContainer.scrollTo({ top: nextTop, behavior: 'auto' });
+    };
+
+    applyScroll();
+    requestAnimationFrame(applyScroll);
+
+    const images = anchorElement.querySelectorAll('img');
+    if (images.length) {
+      let pending = 0;
+      images.forEach((img) => {
+        if (img.complete) return;
+        pending += 1;
+        const onDone = () => {
+          pending -= 1;
+          if (pending <= 0) {
+            applyScroll();
+          }
+        };
+        img.addEventListener('load', onDone, { once: true });
+        img.addEventListener('error', onDone, { once: true });
+      });
+    }
+  }
+
   async function enterThread(threadId, options = {}) {
     const info = findThreadById(threadId);
     if (!info) {
@@ -2215,6 +2269,7 @@ export function createSelectionThreadManager(appContext) {
     document.body.classList.add('thread-mode-active');
     updateThreadPanelTitle(state.activeSelectionText);
     applyThreadLayout();
+    scrollMainChatToThreadAnchor(threadId, info.anchorMessageId);
     await renderThreadMessages(threadId, options);
   }
 
