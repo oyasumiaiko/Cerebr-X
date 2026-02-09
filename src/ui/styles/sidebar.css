@@ -290,15 +290,36 @@ body::after {
     transition: opacity 0.3s ease;
 }
 
+/* 仅在布局模式切换瞬间禁用背景层过渡；日常调参仍保留平滑过渡。 */
+html.layout-mode-switching body::before,
+html.layout-mode-switching body::after {
+    transition: none !important;
+}
+
 body:not(.has-custom-background-image)::before,
 body:not(.has-custom-background-image)::after {
     display: none;
 }
 
-/* 侧栏模式（非全屏）下关闭背景图与氛围层，只保留不透明底色，避免视觉噪声。 */
-html:not(.fullscreen-mode) body::before,
-html:not(.fullscreen-mode) body::after {
-    display: none;
+/* 侧栏模式（非全屏）下：
+   - 原图透明度 > 0：关闭氛围效果，仅保留不透明底色；
+   - 原图透明度 = 0：允许显示氛围层。 */
+html:not(.fullscreen-mode) body::before {
+    --cerebr-sidebar-atmosphere-factor: clamp(
+      0,
+      calc(1 - var(--cerebr-background-image-opacity, 1) * 1000),
+      1
+    );
+    --cerebr-atmosphere-mask: color-mix(
+      in srgb,
+      var(--cerebr-chat-background-solid-color, #262b33)
+        calc((1 - (var(--cerebr-atmosphere-strength) * var(--cerebr-sidebar-atmosphere-factor))) * 100%),
+      transparent
+    );
+    filter: blur(calc((20px + var(--cerebr-atmosphere-strength) * 124px) * var(--cerebr-sidebar-atmosphere-factor)))
+            saturate(calc(1 + ((0.92 + var(--cerebr-atmosphere-strength) * 0.36) - 1) * var(--cerebr-sidebar-atmosphere-factor)));
+    transform: scale(calc(1 + ((1.02 + var(--cerebr-atmosphere-strength) * 0.18) - 1) * var(--cerebr-sidebar-atmosphere-factor)));
+    will-change: auto;
 }
 
 html.standalone-mode,

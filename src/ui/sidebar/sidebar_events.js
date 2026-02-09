@@ -900,9 +900,20 @@ function setupSlashFocusShortcut(appContext) {
  * @param {ReturnType<import('./sidebar_app_context.js').createSidebarAppContext>} appContext
  * @param {boolean} isFullscreen
  */
+let layoutModeSwitchTransitionTimer = null;
 function applyFullscreenMode(appContext, isFullscreen) {
+  const root = document.documentElement;
+  // 切换布局模式时临时关闭背景层过渡，避免侧栏 <-> 全屏切换出现“模糊/缩放渐变”闪动。
+  root.classList.add('layout-mode-switching');
+  if (layoutModeSwitchTransitionTimer) {
+    clearTimeout(layoutModeSwitchTransitionTimer);
+  }
   appContext.state.isFullscreen = !!isFullscreen;
-  document.documentElement.classList.toggle('fullscreen-mode', appContext.state.isFullscreen);
+  root.classList.toggle('fullscreen-mode', appContext.state.isFullscreen);
+  layoutModeSwitchTransitionTimer = setTimeout(() => {
+    root.classList.remove('layout-mode-switching');
+    layoutModeSwitchTransitionTimer = null;
+  }, 220);
   updateFullscreenToggleHints(appContext);
 }
 
