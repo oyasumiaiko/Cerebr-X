@@ -295,6 +295,12 @@ body:not(.has-custom-background-image)::after {
     display: none;
 }
 
+/* 侧栏模式（非全屏）下关闭背景图与氛围层，只保留不透明底色，避免视觉噪声。 */
+html:not(.fullscreen-mode) body::before,
+html:not(.fullscreen-mode) body::after {
+    display: none;
+}
+
 html.standalone-mode,
 body.standalone-mode {
     background-color: var(--cerebr-chat-background-solid-color, #262b33);
