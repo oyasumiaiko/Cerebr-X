@@ -145,6 +145,9 @@ export function createSettingsManager(appContext) {
     customThemeBorderColor: '#30363d',
     customThemeIconColor: '#abb2bf',
     customThemeHighlightColor: '#61afef',
+    customThemeSuccessColor: '#34c759',
+    customThemeWarningColor: '#ff9500',
+    customThemeErrorColor: '#ff3b30',
     customThemeCodeBgColor: '#282c34',
     customThemeCodeTextColor: '#abb2bf'
   };
@@ -160,6 +163,9 @@ export function createSettingsManager(appContext) {
     'customThemeBorderColor',
     'customThemeIconColor',
     'customThemeHighlightColor',
+    'customThemeSuccessColor',
+    'customThemeWarningColor',
+    'customThemeErrorColor',
     'customThemeCodeBgColor',
     'customThemeCodeTextColor'
   ]);
@@ -181,6 +187,9 @@ export function createSettingsManager(appContext) {
     '--cerebr-hover-color',
     '--cerebr-tooltip-bg',
     '--cerebr-highlight',
+    '--cerebr-green',
+    '--cerebr-orange',
+    '--cerebr-red',
     '--cerebr-code-bg',
     '--cerebr-code-color',
     '--cerebr-code-border'
@@ -261,6 +270,19 @@ export function createSettingsManager(appContext) {
       formatValue: (value) => `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`
     },
     {
+      key: 'elementOpacity',
+      type: 'range',
+      id: 'theme-element-opacity',
+      label: '主界面透明度',
+      group: 'theme',
+      min: 0.2,
+      max: 1,
+      step: 0.05,
+      defaultValue: DEFAULT_SETTINGS.elementOpacity,
+      apply: () => applyThemeOpacityOverrides(),
+      formatValue: (value) => `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`
+    },
+    {
       key: 'chatInputBlurRadius',
       type: 'range',
       id: 'theme-chat-input-blur-radius',
@@ -286,39 +308,50 @@ export function createSettingsManager(appContext) {
       key: 'customThemeBgColor',
       type: 'color',
       id: 'custom-theme-bg-color',
-      label: '主背景色',
+      label: '界面底色',
       group: 'theme',
+      section: 'theme-core',
       defaultValue: DEFAULT_SETTINGS.customThemeBgColor,
       apply: () => applyCustomThemeColorOverrides()
-    },
-    {
-      key: 'elementOpacity',
-      type: 'range',
-      id: 'theme-element-opacity',
-      label: '主背景透明度',
-      group: 'theme',
-      min: 0.2,
-      max: 1,
-      step: 0.05,
-      defaultValue: DEFAULT_SETTINGS.elementOpacity,
-      apply: () => applyThemeOpacityOverrides(),
-      formatValue: (value) => `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`
     },
     {
       key: 'customThemeTextColor',
       type: 'color',
       id: 'custom-theme-text-color',
-      label: '文本颜色',
+      label: '主文字色',
       group: 'theme',
+      section: 'theme-core',
       defaultValue: DEFAULT_SETTINGS.customThemeTextColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeBorderColor',
+      type: 'color',
+      id: 'custom-theme-border-color',
+      label: '边框/分隔线',
+      group: 'theme',
+      section: 'theme-core',
+      defaultValue: DEFAULT_SETTINGS.customThemeBorderColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeInputColor',
+      type: 'color',
+      id: 'custom-theme-input-color',
+      label: '输入区底色',
+      group: 'theme',
+      section: 'theme-core',
+      defaultValue: DEFAULT_SETTINGS.customThemeInputColor,
+      alphaEnabled: true,
       apply: () => applyCustomThemeColorOverrides()
     },
     {
       key: 'customThemeUserMessageColor',
       type: 'color',
       id: 'custom-theme-user-message-color',
-      label: '用户消息色',
+      label: '用户气泡色',
       group: 'theme',
+      section: 'theme-chat',
       defaultValue: DEFAULT_SETTINGS.customThemeUserMessageColor,
       alphaEnabled: true,
       apply: () => applyCustomThemeColorOverrides()
@@ -327,29 +360,11 @@ export function createSettingsManager(appContext) {
       key: 'customThemeAiMessageColor',
       type: 'color',
       id: 'custom-theme-ai-message-color',
-      label: 'AI消息色',
+      label: 'AI气泡色',
       group: 'theme',
+      section: 'theme-chat',
       defaultValue: DEFAULT_SETTINGS.customThemeAiMessageColor,
       alphaEnabled: true,
-      apply: () => applyCustomThemeColorOverrides()
-    },
-    {
-      key: 'customThemeInputColor',
-      type: 'color',
-      id: 'custom-theme-input-color',
-      label: '输入框底色',
-      group: 'theme',
-      defaultValue: DEFAULT_SETTINGS.customThemeInputColor,
-      alphaEnabled: true,
-      apply: () => applyCustomThemeColorOverrides()
-    },
-    {
-      key: 'customThemeBorderColor',
-      type: 'color',
-      id: 'custom-theme-border-color',
-      label: '边框颜色',
-      group: 'theme',
-      defaultValue: DEFAULT_SETTINGS.customThemeBorderColor,
       apply: () => applyCustomThemeColorOverrides()
     },
     {
@@ -358,6 +373,7 @@ export function createSettingsManager(appContext) {
       id: 'custom-theme-icon-color',
       label: '图标颜色',
       group: 'theme',
+      section: 'theme-accent',
       defaultValue: DEFAULT_SETTINGS.customThemeIconColor,
       apply: () => applyCustomThemeColorOverrides()
     },
@@ -367,7 +383,41 @@ export function createSettingsManager(appContext) {
       id: 'custom-theme-highlight-color',
       label: '强调色',
       group: 'theme',
+      section: 'theme-accent',
       defaultValue: DEFAULT_SETTINGS.customThemeHighlightColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeSuccessColor',
+      type: 'color',
+      id: 'custom-theme-success-color',
+      label: '成功状态色',
+      group: 'theme',
+      section: 'theme-status',
+      uiHidden: true,
+      defaultValue: DEFAULT_SETTINGS.customThemeSuccessColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeWarningColor',
+      type: 'color',
+      id: 'custom-theme-warning-color',
+      label: '警告状态色',
+      group: 'theme',
+      section: 'theme-status',
+      uiHidden: true,
+      defaultValue: DEFAULT_SETTINGS.customThemeWarningColor,
+      apply: () => applyCustomThemeColorOverrides()
+    },
+    {
+      key: 'customThemeErrorColor',
+      type: 'color',
+      id: 'custom-theme-error-color',
+      label: '错误状态色',
+      group: 'theme',
+      section: 'theme-status',
+      uiHidden: true,
+      defaultValue: DEFAULT_SETTINGS.customThemeErrorColor,
       apply: () => applyCustomThemeColorOverrides()
     },
     {
@@ -376,6 +426,8 @@ export function createSettingsManager(appContext) {
       id: 'custom-theme-code-bg-color',
       label: '代码背景色',
       group: 'theme',
+      section: 'theme-code',
+      uiHidden: true,
       defaultValue: DEFAULT_SETTINGS.customThemeCodeBgColor,
       apply: () => applyCustomThemeColorOverrides()
     },
@@ -385,6 +437,8 @@ export function createSettingsManager(appContext) {
       id: 'custom-theme-code-text-color',
       label: '代码文字色',
       group: 'theme',
+      section: 'theme-code',
+      uiHidden: true,
       defaultValue: DEFAULT_SETTINGS.customThemeCodeTextColor,
       apply: () => applyCustomThemeColorOverrides()
     },
@@ -1128,6 +1182,13 @@ export function createSettingsManager(appContext) {
       advanced: '高级',
       other: '其他'
     };
+    const THEME_SECTION_LABELS = {
+      'theme-core': '基础颜色',
+      'theme-chat': '对话气泡',
+      'theme-accent': '强调与图标',
+      'theme-status': '状态语义色',
+      'theme-code': '代码块'
+    };
     const normalizeGroupKey = (def) => {
       if (def && typeof def.group === 'string' && def.group.trim()) {
         return def.group.trim();
@@ -1151,6 +1212,25 @@ export function createSettingsManager(appContext) {
         autoSection.appendChild(groupEl);
       }
       return groupEl;
+    };
+    const ensureThemeSubgroupSection = (groupSection, def) => {
+      if (!groupSection || normalizeGroupKey(def) !== 'theme') return groupSection;
+      const sectionKey = (typeof def.section === 'string' && def.section.trim())
+        ? def.section.trim()
+        : '';
+      if (!sectionKey) return groupSection;
+      let subgroupEl = groupSection.querySelector(`.settings-subgroup[data-section="${sectionKey}"]`);
+      if (!subgroupEl) {
+        subgroupEl = document.createElement('div');
+        subgroupEl.className = 'settings-subgroup';
+        subgroupEl.dataset.section = sectionKey;
+        const title = document.createElement('div');
+        title.className = 'settings-subgroup-title';
+        title.textContent = THEME_SECTION_LABELS[sectionKey] || sectionKey;
+        subgroupEl.appendChild(title);
+        groupSection.appendChild(subgroupEl);
+      }
+      return subgroupEl;
     };
     const resolveContainer = (def) => {
       const wantsQuick = def.menu === 'quick';
@@ -1181,15 +1261,18 @@ export function createSettingsManager(appContext) {
       const targetSection = (scope === 'panel')
         ? ensureGroupSection(autoSection, normalizeGroupKey(def))
         : autoSection;
+      const targetBucket = (scope === 'panel')
+        ? ensureThemeSubgroupSection(targetSection, def)
+        : targetSection;
       if (existing) {
         dynamicElements.set(def.key, existing);
         const existingItem = existing.closest('.menu-item');
-        if (targetSection && existingItem && existingItem.parentElement !== targetSection) {
-          targetSection.appendChild(existingItem);
+        if (targetBucket && existingItem && existingItem.parentElement !== targetBucket) {
+          targetBucket.appendChild(existingItem);
         }
         continue;
       }
-      if (!autoSection || !targetSection) continue;
+      if (!autoSection || !targetBucket) continue;
 
       const item = document.createElement('div');
       item.className = 'menu-item';
@@ -1210,7 +1293,7 @@ export function createSettingsManager(appContext) {
         wrap.appendChild(input);
         wrap.appendChild(slider);
         item.appendChild(wrap);
-        targetSection.appendChild(item);
+        targetBucket.appendChild(item);
         dynamicElements.set(def.key, input);
       } else if (def.type === 'range') {
         item.classList.add('menu-item--range');
@@ -1228,7 +1311,7 @@ export function createSettingsManager(appContext) {
         });
         item.appendChild(input);
         item.appendChild(valueSpan);
-        targetSection.appendChild(item);
+        targetBucket.appendChild(item);
         dynamicElements.set(def.key, input);
       } else if (def.type === 'color') {
         item.classList.add('menu-item--color');
@@ -1260,7 +1343,7 @@ export function createSettingsManager(appContext) {
             item.appendChild(alphaInput);
             item.appendChild(alphaValue);
             item.appendChild(valueSpan);
-            targetSection.appendChild(item);
+            targetBucket.appendChild(item);
             dynamicElements.set(def.key, input);
             writeColorControlValue(def, input, currentSettings[def.key] ?? def.defaultValue);
             continue;
@@ -1268,7 +1351,7 @@ export function createSettingsManager(appContext) {
         }
         item.appendChild(input);
         item.appendChild(valueSpan);
-        targetSection.appendChild(item);
+        targetBucket.appendChild(item);
         dynamicElements.set(def.key, input);
         writeColorControlValue(def, input, currentSettings[def.key] ?? def.defaultValue);
       } else if (def.type === 'text' || def.type === 'textarea') {
@@ -1316,7 +1399,7 @@ export function createSettingsManager(appContext) {
           actions.appendChild(clearBtn);
 
           item.appendChild(actions);
-          targetSection.appendChild(item);
+          targetBucket.appendChild(item);
 
           dynamicElements.set(def.key, input);
 
@@ -1379,7 +1462,7 @@ export function createSettingsManager(appContext) {
             item.appendChild(actionBar);
           }
 
-          targetSection.appendChild(item);
+          targetBucket.appendChild(item);
           dynamicElements.set(def.key, input);
         }
       } else if (def.type === 'select') {
@@ -1397,7 +1480,7 @@ export function createSettingsManager(appContext) {
           select.appendChild(o);
         });
         item.appendChild(select);
-        targetSection.appendChild(item);
+        targetBucket.appendChild(item);
         dynamicElements.set(def.key, select);
       }
     }
@@ -1890,6 +1973,9 @@ export function createSettingsManager(appContext) {
     const borderColor = normalizeHexColor(currentSettings.customThemeBorderColor, DEFAULT_SETTINGS.customThemeBorderColor);
     const iconColor = normalizeHexColor(currentSettings.customThemeIconColor, DEFAULT_SETTINGS.customThemeIconColor);
     const highlightColor = normalizeHexColor(currentSettings.customThemeHighlightColor, DEFAULT_SETTINGS.customThemeHighlightColor);
+    const successColor = normalizeHexColor(currentSettings.customThemeSuccessColor, DEFAULT_SETTINGS.customThemeSuccessColor);
+    const warningColor = normalizeHexColor(currentSettings.customThemeWarningColor, DEFAULT_SETTINGS.customThemeWarningColor);
+    const errorColor = normalizeHexColor(currentSettings.customThemeErrorColor, DEFAULT_SETTINGS.customThemeErrorColor);
     const codeBgColor = normalizeHexColor(currentSettings.customThemeCodeBgColor, DEFAULT_SETTINGS.customThemeCodeBgColor);
     const codeTextColor = normalizeHexColor(currentSettings.customThemeCodeTextColor, DEFAULT_SETTINGS.customThemeCodeTextColor);
 
@@ -1908,6 +1994,10 @@ export function createSettingsManager(appContext) {
     root.style.setProperty('--cerebr-hover-color', `rgba(${textR}, ${textG}, ${textB}, ${hoverAlpha})`);
     root.style.setProperty('--cerebr-tooltip-bg', inputColor);
     root.style.setProperty('--cerebr-highlight', highlightColor);
+    // 语义状态色与基础语义变量绑定，避免通知/错误态与全局状态色割裂。
+    root.style.setProperty('--cerebr-green', successColor);
+    root.style.setProperty('--cerebr-orange', warningColor);
+    root.style.setProperty('--cerebr-red', errorColor);
     root.style.setProperty('--cerebr-code-bg', codeBgColor);
     root.style.setProperty('--cerebr-code-color', codeTextColor);
     root.style.setProperty('--cerebr-code-border', borderColor);

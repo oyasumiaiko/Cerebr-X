@@ -91,6 +91,7 @@ input, textarea, select {
     --cerebr-code-bg: #f6f8fa;
     --cerebr-code-color: #24292e;
     --cerebr-code-border: #e1e4e8;
+    --cerebr-code-overlay-bg: rgba(255, 255, 255, 0.58);
     --cerebr-inline-code-bg: rgba(0, 0, 0, 0.1);
 
     /* 控件统一样式变量 */
@@ -139,6 +140,7 @@ input, textarea, select {
     --cerebr-code-bg: #282c34;
     --cerebr-code-color: #abb2bf;
     --cerebr-code-border: transparent;
+    --cerebr-code-overlay-bg: rgba(0, 0, 0, 0.36);
     --cerebr-inline-code-bg: rgba(255, 255, 255, 0.1);
 
     /* 深色控件覆盖 */
@@ -3009,24 +3011,15 @@ input:checked + .slider::before {
     font-family: monospace;
     font-size: calc(var(--cerebr-font-size) - 2px);
     white-space: pre-wrap;
-    background: var(--cerebr-code-bg);
-    color: var(--cerebr-code-color);
+    background: var(--cerebr-code-overlay-bg);
+    color: var(--cerebr-text-color);
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 72%, transparent);
 }
-
-/* 深色模式样式 */
-/*
-:root.dark-theme .message pre code {
-    background: #282c34;
-    color: #abb2bf;
-    border: none;
-}
-*/
 
 /* 系统深色模式 */
 @media (prefers-color-scheme: dark) {
     :root:not(.light-theme):not(.dark-theme) {
-        --cerebr-code-bg: #282c34;
-        --cerebr-code-color: #abb2bf;
+        --cerebr-code-overlay-bg: rgba(0, 0, 0, 0.36);
         --cerebr-inline-code-bg: rgba(255, 255, 255, 0.1);
     }
 }
@@ -3691,8 +3684,13 @@ input:checked + .slider::before {
 }
 
 /* 深色模式适配 */
-:root.dark-theme .slider {
+:root.dark-theme .switch input:not(:checked) + .slider {
     background-color: var(--cerebr-slider-track-bg);
+}
+
+/* 保持历史语义：深色模式下开启态使用图标色，便于和禁用/未开启区分。 */
+:root.dark-theme .switch input:checked + .slider {
+    background-color: var(--cerebr-icon-color);
 }
 
 :root.dark-theme .message blockquote {
@@ -5421,6 +5419,10 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     padding: 8px 0 10px;
 }
 
+#chat-history-panel .settings-tab-content .settings-group[data-group="theme"] {
+    gap: 8px;
+}
+
 #chat-history-panel .settings-tab-content .settings-group + .settings-group {
     border-top: 1px solid color-mix(in srgb, var(--cerebr-border-color) 85%, transparent);
     padding-top: 12px;
@@ -5432,6 +5434,32 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     letter-spacing: 0.08em;
     color: color-mix(in srgb, var(--cerebr-text-color) 65%, transparent);
     margin: 2px 0 2px;
+}
+
+#chat-history-panel .settings-tab-content .settings-subgroup {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+    background: color-mix(in srgb, var(--cerebr-control-bg) 70%, transparent);
+}
+
+#chat-history-panel .settings-tab-content .settings-subgroup + .settings-subgroup {
+    margin-top: 4px;
+}
+
+#chat-history-panel .settings-tab-content .settings-subgroup-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: color-mix(in srgb, var(--cerebr-text-color) 78%, transparent);
+    margin: 0 0 2px;
+}
+
+#chat-history-panel .settings-tab-content .settings-subgroup .menu-item {
+    padding: 4px 0;
 }
 
 #chat-history-panel .settings-tab-content .menu-item {
@@ -5487,25 +5515,43 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 }
 
 #chat-history-panel .settings-tab-content .menu-item--color.menu-item--color-rgba {
-    grid-template-columns: minmax(160px, 1fr) auto minmax(130px, 1.2fr) auto auto;
+    grid-template-columns: minmax(160px, 1fr) minmax(120px, 1.2fr) auto auto auto;
 }
 
 #chat-history-panel .settings-tab-content .menu-item--color input[type="color"] {
+    grid-column: 3;
+    grid-row: 1;
     justify-self: end;
 }
 
 #chat-history-panel .settings-tab-content .menu-item--color .settings-color-alpha {
+    grid-column: 2;
+    grid-row: 1;
     width: 100%;
     max-width: 100%;
     min-width: 120px;
 }
 
 #chat-history-panel .settings-tab-content .menu-item--color .settings-color-alpha-value {
+    grid-column: 3;
+    grid-row: 1;
     justify-self: end;
 }
 
 #chat-history-panel .settings-tab-content .menu-item--color .setting-value {
+    grid-column: 2;
+    grid-row: 1;
     justify-self: end;
+}
+
+#chat-history-panel .settings-tab-content .menu-item--color.menu-item--color-rgba input[type="color"] {
+    grid-column: 5;
+    grid-row: 1;
+}
+
+#chat-history-panel .settings-tab-content .menu-item--color.menu-item--color-rgba .setting-value {
+    grid-column: 4;
+    grid-row: 1;
 }
 
 #chat-history-panel .settings-tab-content .menu-item--select {
