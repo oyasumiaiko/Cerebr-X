@@ -1784,7 +1784,7 @@ export function createSelectionThreadManager(appContext) {
     } catch (_) {}
   }
 
-  function runSelectionPromptInThread(anchorNode, selectionInfo, messageElement, existingThread) {
+  function runSelectionPromptInThread(anchorNode, selectionInfo, messageElement, existingThread, options = {}) {
     const selectionText = (selectionInfo?.selectionText || '').trim();
     if (!selectionText) {
       showNotification?.({ message: '选中内容为空，无法发送划词方式1', type: 'warning' });
@@ -1808,7 +1808,10 @@ export function createSelectionThreadManager(appContext) {
       return false;
     }
 
-    let targetThread = existingThread;
+    const normalizedOptions = (options && typeof options === 'object') ? options : {};
+    const forceCreateNewThread = !!normalizedOptions.forceCreateNewThread;
+    // 说明：在“已有高亮片段”上点击解释按钮时，按产品预期应创建新线程而非追加到旧线程。
+    let targetThread = forceCreateNewThread ? null : existingThread;
     if (!targetThread) {
       const created = createThreadAnnotation(anchorNode, selectionInfo);
       if (!created) {
@@ -2078,7 +2081,8 @@ export function createSelectionThreadManager(appContext) {
               anchorNode,
               selectionInfo,
               messageElement,
-              primaryThread
+              primaryThread,
+              { forceCreateNewThread: matchingThreads.length > 0 }
             );
             if (didSend) {
               hideBubble(true);
@@ -2166,7 +2170,8 @@ export function createSelectionThreadManager(appContext) {
               anchorNode,
               selectionInfo,
               anchorElement,
-              primaryThread
+              primaryThread,
+              { forceCreateNewThread: threads.length > 0 }
             );
             if (didSend) {
               hideBubble(true);
