@@ -2392,11 +2392,19 @@ export function createSelectionThreadManager(appContext) {
   }
 
   function exitThread(options = {}) {
-    const { skipDraftCleanup = false } = options || {};
+    const {
+      skipDraftCleanup = false,
+      preserveAnchorViewport = true
+    } = options || {};
     stopThreadResize();
     stopFullscreenWidthResize();
     clearThreadBannerPeekTimer();
     const currentThreadId = state.activeThreadId;
+    const currentAnchorMessageId = state.activeAnchorMessageId;
+    // 在线程面板收起前抓取锚点在主聊天视口中的垂直百分位，用于退出后重定位。
+    const anchorViewportSnapshot = (preserveAnchorViewport && currentThreadId && currentAnchorMessageId)
+      ? captureMainChatAnchorViewportSnapshot(currentThreadId, currentAnchorMessageId)
+      : null;
     if (!skipDraftCleanup && currentThreadId) {
       cleanupDraftThreadIfNeeded(currentThreadId);
     }
@@ -2414,6 +2422,11 @@ export function createSelectionThreadManager(appContext) {
     updateThreadPanelTitle('');
     resetHiddenMessages();
     moveThreadPanelHome();
+    if (anchorViewportSnapshot?.viewportPercent != null && currentThreadId && currentAnchorMessageId) {
+      scrollMainChatToThreadAnchor(currentThreadId, currentAnchorMessageId, {
+        preferredViewportPercent: anchorViewportSnapshot.viewportPercent
+      });
+    }
   }
 
   function resetForClearChat() {
@@ -2422,7 +2435,7 @@ export function createSelectionThreadManager(appContext) {
     clearBubbleHideAnimationTimer();
     clearSelectionRanges();
     state.pendingSelection = null;
-    exitThread({ skipDraftCleanup: true });
+    exitThread({ skipDraftCleanup: true, preserveAnchorViewport: false });
     if (bubbleEl) {
       bubbleEl.remove();
       bubbleEl = null;
