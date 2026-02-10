@@ -219,8 +219,8 @@ export function createSelectionThreadManager(appContext) {
     bubbleContentTextEl.className = 'selection-thread-bubble__content-text';
     bubbleContentIconEl = document.createElement('div');
     bubbleContentIconEl.className = 'selection-thread-bubble__content-icon';
+    bubbleHeaderEl.appendChild(bubbleContentIconEl);
     bubbleContentEl.appendChild(bubbleContentTextEl);
-    bubbleContentEl.appendChild(bubbleContentIconEl);
 
     bubbleEl.appendChild(bubbleHeaderEl);
     bubbleEl.appendChild(bubbleContentEl);
@@ -424,25 +424,20 @@ export function createSelectionThreadManager(appContext) {
         bubbleContentIconEl.appendChild(icon);
       }
       bubbleContentIconEl.style.display = bubbleContentIconEl.childElementCount ? 'flex' : 'none';
-      bubbleContentEl.classList.toggle(
-        'selection-thread-bubble__content--icon',
-        bubbleContentIconEl.childElementCount > 0
-      );
     } else if (iconClass) {
       bubbleContentIconEl.innerHTML = '';
       const icon = document.createElement('i');
       icon.className = iconClass;
       bubbleContentIconEl.appendChild(icon);
       bubbleContentIconEl.style.display = 'flex';
-      bubbleContentEl.classList.add('selection-thread-bubble__content--icon');
     } else {
       bubbleContentIconEl.innerHTML = '';
       bubbleContentIconEl.style.display = 'none';
-      bubbleContentEl.classList.remove('selection-thread-bubble__content--icon');
     }
 
     bubbleContentEl.style.display = hasContent ? '' : 'none';
-    bubbleHeaderEl.style.display = title ? 'flex' : 'none';
+    const hasHeaderActions = bubbleContentIconEl.childElementCount > 0;
+    bubbleHeaderEl.style.display = (title || hasHeaderActions) ? 'flex' : 'none';
 
     state.bubbleClickHandler = typeof onClick === 'function' ? onClick : null;
     bubbleEl.classList.toggle('selection-thread-bubble--action', !!state.bubbleClickHandler);
