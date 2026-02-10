@@ -437,7 +437,31 @@ export function createUIManager(appContext) {
 
     // 按住 Alt 时使用加速滚动，提高浏览长对话的效率
     container.addEventListener('wheel', (e) => {
-      const nestedScrollable = e.altKey ? resolveAltWheelNestedScrollable(e.target) : null;
+      if (!e.altKey) {
+        // 普通滚轮路径：不做 Alt 相关分流与归一化，保持最小开销。
+        if (mainAltScrollState.raf) {
+          stopMainAltScrollAnimation();
+        }
+        if (nestedAltScrollState.raf) {
+          stopNestedAltScrollAnimation();
+        }
+
+        const effectiveDeltaY = e.deltaY;
+        if (effectiveDeltaY < 0) {
+          messageSender.setShouldAutoScroll(false);
+          return;
+        }
+        if (effectiveDeltaY > 0) {
+          const effectiveScrollTop = Math.max(0, container.scrollTop || 0);
+          const distanceFromBottom = container.scrollHeight - effectiveScrollTop - container.clientHeight;
+          if (distanceFromBottom < AUTO_SCROLL_THRESHOLD) {
+            messageSender.setShouldAutoScroll(true);
+          }
+        }
+        return;
+      }
+
+      const nestedScrollable = resolveAltWheelNestedScrollable(e.target);
       if (nestedScrollable) {
         // 在气泡预览内按 Alt+滚轮时，优先滚动气泡内部，不让主聊天容器抢滚动。
         e.preventDefault();
@@ -454,23 +478,13 @@ export function createUIManager(appContext) {
       let effectiveDeltaY = e.deltaY;
       let projectedScrollTop = Math.max(0, container.scrollTop || 0);
 
-      if (e.altKey) {
-        e.preventDefault();
-        const acceleratedDeltaY = normalizeWheelDelta(e.deltaY, e.deltaMode) * ALT_SCROLL_MULTIPLIER;
-        const acceleratedDeltaX = normalizeWheelDelta(e.deltaX, e.deltaMode) * ALT_SCROLL_MULTIPLIER;
+      e.preventDefault();
+      const acceleratedDeltaY = normalizeWheelDelta(e.deltaY, e.deltaMode) * ALT_SCROLL_MULTIPLIER;
+      const acceleratedDeltaX = normalizeWheelDelta(e.deltaX, e.deltaMode) * ALT_SCROLL_MULTIPLIER;
 
-        stopNestedAltScrollAnimation();
-        projectedScrollTop = animateMainAltScrollBy(acceleratedDeltaY, acceleratedDeltaX);
-        effectiveDeltaY = acceleratedDeltaY || 0;
-      } else {
-        // 非 Alt 滚动接管时立即中断 Alt 动画，避免双通道滚动叠加。
-        if (mainAltScrollState.raf) {
-          stopMainAltScrollAnimation();
-        }
-        if (nestedAltScrollState.raf) {
-          stopNestedAltScrollAnimation();
-        }
-      }
+      stopNestedAltScrollAnimation();
+      projectedScrollTop = animateMainAltScrollBy(acceleratedDeltaY, acceleratedDeltaX);
+      effectiveDeltaY = acceleratedDeltaY || 0;
 
       if (effectiveDeltaY < 0) {
         messageSender.setShouldAutoScroll(false);
@@ -482,7 +496,7 @@ export function createUIManager(appContext) {
         const distanceFromBottom = container.scrollHeight - effectiveScrollTop - container.clientHeight;
         if (distanceFromBottom < AUTO_SCROLL_THRESHOLD) {
           messageSender.setShouldAutoScroll(true);
-        } else if (e.altKey) {
+        } else {
           messageSender.setShouldAutoScroll(false);
         }
       }
