@@ -2215,22 +2215,59 @@ export function createSelectionThreadManager(appContext) {
     return null;
   }
 
-  function scrollMainChatToThreadAnchor(threadId, anchorMessageId) {
+  function resolveMainChatThreadAnchorTarget(threadId, anchorMessageId) {
     if (!chatContainer || !anchorMessageId) return;
     const selector = buildMessageSelector(anchorMessageId);
     const anchorElement = selector ? chatContainer.querySelector(selector) : null;
-    if (!anchorElement) return;
+    if (!anchorElement) return null;
+    const targetElement = findHighlightElementForThread(anchorElement, threadId) || anchorElement;
+    return { anchorElement, targetElement };
+  }
+
+  function captureMainChatAnchorViewportSnapshot(threadId, anchorMessageId) {
+    const resolved = resolveMainChatThreadAnchorTarget(threadId, anchorMessageId);
+    if (!resolved?.targetElement || !chatContainer) return null;
+    const containerRect = chatContainer.getBoundingClientRect();
+    const targetRect = resolved.targetElement.getBoundingClientRect();
+    const containerHeight = containerRect.height || chatContainer.clientHeight || 0;
+    if (!(containerHeight > 0)) return null;
+
+    // 仅在锚点当前可见时才保持“视口百分位”，避免离屏元素导致不合理跳转。
+    const isVisible = targetRect.bottom > containerRect.top && targetRect.top < containerRect.bottom;
+    if (!isVisible) return null;
+    const targetOffset = targetRect.top - containerRect.top;
+    return {
+      viewportPercent: clampNumber(targetOffset / containerHeight, 0, 1)
+    };
+  }
+
+  function scrollMainChatToThreadAnchor(threadId, anchorMessageId, options = {}) {
+    const resolved = resolveMainChatThreadAnchorTarget(threadId, anchorMessageId);
+    if (!resolved?.anchorElement || !resolved?.targetElement || !chatContainer) return;
+    const { anchorElement, targetElement } = resolved;
+    const normalizedOptions = (options && typeof options === 'object') ? options : {};
+    const preferredPercent = Number.isFinite(normalizedOptions.preferredViewportPercent)
+      ? clampNumber(normalizedOptions.preferredViewportPercent, 0, 1)
+      : null;
 
     // 进入线程时让左侧主聊天尽量对齐到“线程对应的高亮位置”，找不到高亮时回退到锚点消息。
-    const targetElement = findHighlightElementForThread(anchorElement, threadId) || anchorElement;
     const applyScroll = () => {
       if (!chatContainer || !targetElement) return;
       const containerRect = chatContainer.getBoundingClientRect();
       const targetRect = targetElement.getBoundingClientRect();
       const style = window.getComputedStyle(chatContainer);
-      const paddingTop = parseFloat(style.paddingTop) || 0;
       const delta = targetRect.top - containerRect.top;
-      const rawTop = chatContainer.scrollTop + delta - paddingTop;
+      const baseScrollTop = Number.isFinite(chatContainer.scrollTop) ? chatContainer.scrollTop : 0;
+      const rawTop = preferredPercent == null
+        ? (() => {
+            const paddingTop = parseFloat(style.paddingTop) || 0;
+            return baseScrollTop + delta - paddingTop;
+          })()
+        : (() => {
+            const containerHeight = containerRect.height || chatContainer.clientHeight || 0;
+            const desiredOffset = containerHeight * preferredPercent;
+            return baseScrollTop + delta - desiredOffset;
+          })();
       const maxTop = Math.max(0, chatContainer.scrollHeight - chatContainer.clientHeight);
       const nextTop = Math.max(0, Math.min(rawTop, maxTop));
       chatContainer.scrollTo({ top: nextTop, behavior: 'auto' });
@@ -2263,13 +2300,16 @@ export function createSelectionThreadManager(appContext) {
       showNotification?.({ message: '未找到对应的划词对话', type: 'warning' });
       return;
     }
+    const anchorViewportSnapshot = captureMainChatAnchorViewportSnapshot(threadId, info.anchorMessageId);
     state.activeThreadId = threadId;
     state.activeAnchorMessageId = info.anchorMessageId;
     state.activeSelectionText = info.annotation?.selectionText || '';
     document.body.classList.add('thread-mode-active');
     updateThreadPanelTitle(state.activeSelectionText);
     applyThreadLayout();
-    scrollMainChatToThreadAnchor(threadId, info.anchorMessageId);
+    scrollMainChatToThreadAnchor(threadId, info.anchorMessageId, {
+      preferredViewportPercent: anchorViewportSnapshot?.viewportPercent
+    });
     await renderThreadMessages(threadId, options);
   }
 
