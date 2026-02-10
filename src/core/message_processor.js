@@ -301,6 +301,8 @@ export function createMessageProcessor(appContext) {
     const MIN_KEEP_BUFFER_PX = 800;
     const MIN_DROP_BUFFER_PX = 1600;
     const PIN_TAIL_COUNT = 6; // 永远保留末尾若干消息（流式更新/快速查看）
+    const BLUR_CULL_BUFFER_MULTIPLIER = 1.1; // 离屏模糊剔除缓冲区（避免临界抖动）
+    const MIN_BLUR_CULL_BUFFER_PX = 420;
 
     function getContainerState(container) {
       let state = containerStateMap.get(container);
@@ -440,6 +442,30 @@ export function createMessageProcessor(appContext) {
       nodes.forEach((node) => restoreMessage(node));
     }
 
+    function applyOffscreenBlurCull(messages, viewportTop, viewportBottom, viewportHeight, tailStart) {
+      if (!Array.isArray(messages) || !messages.length) return;
+      const blurKeepBuffer = Math.max(MIN_BLUR_CULL_BUFFER_PX, viewportHeight * BLUR_CULL_BUFFER_MULTIPLIER);
+      const blurKeepTop = viewportTop - blurKeepBuffer;
+      const blurKeepBottom = viewportBottom + blurKeepBuffer;
+      const total = messages.length;
+
+      for (let i = 0; i < total; i += 1) {
+        const node = messages[i];
+        if (!node || !node.classList) continue;
+        // 尾部/更新中消息保持滤镜，避免流式输出与交互中的视觉跳变。
+        const pinned = shouldPinMessage(node, i, total, tailStart);
+        if (pinned) {
+          node.classList.remove('message-offscreen-blur-disabled');
+          continue;
+        }
+        const top = Number(node.offsetTop) || 0;
+        const height = Math.max(1, Number(node.offsetHeight) || 0);
+        const bottom = top + height;
+        const isOutside = bottom < blurKeepTop || top > blurKeepBottom;
+        node.classList.toggle('message-offscreen-blur-disabled', isOutside);
+      }
+    }
+
     function updateContainer(container) {
       if (!container) return;
       const messageNodes = Array.from(container.querySelectorAll('.message'));
@@ -447,15 +473,19 @@ export function createMessageProcessor(appContext) {
       const total = messages.length;
       if (!total) return;
 
-      if (total < MIN_MESSAGES_FOR_VIRTUALIZE) {
-        restoreAll(container);
-        return;
-      }
-
       const viewportHeight = container.clientHeight || 0;
       if (viewportHeight <= 0) return;
       const viewportTop = container.scrollTop || 0;
       const viewportBottom = viewportTop + viewportHeight;
+      const tailStart = Math.max(total - PIN_TAIL_COUNT, 0);
+
+      // 轻量优化：无论是否进入“DOM 虚拟化”，都先剔除离屏消息的 backdrop blur。
+      applyOffscreenBlurCull(messages, viewportTop, viewportBottom, viewportHeight, tailStart);
+
+      if (total < MIN_MESSAGES_FOR_VIRTUALIZE) {
+        restoreAll(container);
+        return;
+      }
 
       const keepBuffer = Math.max(MIN_KEEP_BUFFER_PX, viewportHeight * KEEP_BUFFER_MULTIPLIER);
       const dropBuffer = Math.max(MIN_DROP_BUFFER_PX, viewportHeight * DROP_BUFFER_MULTIPLIER);
@@ -469,8 +499,6 @@ export function createMessageProcessor(appContext) {
       const lastKeepIdx = findLastIndexByTop(messages, keepBottom);
       const firstDropIdx = findFirstIndexByBottom(messages, dropTop);
       const lastDropIdx = findLastIndexByTop(messages, dropBottom);
-
-      const tailStart = Math.max(total - PIN_TAIL_COUNT, 0);
 
       for (let i = 0; i < total; i += 1) {
         const node = messages[i];

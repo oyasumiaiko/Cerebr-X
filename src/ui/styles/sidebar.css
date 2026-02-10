@@ -337,6 +337,12 @@ body.standalone-mode {
     background-color: var(--cerebr-chat-background-solid-color, #262b33);
 }
 
+/* 侧栏 iframe 场景统一使用不透明背景，不绘制氛围层 blur，避免与宿主页面叠加产生额外合成开销。 */
+html:not(.standalone-mode) body::before,
+html:not(.standalone-mode) body::after {
+    display: none !important;
+}
+
 /* 全局控件统一样式 */
 button,
 input[type="text"],
@@ -986,6 +992,12 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     pointer-events: none;
+}
+
+/* 离屏消息保留布局与内容，仅关闭昂贵滤镜，减少长会话滚动卡顿。 */
+.message.message-offscreen-blur-disabled {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
 }
 
 /* 聊天记录历史跳转时禁用入场动画，避免定位消息出现延时 */
