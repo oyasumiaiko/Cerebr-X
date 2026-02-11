@@ -1048,6 +1048,7 @@ class CerebrSidebar {
 
   // 添加全屏模式切换方法
   toggleFullscreen(isFullscreen) {
+    const shouldRestoreVisibility = !this.isVisible;
     // 如果isFullscreen为undefined，则根据当前状态切换
     if (isFullscreen === undefined) {
       isFullscreen = !this.isFullscreen;
@@ -1074,11 +1075,6 @@ class CerebrSidebar {
 
       // 隐藏父文档滚动条
       document.documentElement.style.overflow = 'hidden';
-
-      // 如果侧边栏当前不可见，需要先显示侧边栏
-      if (!this.isVisible) {
-        this.toggle(true);
-      }
       
       // 通知iframe进入全屏模式
       this.notifyIframeFullscreenState(true);
@@ -1103,6 +1099,12 @@ class CerebrSidebar {
       
       // 通知iframe退出全屏模式
       this.notifyIframeFullscreenState(false);
+    }
+
+    // 统一行为：如果用户在“隐藏状态”下触发全屏快捷键，
+    // 无论是进入全屏还是退出全屏，都应把侧栏打开并展示切换后的布局。
+    if (shouldRestoreVisibility) {
+      this.toggle(true);
     }
 
     // 如果是全屏模式，确保侧边栏可见
