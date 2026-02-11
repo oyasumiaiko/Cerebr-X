@@ -970,7 +970,7 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
     transform: translateY(8px) scale(0.98);
     animation: messageAppear 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     will-change: transform, opacity;
-    backdrop-filter: blur(var(--cerebr-chat-input-blur-radius, 0px));
+    backdrop-filter: saturate(2.5) blur(var(--cerebr-chat-input-blur-radius, 0px));
     -webkit-backdrop-filter: blur(var(--cerebr-chat-input-blur-radius, 0px));
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
     transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
