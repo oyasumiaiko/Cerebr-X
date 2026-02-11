@@ -38,6 +38,8 @@ export function createImageHandler(appContext) {
   let naturalHeight = 0;
   let lastOpenTimestampMs = 0;
   let canDragImage = false;
+  // 预览图默认不铺满视口，按视口 80% 进行首次自适应，保留上下左右留白。
+  const PREVIEW_DEFAULT_FIT_RATIO = 0.8;
 
   /**
    * 应用图像的平移和缩放变换
@@ -94,8 +96,10 @@ export function createImageHandler(appContext) {
     const maxW = containerRect.width;
     const maxH = containerRect.height;
     if (!naturalWidth || !naturalHeight || maxW <= 0 || maxH <= 0) return;
-    // 适配缩放：以容器尺寸为基准
-    currentScale = Math.min(maxW / naturalWidth, maxH / naturalHeight);
+    // 适配缩放：默认按视口 80% 适配，避免初始打开就铺满整屏。
+    const fitW = Math.max(1, maxW * PREVIEW_DEFAULT_FIT_RATIO);
+    const fitH = Math.max(1, maxH * PREVIEW_DEFAULT_FIT_RATIO);
+    currentScale = Math.min(fitW / naturalWidth, fitH / naturalHeight);
     const displayWidth = Math.max(1, Math.round(naturalWidth * currentScale));
     const displayHeight = Math.max(1, Math.round(naturalHeight * currentScale));
     // 居中图片（容器本身由 CSS 控制最大 90%，不强行改容器尺寸）

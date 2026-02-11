@@ -824,6 +824,16 @@ function setupClickAwayHandler(appContext) {
       return;
     }
     const target = e.target;
+    const previewModal = appContext.dom.previewModal || document.querySelector('.image-preview-modal');
+    // 图片预览打开时，点击预览层只应关闭预览本身，不应触发“点击外部关闭聊天记录面板”。
+    if (
+      previewModal
+      && previewModal.classList.contains('visible')
+      && typeof previewModal.contains === 'function'
+      && previewModal.contains(target)
+    ) {
+      return;
+    }
 
     const panelsAndToggles = [
       {
