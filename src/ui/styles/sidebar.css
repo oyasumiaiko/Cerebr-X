@@ -28,6 +28,8 @@ input, textarea, select {
     --cerebr-background-image: none;
     --cerebr-background-image-intensity: 0;
     --cerebr-background-image-opacity: 1;
+    --cerebr-background-message-blur-radius: 0px;
+    --cerebr-fullscreen-hide-original-on-chat: 0;
     --cerebr-chat-background-color: var(--cerebr-bg-color);
     /* 始终不透明的聊天底板色，用于彻底隔离 iframe 后网页内容。 */
     --cerebr-chat-background-solid-color: #262b33;
@@ -287,6 +289,8 @@ body::before {
 }
 
 body::after {
+    --cerebr-background-message-blur-effective: 0px;
+    --cerebr-background-original-opacity-factor: 1;
     content: '';
     position: fixed;
     inset: 0;
@@ -295,9 +299,20 @@ body::after {
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    opacity: var(--cerebr-background-image-opacity, 1);
+    opacity: calc(var(--cerebr-background-image-opacity, 1) * var(--cerebr-background-original-opacity-factor, 1));
+    filter: blur(var(--cerebr-background-message-blur-effective, 0px));
     z-index: -1;
-    transition: opacity 0.3s ease;
+    transition: opacity 0.3s ease, filter 0.3s ease;
+}
+
+/* 仅在“聊天区已有消息”时，对背景原图层附加模糊；空欢迎态保持原始清晰度。 */
+body.chat-has-messages::after {
+    --cerebr-background-message-blur-effective: var(--cerebr-background-message-blur-radius, 0px);
+}
+
+/* 当开关开启时：全屏 + 聊天非空，直接隐藏“背景原图层”，仅保留氛围层(body::before)。 */
+html.fullscreen-mode body.chat-has-messages::after {
+    --cerebr-background-original-opacity-factor: calc(1 - var(--cerebr-fullscreen-hide-original-on-chat, 0));
 }
 
 /* 仅在布局模式切换瞬间禁用背景层过渡；日常调参仍保留平滑过渡。 */

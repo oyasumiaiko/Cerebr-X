@@ -1395,6 +1395,7 @@
     function updateEmptyStateClass() {
       const hasMessage = !!chatContainer.querySelector('.message');
       document.body.classList.toggle('chat-empty', !hasMessage);
+      document.body.classList.toggle('chat-has-messages', hasMessage);
     }
 
     function scheduleHistoryRebuild() {

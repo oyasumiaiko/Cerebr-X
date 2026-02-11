@@ -116,7 +116,12 @@ export function createSettingsManager(appContext) {
     scaleFactor: 1, // Added default scaleFactor
     backgroundImageUrl: '',
     backgroundImageIntensity: 0.6,
+    // 仅在“已有聊天消息”时追加到原图层(body::after)的模糊半径（单位 px）。
+    // 0 表示关闭该效果。
+    backgroundMessageBlurRadius: 0,
     fullscreenBackgroundCover: false,
+    // 全屏模式下当聊天区已有消息时，是否隐藏背景“原图层”，仅保留氛围层。
+    fullscreenHideOriginalOnChat: false,
     backgroundOverallOpacity: 1,
     // 全屏滚动缩略图（MiniMap）：显示开关、宽度与透明度
     enableScrollMinimap: true,
@@ -475,6 +480,19 @@ export function createSettingsManager(appContext) {
       formatValue: (value) => `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`
     },
     {
+      key: 'backgroundMessageBlurRadius',
+      type: 'range',
+      id: 'background-message-blur-radius',
+      label: '消息态原图模糊',
+      group: 'background',
+      min: 0,
+      max: 120,
+      step: 1,
+      defaultValue: DEFAULT_SETTINGS.backgroundMessageBlurRadius,
+      apply: (v) => applyBackgroundMessageBlurRadius(v),
+      formatValue: (value) => `${clampBackgroundMessageBlurRadius(value)}px`
+    },
+    {
       key: 'backgroundOverallOpacity',
       type: 'range',
       id: 'background-overall-opacity',
@@ -495,6 +513,15 @@ export function createSettingsManager(appContext) {
       group: 'background',
       defaultValue: DEFAULT_SETTINGS.fullscreenBackgroundCover,
       apply: (v) => applyFullscreenBackgroundCover(v)
+    },
+    {
+      key: 'fullscreenHideOriginalOnChat',
+      type: 'toggle',
+      id: 'fullscreen-hide-original-on-chat',
+      label: '全屏消息态隐藏原图',
+      group: 'background',
+      defaultValue: DEFAULT_SETTINGS.fullscreenHideOriginalOnChat,
+      apply: (v) => applyFullscreenHideOriginalOnChat(v)
     },
     // 自动滚动
     {
@@ -849,6 +876,12 @@ export function createSettingsManager(appContext) {
     }
     if (key === 'chatInputBlurRadius') {
       return clampChatInputBlurRadius(value);
+    }
+    if (key === 'backgroundMessageBlurRadius') {
+      return clampBackgroundMessageBlurRadius(value);
+    }
+    if (key === 'fullscreenHideOriginalOnChat') {
+      return !!value;
     }
     if (key === 'enableCustomThemeColors') {
       return !!value;
@@ -2581,6 +2614,12 @@ export function createSettingsManager(appContext) {
     document.documentElement.style.setProperty('--cerebr-background-image-opacity', numeric);
   }
 
+  function applyBackgroundMessageBlurRadius(value) {
+    const radius = clampBackgroundMessageBlurRadius(value);
+    // 仅在“存在聊天消息”时由 CSS 类启用该变量，避免空欢迎态被额外模糊。
+    document.documentElement.style.setProperty('--cerebr-background-message-blur-radius', `${radius}px`);
+  }
+
   function applyChatInputBlurRadius(value) {
     const radius = clampChatInputBlurRadius(value);
     // 聊天消息、输入区以及各类浮层面板统一使用该变量，保持模糊强度一致。
@@ -2598,6 +2637,11 @@ export function createSettingsManager(appContext) {
     const useCover = !!enabled;
     document.documentElement.style.setProperty('--cerebr-fullscreen-bg-size', useCover ? 'cover' : 'contain');
     document.documentElement.style.setProperty('--cerebr-fullscreen-blur-opacity', '1');
+  }
+
+  function applyFullscreenHideOriginalOnChat(enabled) {
+    // 这里只写入 0/1 开关值，具体“仅在全屏+有消息时生效”的条件放在 CSS 里统一控制。
+    document.documentElement.style.setProperty('--cerebr-fullscreen-hide-original-on-chat', enabled ? '1' : '0');
   }
 
   function refreshBackgroundImage(options = {}) {
@@ -2641,6 +2685,12 @@ export function createSettingsManager(appContext) {
     const n = Number(input);
     if (!Number.isFinite(n)) return DEFAULT_SETTINGS.chatInputBlurRadius;
     return Math.round(Math.min(100, Math.max(0, n)));
+  }
+
+  function clampBackgroundMessageBlurRadius(input) {
+    const n = Number(input);
+    if (!Number.isFinite(n)) return DEFAULT_SETTINGS.backgroundMessageBlurRadius;
+    return Math.round(Math.min(120, Math.max(0, n)));
   }
 
   function getScrollMinimapWidthBounds() {
