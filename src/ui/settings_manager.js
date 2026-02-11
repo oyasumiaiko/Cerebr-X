@@ -2545,15 +2545,23 @@ export function createSettingsManager(appContext) {
     if (token !== backgroundImageLoadToken) return;
     document.documentElement.style.setProperty('--cerebr-background-image', cssValue || 'none');
 
-    const targets = [document.documentElement, document.body];
-    targets.forEach((node) => {
-      if (!node) return;
-      if (hasImage) {
-        node.classList.add('has-custom-background-image');
-      } else {
-        node.classList.remove('has-custom-background-image');
-      }
-    });
+    const syncBackgroundClass = () => {
+      if (token !== backgroundImageLoadToken) return;
+      const targets = [document.documentElement, document.body];
+      targets.forEach((node) => {
+        if (!node) return;
+        if (hasImage) {
+          node.classList.add('has-custom-background-image');
+        } else {
+          node.classList.remove('has-custom-background-image');
+        }
+      });
+    };
+    syncBackgroundClass();
+    // 兜底：极少数初始化时机下 body 可能尚未就绪，导致背景图 class 未及时同步。
+    if (!document.body) {
+      document.addEventListener('DOMContentLoaded', syncBackgroundClass, { once: true });
+    }
 
     if (hasImage && debugUrl) {
       console.log('[Cerebr] 已加载背景图片:', debugUrl);
