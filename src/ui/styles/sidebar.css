@@ -337,9 +337,8 @@ body.standalone-mode {
     background-color: var(--cerebr-chat-background-solid-color, #262b33);
 }
 
-/* 侧栏 iframe 场景统一使用不透明背景，不绘制氛围层 blur，避免与宿主页面叠加产生额外合成开销。 */
-html:not(.standalone-mode) body::before,
-html:not(.standalone-mode) body::after {
+/* 侧栏 iframe 场景仅关闭“氛围 blur 层”(:before)，保留主背景图层(:after)。 */
+html:not(.standalone-mode) body::before {
     display: none !important;
 }
 
