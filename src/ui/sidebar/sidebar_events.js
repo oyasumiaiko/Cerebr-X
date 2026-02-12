@@ -834,6 +834,12 @@ function setupClickAwayHandler(appContext) {
     ) {
       return;
     }
+    // 需求变更：聊天记录（Esc 面板）改为“仅显式关闭”。
+    // 因此当面板已打开时，点击外部不再触发自动关闭。
+    const chatHistoryPanel = document.getElementById('chat-history-panel');
+    if (chatHistoryPanel?.classList?.contains('visible')) {
+      return;
+    }
 
     const panelsAndToggles = [
       {

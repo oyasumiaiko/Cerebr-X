@@ -2943,6 +2943,9 @@ export function createChatHistoryUI(appContext) {
   function closeChatHistoryPanel() {
     const panel = document.getElementById('chat-history-panel');
     if (panel && panel.classList.contains('visible')) {
+      if (typeof panel._cancelDragMove === 'function') {
+        panel._cancelDragMove();
+      }
       const activeTabName = panel.querySelector('.history-tab.active')?.dataset?.tab;
       lastClosedTabName = activeTabName || lastClosedTabName || 'history';
       lastClosedAt = Date.now();
@@ -7516,6 +7519,111 @@ export function createChatHistoryUI(appContext) {
     return lastClosedAt;
   }
 
+  // Esc 面板（聊天记录面板）拖拽时保留的最小可视边距，避免拖到完全看不见。
+  const CHAT_HISTORY_PANEL_DRAG_MARGIN_PX = 8;
+
+  function clampChatHistoryPanelPosition(panel, nextLeft = null, nextTop = null) {
+    if (!panel || panel.dataset.dragPositioned !== '1') return;
+    const rect = panel.getBoundingClientRect();
+    if (!rect || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) return;
+
+    const minLeft = CHAT_HISTORY_PANEL_DRAG_MARGIN_PX;
+    const minTop = CHAT_HISTORY_PANEL_DRAG_MARGIN_PX;
+    const maxLeft = Math.max(minLeft, window.innerWidth - rect.width - CHAT_HISTORY_PANEL_DRAG_MARGIN_PX);
+    const maxTop = Math.max(minTop, window.innerHeight - rect.height - CHAT_HISTORY_PANEL_DRAG_MARGIN_PX);
+    const rawLeft = Number.isFinite(nextLeft) ? Number(nextLeft) : Number.parseFloat(panel.style.left);
+    const rawTop = Number.isFinite(nextTop) ? Number(nextTop) : Number.parseFloat(panel.style.top);
+    if (!Number.isFinite(rawLeft) || !Number.isFinite(rawTop)) return;
+
+    const clampedLeft = Math.min(Math.max(rawLeft, minLeft), maxLeft);
+    const clampedTop = Math.min(Math.max(rawTop, minTop), maxTop);
+    panel.style.left = `${Math.round(clampedLeft)}px`;
+    panel.style.top = `${Math.round(clampedTop)}px`;
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+    panel.style.margin = '0';
+  }
+
+  function setupChatHistoryPanelDrag(panel, header) {
+    if (!panel || !header || header.dataset.dragReady === '1') return;
+    header.dataset.dragReady = '1';
+
+    const isDragIgnoredTarget = (target) => {
+      if (!(target instanceof Element)) return false;
+      return !!target.closest('button, input, textarea, select, option, a, [role="button"], .header-actions, .switch-container');
+    };
+
+    let dragSession = null;
+
+    const removeDragListeners = () => {
+      document.removeEventListener('pointermove', handlePointerMove);
+      document.removeEventListener('pointerup', handlePointerEnd);
+      document.removeEventListener('pointercancel', handlePointerEnd);
+      window.removeEventListener('blur', handlePointerEnd);
+    };
+
+    const clearDraggingState = () => {
+      removeDragListeners();
+      dragSession = null;
+      panel.classList.remove('chat-history-panel-dragging');
+      document.body.classList.remove('chat-history-panel-dragging');
+    };
+
+    const handlePointerMove = (event) => {
+      if (!dragSession || event.pointerId !== dragSession.pointerId) return;
+      const deltaX = event.clientX - dragSession.startClientX;
+      const deltaY = event.clientY - dragSession.startClientY;
+      const nextLeft = dragSession.startLeft + deltaX;
+      const nextTop = dragSession.startTop + deltaY;
+      clampChatHistoryPanelPosition(panel, nextLeft, nextTop);
+      event.preventDefault();
+    };
+
+    const handlePointerEnd = (event) => {
+      if (!dragSession) return;
+      if (event?.pointerId != null && event.pointerId !== dragSession.pointerId) return;
+      clearDraggingState();
+    };
+
+    header.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      if (isDragIgnoredTarget(event.target)) return;
+
+      // 首次拖拽时，将当前居中后的实际位置固化为 left/top，后续再按绝对坐标拖动。
+      const rect = panel.getBoundingClientRect();
+      panel.style.left = `${Math.round(rect.left)}px`;
+      panel.style.top = `${Math.round(rect.top)}px`;
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+      panel.style.margin = '0';
+      panel.dataset.dragPositioned = '1';
+
+      dragSession = {
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startLeft: Number.parseFloat(panel.style.left) || rect.left,
+        startTop: Number.parseFloat(panel.style.top) || rect.top
+      };
+      panel.classList.add('chat-history-panel-dragging');
+      document.body.classList.add('chat-history-panel-dragging');
+
+      document.addEventListener('pointermove', handlePointerMove);
+      document.addEventListener('pointerup', handlePointerEnd);
+      document.addEventListener('pointercancel', handlePointerEnd);
+      window.addEventListener('blur', handlePointerEnd);
+      event.preventDefault();
+    });
+
+    // 面板关闭/ESC 强制关闭时，允许外部直接调用以清理拖拽会话。
+    panel._cancelDragMove = clearDraggingState;
+
+    window.addEventListener('resize', () => {
+      if (!panel.classList.contains('visible')) return;
+      clampChatHistoryPanelPosition(panel);
+    });
+  }
+
   async function showChatHistoryPanel(initialTab = 'history') {
     ensurePanelStylesInjected();
     let panel = document.getElementById('chat-history-panel');
@@ -7638,6 +7746,7 @@ export function createChatHistoryUI(appContext) {
       header.appendChild(title);
       header.appendChild(headerActions);
       panel.appendChild(header);
+      setupChatHistoryPanelDrag(panel, header);
 
       // 创建标签切换栏
       const tabBar = document.createElement('div');
@@ -7906,6 +8015,10 @@ export function createChatHistoryUI(appContext) {
           services.settingsManager?.refreshSettingsContainers?.();
         }
       }
+      const existingHeader = panel.querySelector('.panel-header');
+      if (existingHeader) {
+        setupChatHistoryPanelDrag(panel, existingHeader);
+      }
       const filterContainer = panel.querySelector('.filter-container');
       ensureSearchSyntaxHelp(filterContainer);
       const urlFilterButton = panel.querySelector('.filter-container .url-filter-btn.url-filter-toggle');
@@ -7959,6 +8072,7 @@ export function createChatHistoryUI(appContext) {
     panel.style.display = 'flex';
     void panel.offsetWidth;  
     panel.classList.add('visible');
+    clampChatHistoryPanelPosition(panel);
 
     // 预热全量元数据（idle），降低“首次全文搜索”的启动延迟
     scheduleConversationMetadataWarmup(panel);

@@ -5398,6 +5398,11 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 /* 添加更多间距 */
 #chat-history-panel .panel-header {
     margin-bottom: 20px;
+    cursor: grab;
+}
+
+#chat-history-panel.chat-history-panel-dragging .panel-header {
+    cursor: grabbing;
 }
 
 #chat-history-panel .header-actions {
@@ -5408,6 +5413,10 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 
 #chat-history-panel .switch-container {
     margin-right: 12px;
+}
+
+body.chat-history-panel-dragging {
+    user-select: none;
 }
 
 /* 聊天历史标签切换样式 */
