@@ -2946,6 +2946,9 @@ export function createChatHistoryUI(appContext) {
       if (typeof panel._cancelDragMove === 'function') {
         panel._cancelDragMove();
       }
+      if (typeof panel._cancelResizeMove === 'function') {
+        panel._cancelResizeMove();
+      }
       const activeTabName = panel.querySelector('.history-tab.active')?.dataset?.tab;
       lastClosedTabName = activeTabName || lastClosedTabName || 'history';
       lastClosedAt = Date.now();
@@ -7519,8 +7522,25 @@ export function createChatHistoryUI(appContext) {
     return lastClosedAt;
   }
 
-  // Esc 面板（聊天记录面板）拖拽时保留的最小可视边距，避免拖到完全看不见。
+  // Esc 面板在拖动/缩放时使用的一组约束常量。
   const CHAT_HISTORY_PANEL_DRAG_MARGIN_PX = 8;
+  const CHAT_HISTORY_PANEL_RESIZE_MARGIN_PX = 8;
+  const CHAT_HISTORY_PANEL_MIN_WIDTH_PX = 480;
+  const CHAT_HISTORY_PANEL_MIN_HEIGHT_PX = 360;
+
+  function isChatHistoryPanelFullscreenLayout() {
+    return !!(state?.isFullscreen || document.documentElement.classList.contains('fullscreen-mode'));
+  }
+
+  function resetChatHistoryPanelCenterPosition(panel) {
+    if (!panel) return;
+    panel.dataset.dragPositioned = '0';
+    panel.style.left = '';
+    panel.style.top = '';
+    panel.style.right = '';
+    panel.style.bottom = '';
+    panel.style.margin = '';
+  }
 
   function clampChatHistoryPanelPosition(panel, nextLeft = null, nextTop = null) {
     if (!panel || panel.dataset.dragPositioned !== '1') return;
@@ -7542,6 +7562,52 @@ export function createChatHistoryUI(appContext) {
     panel.style.right = 'auto';
     panel.style.bottom = 'auto';
     panel.style.margin = '0';
+  }
+
+  function clampChatHistoryPanelSize(panel, nextWidth = null, nextHeight = null) {
+    if (!panel) return;
+    const hasCustomSize = panel.dataset.sizeCustomized === '1';
+    const hasInputSize = Number.isFinite(nextWidth) || Number.isFinite(nextHeight);
+    if (!hasCustomSize && !hasInputSize) return;
+
+    const rect = panel.getBoundingClientRect();
+    if (!rect || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) return;
+
+    const isFullscreenLayout = isChatHistoryPanelFullscreenLayout();
+    const reservedBottomSpace = isFullscreenLayout
+      ? CHAT_HISTORY_PANEL_RESIZE_MARGIN_PX
+      : 60 + CHAT_HISTORY_PANEL_RESIZE_MARGIN_PX;
+    const maxWidth = Math.max(
+      CHAT_HISTORY_PANEL_MIN_WIDTH_PX,
+      window.innerWidth - CHAT_HISTORY_PANEL_RESIZE_MARGIN_PX * 2
+    );
+    const maxHeight = Math.max(
+      CHAT_HISTORY_PANEL_MIN_HEIGHT_PX,
+      window.innerHeight - CHAT_HISTORY_PANEL_RESIZE_MARGIN_PX - reservedBottomSpace
+    );
+
+    const rawWidth = Number.isFinite(nextWidth) ? Number(nextWidth) : rect.width;
+    const rawHeight = Number.isFinite(nextHeight) ? Number(nextHeight) : rect.height;
+    if (!Number.isFinite(rawWidth) || !Number.isFinite(rawHeight)) return;
+
+    const clampedWidth = Math.min(Math.max(rawWidth, CHAT_HISTORY_PANEL_MIN_WIDTH_PX), maxWidth);
+    const clampedHeight = Math.min(Math.max(rawHeight, CHAT_HISTORY_PANEL_MIN_HEIGHT_PX), maxHeight);
+
+    panel.style.width = `${Math.round(clampedWidth)}px`;
+    panel.style.height = `${Math.round(clampedHeight)}px`;
+  }
+
+  function syncChatHistoryPanelLayoutMode(panel) {
+    if (!panel) return;
+    if (isChatHistoryPanelFullscreenLayout()) {
+      clampChatHistoryPanelPosition(panel);
+      return;
+    }
+    // 侧栏模式下保持默认居中（允许改尺寸，但不允许拖动位移）。
+    if (typeof panel._cancelDragMove === 'function') {
+      panel._cancelDragMove();
+    }
+    resetChatHistoryPanelCenterPosition(panel);
   }
 
   function setupChatHistoryPanelDrag(panel, header) {
@@ -7588,8 +7654,9 @@ export function createChatHistoryUI(appContext) {
     header.addEventListener('pointerdown', (event) => {
       if (event.button !== 0) return;
       if (isDragIgnoredTarget(event.target)) return;
+      if (!isChatHistoryPanelFullscreenLayout()) return;
 
-      // 首次拖拽时，将当前居中后的实际位置固化为 left/top，后续再按绝对坐标拖动。
+      // 仅在全屏模式允许拖动位移：把当前布局位置固化为 left/top 后再拖拽。
       const rect = panel.getBoundingClientRect();
       panel.style.left = `${Math.round(rect.left)}px`;
       panel.style.top = `${Math.round(rect.top)}px`;
@@ -7617,11 +7684,98 @@ export function createChatHistoryUI(appContext) {
 
     // 面板关闭/ESC 强制关闭时，允许外部直接调用以清理拖拽会话。
     panel._cancelDragMove = clearDraggingState;
+  }
 
-    window.addEventListener('resize', () => {
-      if (!panel.classList.contains('visible')) return;
+  function setupChatHistoryPanelResize(panel) {
+    if (!panel || panel.dataset.resizeReady === '1') return;
+    panel.dataset.resizeReady = '1';
+
+    let resizeHandle = panel.querySelector('.chat-history-panel-resize-handle');
+    if (!resizeHandle) {
+      resizeHandle = document.createElement('button');
+      resizeHandle.type = 'button';
+      resizeHandle.className = 'chat-history-panel-resize-handle';
+      resizeHandle.title = '拖动调整窗口大小';
+      resizeHandle.setAttribute('aria-label', '拖动调整窗口大小');
+      panel.appendChild(resizeHandle);
+    }
+
+    let resizeSession = null;
+
+    const removeResizeListeners = () => {
+      document.removeEventListener('pointermove', handleResizePointerMove);
+      document.removeEventListener('pointerup', handleResizePointerEnd);
+      document.removeEventListener('pointercancel', handleResizePointerEnd);
+      window.removeEventListener('blur', handleResizePointerEnd);
+    };
+
+    const clearResizingState = () => {
+      removeResizeListeners();
+      resizeSession = null;
+      panel.classList.remove('chat-history-panel-resizing');
+      document.body.classList.remove('chat-history-panel-resizing');
+    };
+
+    const handleResizePointerMove = (event) => {
+      if (!resizeSession || event.pointerId !== resizeSession.pointerId) return;
+      const deltaX = event.clientX - resizeSession.startClientX;
+      const deltaY = event.clientY - resizeSession.startClientY;
+      const nextWidth = resizeSession.startWidth + deltaX;
+      const nextHeight = resizeSession.startHeight + deltaY;
+      clampChatHistoryPanelSize(panel, nextWidth, nextHeight);
       clampChatHistoryPanelPosition(panel);
+      panel.dataset.sizeCustomized = '1';
+      event.preventDefault();
+    };
+
+    const handleResizePointerEnd = (event) => {
+      if (!resizeSession) return;
+      if (event?.pointerId != null && event.pointerId !== resizeSession.pointerId) return;
+      clearResizingState();
+    };
+
+    resizeHandle.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      const rect = panel.getBoundingClientRect();
+      resizeSession = {
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startWidth: rect.width,
+        startHeight: rect.height
+      };
+      panel.classList.add('chat-history-panel-resizing');
+      document.body.classList.add('chat-history-panel-resizing');
+
+      document.addEventListener('pointermove', handleResizePointerMove);
+      document.addEventListener('pointerup', handleResizePointerEnd);
+      document.addEventListener('pointercancel', handleResizePointerEnd);
+      window.addEventListener('blur', handleResizePointerEnd);
+      event.preventDefault();
     });
+
+    // 面板关闭/ESC 强制关闭时，允许外部直接调用以清理缩放会话。
+    panel._cancelResizeMove = clearResizingState;
+
+    if (!panel._layoutSyncObserver) {
+      const root = document.documentElement;
+      const observer = new MutationObserver(() => {
+        if (!panel.classList.contains('visible')) return;
+        syncChatHistoryPanelLayoutMode(panel);
+        clampChatHistoryPanelSize(panel);
+      });
+      observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+      panel._layoutSyncObserver = observer;
+    }
+
+    if (!panel._resizeViewportListenerBound) {
+      panel._resizeViewportListenerBound = true;
+      window.addEventListener('resize', () => {
+        if (!panel.classList.contains('visible')) return;
+        clampChatHistoryPanelSize(panel);
+        syncChatHistoryPanelLayoutMode(panel);
+      });
+    }
   }
 
   async function showChatHistoryPanel(initialTab = 'history') {
@@ -7747,6 +7901,7 @@ export function createChatHistoryUI(appContext) {
       header.appendChild(headerActions);
       panel.appendChild(header);
       setupChatHistoryPanelDrag(panel, header);
+      setupChatHistoryPanelResize(panel);
 
       // 创建标签切换栏
       const tabBar = document.createElement('div');
@@ -8019,6 +8174,7 @@ export function createChatHistoryUI(appContext) {
       if (existingHeader) {
         setupChatHistoryPanelDrag(panel, existingHeader);
       }
+      setupChatHistoryPanelResize(panel);
       const filterContainer = panel.querySelector('.filter-container');
       ensureSearchSyntaxHelp(filterContainer);
       const urlFilterButton = panel.querySelector('.filter-container .url-filter-btn.url-filter-toggle');
@@ -8070,9 +8226,11 @@ export function createChatHistoryUI(appContext) {
     void activateChatHistoryTab(panel, initialTab);
 
     panel.style.display = 'flex';
+    syncChatHistoryPanelLayoutMode(panel);
+    clampChatHistoryPanelSize(panel);
     void panel.offsetWidth;  
     panel.classList.add('visible');
-    clampChatHistoryPanelPosition(panel);
+    syncChatHistoryPanelLayoutMode(panel);
 
     // 预热全量元数据（idle），降低“首次全文搜索”的启动延迟
     scheduleConversationMetadataWarmup(panel);

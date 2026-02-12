@@ -5398,10 +5398,13 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 /* 添加更多间距 */
 #chat-history-panel .panel-header {
     margin-bottom: 20px;
+}
+
+.fullscreen-mode #chat-history-panel .panel-header {
     cursor: grab;
 }
 
-#chat-history-panel.chat-history-panel-dragging .panel-header {
+.fullscreen-mode #chat-history-panel.chat-history-panel-dragging .panel-header {
     cursor: grabbing;
 }
 
@@ -5415,7 +5418,46 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     margin-right: 12px;
 }
 
-body.chat-history-panel-dragging {
+/* 右下角缩放把手：用于直接拖动调整 Esc 面板尺寸。 */
+#chat-history-panel .chat-history-panel-resize-handle {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: nwse-resize;
+    opacity: 0.28;
+    z-index: 6;
+}
+
+#chat-history-panel .chat-history-panel-resize-handle::before {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    border-right: 2px solid color-mix(in srgb, var(--cerebr-text-color) 72%, transparent);
+    border-bottom: 2px solid color-mix(in srgb, var(--cerebr-text-color) 72%, transparent);
+    border-radius: 2px;
+}
+
+#chat-history-panel:hover .chat-history-panel-resize-handle,
+#chat-history-panel.chat-history-panel-resizing .chat-history-panel-resize-handle {
+    opacity: 0.72;
+}
+
+#chat-history-panel .chat-history-panel-resize-handle:hover::before,
+#chat-history-panel.chat-history-panel-resizing .chat-history-panel-resize-handle::before {
+    border-right-color: var(--cerebr-highlight);
+    border-bottom-color: var(--cerebr-highlight);
+}
+
+body.chat-history-panel-dragging,
+body.chat-history-panel-resizing {
     user-select: none;
 }
 
