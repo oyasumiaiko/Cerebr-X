@@ -188,6 +188,9 @@ export function createMessageSender(appContext) {
    * - 现在将每一次请求视为独立 attempt，便于实现“按消息粒度的停止生成 / 自动重试”。
    */
   const activeAttempts = new Map();
+  // 对外暴露“哪些会话正在流式生成”，供 ESC 聊天记录面板做实时标记。
+  const streamingConversationListeners = new Set();
+  let lastStreamingConversationStateKey = '';
   let isTemporaryMode = false;
   let pageContent = null;
   let shouldSendChatHistory = true;
@@ -204,6 +207,59 @@ export function createMessageSender(appContext) {
   const STREAM_DRAFT_SAVE_INTERVAL_MS = 1200;
 
   // 临时模式状态不再写入 sessionStorage，改由父页面在内存里同步，避免 F5 刷新仍保留旧状态。
+
+  function collectStreamingConversationIds() {
+    if (!activeAttempts.size) return [];
+    const ids = new Set();
+    for (const attempt of activeAttempts.values()) {
+      if (!attempt || attempt.finished) continue;
+      const boundId = normalizeConversationId(attempt.boundConversationId);
+      if (!boundId) continue;
+      ids.add(boundId);
+    }
+    return Array.from(ids).sort();
+  }
+
+  function getStreamingConversationIds() {
+    return collectStreamingConversationIds();
+  }
+
+  function notifyStreamingConversationStateChanged() {
+    const ids = collectStreamingConversationIds();
+    const nextKey = ids.join('|');
+    if (nextKey === lastStreamingConversationStateKey) return;
+    lastStreamingConversationStateKey = nextKey;
+    if (!streamingConversationListeners.size) return;
+    for (const listener of streamingConversationListeners) {
+      try {
+        listener(ids);
+      } catch (error) {
+        console.warn('streamingConversation listener 执行失败:', error);
+      }
+    }
+  }
+
+  function subscribeStreamingConversationState(listener) {
+    if (typeof listener !== 'function') return () => {};
+    streamingConversationListeners.add(listener);
+    try {
+      listener(collectStreamingConversationIds());
+    } catch (error) {
+      console.warn('streamingConversation listener 初始化失败:', error);
+    }
+    return () => {
+      streamingConversationListeners.delete(listener);
+    };
+  }
+
+  function updateAttemptBoundConversationId(attemptState, nextConversationId) {
+    if (!attemptState) return;
+    const normalizedNext = normalizeConversationId(nextConversationId);
+    const normalizedCurrent = normalizeConversationId(attemptState.boundConversationId);
+    if (normalizedCurrent === normalizedNext) return;
+    attemptState.boundConversationId = normalizedNext;
+    notifyStreamingConversationStateChanged();
+  }
 
   function getAutoRetryDelayMs(attemptIndex = 0) {
     const normalizedAttempt = Math.max(0, attemptIndex);
@@ -934,7 +990,7 @@ export function createMessageSender(appContext) {
     if (!normalizeConversationId(attemptState.boundConversationId)) {
       const fromSenderState = normalizeConversationId(currentConversationId);
       const fromHistoryUi = normalizeConversationId(chatHistoryUI?.getCurrentConversationId?.());
-      attemptState.boundConversationId = fromSenderState || fromHistoryUi || '';
+      updateAttemptBoundConversationId(attemptState, fromSenderState || fromHistoryUi || '');
     }
     if (attemptState.boundApiLock === undefined) {
       attemptState.boundApiLock = chatHistoryUI?.getActiveConversationApiLock?.() || null;
@@ -989,7 +1045,7 @@ export function createMessageSender(appContext) {
         || boundId
         || (shouldActivate ? activeId : '');
       if (savedId) {
-        attemptState.boundConversationId = savedId;
+        updateAttemptBoundConversationId(attemptState, savedId);
         if (shouldActivate) {
           currentConversationId = savedId;
         }
@@ -2345,6 +2401,7 @@ export function createMessageSender(appContext) {
         pendingForcedPersist: false
       };
       activeAttempts.set(attemptState.id, attemptState);
+      notifyStreamingConversationStateChanged();
 
       // 如果这是第一个进行中的请求，开启全局“正在处理”状态与自动滚动
       if (activeAttempts.size === 1) {
@@ -2367,6 +2424,7 @@ export function createMessageSender(appContext) {
 
 	      attemptState.finished = true;
 	      activeAttempts.delete(attemptState.id);
+      notifyStreamingConversationStateChanged();
 
       const hasOtherAttempts = activeAttempts.size > 0;
       if (!hasOtherAttempts) {
@@ -4550,6 +4608,8 @@ export function createMessageSender(appContext) {
     getShouldAutoScroll,
     setShouldAutoScroll,
     getSlashCommandList,
-    getSlashCommandHints
+    getSlashCommandHints,
+    getStreamingConversationIds,
+    subscribeStreamingConversationState
   };
 } 

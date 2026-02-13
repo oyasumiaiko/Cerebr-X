@@ -5082,6 +5082,36 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     gap: 3px;
 }
 
+.chat-history-item .info .info-streaming-wrap {
+    display: inline-flex;
+    align-items: center;
+}
+
+.chat-history-item .info .info-streaming-wrap[hidden] {
+    display: none !important;
+}
+
+.chat-history-item .info .info-streaming {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--cerebr-green) 20%, transparent);
+    color: color-mix(in srgb, var(--cerebr-text-color) 82%, var(--cerebr-green));
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.chat-history-item .info .info-streaming::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--cerebr-green);
+}
+
 .chat-history-item .info .info-api-lock {
     display: inline-flex;
     align-items: center;

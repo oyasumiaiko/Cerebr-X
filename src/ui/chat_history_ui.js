@@ -4681,6 +4681,54 @@ export function createChatHistoryUI(appContext) {
   //  聊天记录列表：标注“该会话已在其它标签页打开”（右上角绿点）并提供跳转
   // ==========================================================================
 
+  let streamingConversationUnsubscribe = null;
+
+  function getStreamingConversationIdSet() {
+    const ids = services.messageSender?.getStreamingConversationIds?.();
+    if (!Array.isArray(ids) || ids.length === 0) return new Set();
+    const normalizedIds = ids
+      .map((id) => (typeof id === 'string' ? id.trim() : ''))
+      .filter(Boolean);
+    return new Set(normalizedIds);
+  }
+
+  function updateConversationItemStreamingUi(item, conversationId, streamingIdSet = null) {
+    if (!item) return;
+    const normalizedId = (typeof conversationId === 'string' && conversationId.trim()) ? conversationId.trim() : '';
+    if (!normalizedId) return;
+    const streamingWrap = item.querySelector('.info-streaming-wrap');
+    if (!streamingWrap) return;
+
+    const effectiveIdSet = (streamingIdSet instanceof Set) ? streamingIdSet : getStreamingConversationIdSet();
+    const isStreaming = effectiveIdSet.has(normalizedId);
+    item.classList.toggle('is-streaming', isStreaming);
+    streamingWrap.hidden = !isStreaming;
+    streamingWrap.setAttribute('aria-hidden', isStreaming ? 'false' : 'true');
+  }
+
+  function refreshStreamingUiIfPanelVisible() {
+    try {
+      const panel = document.getElementById('chat-history-panel');
+      if (!panel || !panel.classList.contains('visible')) return;
+      const list = panel.querySelector('#chat-history-list');
+      if (!list) return;
+      const streamingIdSet = getStreamingConversationIdSet();
+      list.querySelectorAll('.chat-history-item').forEach((item) => {
+        const id = item.getAttribute('data-id') || '';
+        if (id) updateConversationItemStreamingUi(item, id, streamingIdSet);
+      });
+    } catch (_) {}
+  }
+
+  function ensureStreamingConversationUiSubscription() {
+    if (streamingConversationUnsubscribe) return;
+    const sender = services.messageSender;
+    if (!sender?.subscribeStreamingConversationState) return;
+    streamingConversationUnsubscribe = sender.subscribeStreamingConversationState(() => {
+      refreshStreamingUiIfPanelVisible();
+    });
+  }
+
   function buildOpenTabsTooltipText(tabs, selfTabId) {
     const list = Array.isArray(tabs) ? tabs : [];
     if (list.length === 0) return '';
@@ -5599,6 +5647,15 @@ export function createChatHistoryUI(appContext) {
     infoContent.appendChild(createInfoSpan('info-time', chatTimeSpan));
     infoContent.appendChild(createSeparator());
     infoContent.appendChild(statsWrap);
+    const streamingWrap = document.createElement('span');
+    streamingWrap.className = 'info-streaming-wrap';
+    streamingWrap.hidden = true;
+    streamingWrap.setAttribute('aria-hidden', 'true');
+    streamingWrap.appendChild(createSeparator());
+    const streamingBadge = createInfoSpan('info-streaming', '生成中');
+    streamingBadge.title = '该会话正在流式生成';
+    streamingWrap.appendChild(streamingBadge);
+    infoContent.appendChild(streamingWrap);
     if (apiLockInfo) {
       const apiLockSpan = document.createElement('span');
       apiLockSpan.className = 'info-api-lock';
@@ -5774,6 +5831,8 @@ export function createChatHistoryUI(appContext) {
     });
 
     // 根据最新快照更新右侧“已打开/跳转”标记
+    ensureStreamingConversationUiSubscription();
+    updateConversationItemStreamingUi(item, conv.id);
     updateConversationItemOpenTabUi(item, conv.id);
 
     return item;
