@@ -496,10 +496,9 @@ export function createContextMenuManager(appContext) {
   }
 
   /**
-   * 统一解析“重新生成”的 API 参数，确保展示与实际发送一致。
-   * - 若传入 apiOverride（如收藏 API/指定 ID），直接使用；
-   * - 否则优先沿用“被重生成目标 AI 消息”的原始 API；
-   * - 若目标未记录 API，再回退到 prompt 设置中的 model 偏好；仍未命中则 follow_current。
+   * 解析“重新生成”使用的 API 参数。
+   * - 若传入 apiOverride（如收藏 API/手动指定），优先使用该覆盖值；
+   * - 未传覆盖值时，默认跟随当前 API 上下文（当前选中或会话锁定）。
    *
    * @param {Object|null} regenTarget
    * @param {any} [apiOverride=null]
@@ -507,16 +506,7 @@ export function createContextMenuManager(appContext) {
    */
   function resolveRegenerateApiParam(regenTarget, apiOverride = null) {
     if (apiOverride != null) return apiOverride;
-    const configMap = resolveRegenerateTargetApiConfigMap(regenTarget);
-    const targetIds = getRegenerateTargetAiIds(regenTarget);
-    for (let i = 0; i < targetIds.length; i += 1) {
-      const config = configMap.get(targetIds[i]);
-      if (config) return config;
-    }
-    const originalMessageText = (typeof regenTarget?.originalMessageText === 'string')
-      ? regenTarget.originalMessageText
-      : '';
-    return resolvePromptPreferredApiParam(originalMessageText);
+    return 'follow_current';
   }
 
   /**
