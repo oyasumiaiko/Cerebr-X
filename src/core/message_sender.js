@@ -190,6 +190,7 @@ export function createMessageSender(appContext) {
   const activeAttempts = new Map();
   // 对外暴露“哪些会话正在流式生成”，供 ESC 聊天记录面板做实时标记。
   const streamingConversationListeners = new Set();
+  const backgroundCompletedConversationIds = new Set();
   let lastStreamingConversationStateKey = '';
   let isTemporaryMode = false;
   let pageContent = null;
@@ -220,19 +221,39 @@ export function createMessageSender(appContext) {
     return Array.from(ids).sort();
   }
 
+  function collectBackgroundCompletedConversationIds() {
+    if (!backgroundCompletedConversationIds.size) return [];
+    return Array.from(backgroundCompletedConversationIds).sort();
+  }
+
   function getStreamingConversationIds() {
     return collectStreamingConversationIds();
   }
 
+  function getBackgroundCompletedConversationIds() {
+    return collectBackgroundCompletedConversationIds();
+  }
+
+  function clearBackgroundCompletedConversationMarker(conversationId) {
+    const normalizedId = normalizeConversationId(conversationId);
+    if (!normalizedId) return false;
+    const removed = backgroundCompletedConversationIds.delete(normalizedId);
+    if (removed) {
+      notifyStreamingConversationStateChanged();
+    }
+    return removed;
+  }
+
   function notifyStreamingConversationStateChanged() {
-    const ids = collectStreamingConversationIds();
-    const nextKey = ids.join('|');
+    const streamingIds = collectStreamingConversationIds();
+    const completedIds = collectBackgroundCompletedConversationIds();
+    const nextKey = `s:${streamingIds.join('|')}#c:${completedIds.join('|')}`;
     if (nextKey === lastStreamingConversationStateKey) return;
     lastStreamingConversationStateKey = nextKey;
     if (!streamingConversationListeners.size) return;
     for (const listener of streamingConversationListeners) {
       try {
-        listener(ids);
+        listener(streamingIds, completedIds);
       } catch (error) {
         console.warn('streamingConversation listener 执行失败:', error);
       }
@@ -243,7 +264,7 @@ export function createMessageSender(appContext) {
     if (typeof listener !== 'function') return () => {};
     streamingConversationListeners.add(listener);
     try {
-      listener(collectStreamingConversationIds());
+      listener(collectStreamingConversationIds(), collectBackgroundCompletedConversationIds());
     } catch (error) {
       console.warn('streamingConversation listener 初始化失败:', error);
     }
@@ -257,6 +278,9 @@ export function createMessageSender(appContext) {
     const normalizedNext = normalizeConversationId(nextConversationId);
     const normalizedCurrent = normalizeConversationId(attemptState.boundConversationId);
     if (normalizedCurrent === normalizedNext) return;
+    if (normalizedNext) {
+      backgroundCompletedConversationIds.delete(normalizedNext);
+    }
     attemptState.boundConversationId = normalizedNext;
     notifyStreamingConversationStateChanged();
   }
@@ -2398,7 +2422,8 @@ export function createMessageSender(appContext) {
         persistInFlight: false,
         persistPromise: null,
         pendingPersist: false,
-        pendingForcedPersist: false
+        pendingForcedPersist: false,
+        completedSuccessfully: false
       };
       activeAttempts.set(attemptState.id, attemptState);
       notifyStreamingConversationStateChanged();
@@ -2424,6 +2449,18 @@ export function createMessageSender(appContext) {
 
 	      attemptState.finished = true;
 	      activeAttempts.delete(attemptState.id);
+
+      if (attemptState.completedSuccessfully) {
+        const boundId = normalizeConversationId(attemptState.boundConversationId);
+        if (boundId) {
+          const finishedInBackground = !isAttemptMainConversationActive(attemptState);
+          if (finishedInBackground) {
+            backgroundCompletedConversationIds.add(boundId);
+          } else {
+            backgroundCompletedConversationIds.delete(boundId);
+          }
+        }
+      }
       notifyStreamingConversationStateChanged();
 
       const hasOtherAttempts = activeAttempts.size > 0;
@@ -2881,6 +2918,9 @@ export function createMessageSender(appContext) {
         || normalizeConversationId(chatHistoryUI?.getCurrentConversationId?.());
       if (finalConversationId && isAttemptMainConversationActive(attempt)) {
         currentConversationId = finalConversationId;
+      }
+      if (attempt) {
+        attempt.completedSuccessfully = true;
       }
 
       // 首条 AI 回复后尝试生成对话标题（异步，不阻塞主流程）
@@ -4550,6 +4590,7 @@ export function createMessageSender(appContext) {
   function setCurrentConversationId(id) {
     currentConversationId = id;
     // console.log(`消息发送器: 设置当前会话ID为 ${id}`);
+    clearBackgroundCompletedConversationMarker(id);
 
     // 同步到“会话-标签页存在性”服务：用于聊天记录面板提示“该会话已在其它标签页打开”
     // 设计说明：
@@ -4610,6 +4651,7 @@ export function createMessageSender(appContext) {
     getSlashCommandList,
     getSlashCommandHints,
     getStreamingConversationIds,
+    getBackgroundCompletedConversationIds,
     subscribeStreamingConversationState
   };
 } 

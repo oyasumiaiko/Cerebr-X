@@ -5070,45 +5070,58 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 }
 
 .chat-history-item .info .info-streaming-wrap,
+.chat-history-item .info .info-background-complete-wrap,
 .chat-history-item .info .info-open-wrap {
     display: inline-flex;
     align-items: center;
 }
 
 .chat-history-item .info .info-streaming-wrap[hidden],
+.chat-history-item .info .info-background-complete-wrap[hidden],
 .chat-history-item .info .info-open-wrap[hidden] {
     display: none !important;
 }
 
 .chat-history-item .info .info-streaming,
+.chat-history-item .info .info-background-complete,
 .chat-history-item .info .info-open-state {
+    --status-pill-color: var(--cerebr-green);
     display: inline-flex;
     align-items: center;
     gap: 5px;
     height: 18px;
     padding: 0 7px;
     border-radius: 999px;
-    background: color-mix(in srgb, var(--cerebr-green) 20%, transparent);
-    color: color-mix(in srgb, var(--cerebr-text-color) 82%, var(--cerebr-green));
+    background: color-mix(in srgb, var(--status-pill-color) 34%, transparent);
+    color: color-mix(in srgb, var(--cerebr-text-color) 72%, var(--status-pill-color));
+    border: 1px solid color-mix(in srgb, var(--status-pill-color) 52%, transparent);
     white-space: nowrap;
-    font-weight: 500;
+    font-weight: 600;
 }
 
-.chat-history-item .info .info-streaming::before,
-.chat-history-item .info .info-open-state::before {
+.chat-history-item .info .info-streaming::before {
     content: '';
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--cerebr-green);
+    background: var(--status-pill-color);
+}
+
+.chat-history-item .info .info-background-complete {
+    --status-pill-color: var(--cerebr-teal);
 }
 
 .chat-history-item .info .info-open-state {
+    --status-pill-color: var(--cerebr-highlight);
     cursor: default;
 }
 
 .chat-history-item .info .info-open-state.is-jumpable {
     cursor: pointer;
+}
+
+.chat-history-item .info .info-open-state.is-jumpable:hover {
+    background: color-mix(in srgb, var(--status-pill-color) 42%, transparent);
 }
 
 .chat-history-item .info .info-api-lock {

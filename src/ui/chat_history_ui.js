@@ -4678,13 +4678,22 @@ export function createChatHistoryUI(appContext) {
    */
 
   // ==========================================================================
-  //  聊天记录列表：标注“正在生成 / 已打开”状态并提供跨标签页跳转
+  //  聊天记录列表：标注“正在生成 / 后台已完成 / 已打开”状态并提供跨标签页跳转
   // ==========================================================================
 
   let streamingConversationUnsubscribe = null;
 
   function getStreamingConversationIdSet() {
     const ids = services.messageSender?.getStreamingConversationIds?.();
+    if (!Array.isArray(ids) || ids.length === 0) return new Set();
+    const normalizedIds = ids
+      .map((id) => (typeof id === 'string' ? id.trim() : ''))
+      .filter(Boolean);
+    return new Set(normalizedIds);
+  }
+
+  function getBackgroundCompletedConversationIdSet() {
+    const ids = services.messageSender?.getBackgroundCompletedConversationIds?.();
     if (!Array.isArray(ids) || ids.length === 0) return new Set();
     const normalizedIds = ids
       .map((id) => (typeof id === 'string' ? id.trim() : ''))
@@ -4720,6 +4729,33 @@ export function createChatHistoryUI(appContext) {
     refreshConversationItemStatusBadgeWrap(item);
   }
 
+  function updateConversationItemBackgroundCompletionUi(
+    item,
+    conversationId,
+    completedIdSet = null,
+    streamingIdSet = null
+  ) {
+    if (!item) return;
+    const normalizedId = (typeof conversationId === 'string' && conversationId.trim()) ? conversationId.trim() : '';
+    if (!normalizedId) return;
+    const completionWrap = item.querySelector('.info-background-complete-wrap');
+    if (!completionWrap) return;
+
+    const effectiveCompletedSet = (completedIdSet instanceof Set)
+      ? completedIdSet
+      : getBackgroundCompletedConversationIdSet();
+    const effectiveStreamingSet = (streamingIdSet instanceof Set)
+      ? streamingIdSet
+      : getStreamingConversationIdSet();
+    const isStreaming = effectiveStreamingSet.has(normalizedId);
+    const isBackgroundCompleted = effectiveCompletedSet.has(normalizedId);
+    const shouldShow = isBackgroundCompleted && !isStreaming;
+
+    completionWrap.hidden = !shouldShow;
+    completionWrap.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+    refreshConversationItemStatusBadgeWrap(item);
+  }
+
   function refreshStreamingUiIfPanelVisible() {
     try {
       const panel = document.getElementById('chat-history-panel');
@@ -4727,9 +4763,12 @@ export function createChatHistoryUI(appContext) {
       const list = panel.querySelector('#chat-history-list');
       if (!list) return;
       const streamingIdSet = getStreamingConversationIdSet();
+      const completedIdSet = getBackgroundCompletedConversationIdSet();
       list.querySelectorAll('.chat-history-item').forEach((item) => {
         const id = item.getAttribute('data-id') || '';
-        if (id) updateConversationItemStreamingUi(item, id, streamingIdSet);
+        if (!id) return;
+        updateConversationItemStreamingUi(item, id, streamingIdSet);
+        updateConversationItemBackgroundCompletionUi(item, id, completedIdSet, streamingIdSet);
       });
     } catch (_) {}
   }
@@ -5704,6 +5743,15 @@ export function createChatHistoryUI(appContext) {
     streamingWrap.appendChild(streamingBadge);
     statusBadges.appendChild(streamingWrap);
 
+    const backgroundCompleteWrap = document.createElement('span');
+    backgroundCompleteWrap.className = 'info-background-complete-wrap';
+    backgroundCompleteWrap.hidden = true;
+    backgroundCompleteWrap.setAttribute('aria-hidden', 'true');
+    const backgroundCompleteBadge = createInfoSpan('info-background-complete', '已完成');
+    backgroundCompleteBadge.title = '该会话已在后台生成完成';
+    backgroundCompleteWrap.appendChild(backgroundCompleteBadge);
+    statusBadges.appendChild(backgroundCompleteWrap);
+
     const openWrap = document.createElement('span');
     openWrap.className = 'info-open-wrap';
     openWrap.hidden = true;
@@ -5869,6 +5917,7 @@ export function createChatHistoryUI(appContext) {
     // 根据最新快照更新右侧“已打开/跳转”标记
     ensureStreamingConversationUiSubscription();
     updateConversationItemStreamingUi(item, conv.id);
+    updateConversationItemBackgroundCompletionUi(item, conv.id);
     updateConversationItemOpenTabUi(item, conv.id);
 
     return item;
