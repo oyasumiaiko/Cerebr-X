@@ -957,6 +957,19 @@ export function createContextMenuManager(appContext) {
     // 根本修复：直接在快照树移除思考块，而不是在导出时做 filter。
     snapshotNode.querySelectorAll('.thoughts-content').forEach((node) => node.remove());
 
+    // 长用户消息在常规 UI 下会限制 text-content 高度并启用内部滚动；
+    // 截图场景需要完整内容，因此在快照里解除该限制，让高度自然展开。
+    if (snapshotNode.classList.contains('user-message')) {
+      const textContentNodes = snapshotNode.querySelectorAll('.text-content');
+      textContentNodes.forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        node.style.maxHeight = 'none';
+        node.style.height = 'auto';
+        node.style.overflow = 'visible';
+        node.style.overflowY = 'visible';
+      });
+    }
+
     stagingHost.appendChild(snapshotNode);
     document.body.appendChild(stagingHost);
 
