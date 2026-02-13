@@ -144,6 +144,12 @@ export function createSettingsManager(appContext) {
     messageBlurRadius: 0,
     // 兼容旧版本（聊天/输入模糊），仅用于迁移；新版本请使用 mainUiBlurRadius/messageBlurRadius
     chatInputBlurRadius: 0,
+    // 消息“复制为图片”导出参数（0 表示跟随当前消息样式）
+    copyImageWidth: 0,
+    copyImageFontSize: 0,
+    copyImageScale: 1,
+    copyImagePadding: 15,
+    copyImageFontFamily: 'inherit',
     // 是否启用“自定义配色覆盖主题”
     enableCustomThemeColors: false,
     customThemeBgColor: '#262b33',
@@ -652,6 +658,69 @@ export function createSettingsManager(appContext) {
       defaultValue: DEFAULT_SETTINGS.showModelNameInPlaceholder,
       apply: (v) => applyShowModelNameInPlaceholder(v)
     },
+    {
+      key: 'copyImageWidth',
+      type: 'range',
+      group: 'capture',
+      label: '导出宽度',
+      min: 0,
+      max: 1600,
+      step: 10,
+      defaultValue: DEFAULT_SETTINGS.copyImageWidth,
+      formatValue: (value) => {
+        const normalized = clampCopyImageWidth(value);
+        return normalized <= 0 ? '跟随消息宽度' : `${normalized}px`;
+      }
+    },
+    {
+      key: 'copyImageFontSize',
+      type: 'range',
+      group: 'capture',
+      label: '导出字号',
+      min: 0,
+      max: 32,
+      step: 1,
+      defaultValue: DEFAULT_SETTINGS.copyImageFontSize,
+      formatValue: (value) => {
+        const normalized = clampCopyImageFontSize(value);
+        return normalized <= 0 ? '跟随消息字号' : `${normalized}px`;
+      }
+    },
+    {
+      key: 'copyImageScale',
+      type: 'range',
+      group: 'capture',
+      label: '导出分辨率',
+      min: 1,
+      max: 4,
+      step: 0.25,
+      defaultValue: DEFAULT_SETTINGS.copyImageScale,
+      formatValue: (value) => `${clampCopyImageScale(value).toFixed(2)}x`
+    },
+    {
+      key: 'copyImagePadding',
+      type: 'range',
+      group: 'capture',
+      label: '图片边距',
+      min: 0,
+      max: 64,
+      step: 1,
+      defaultValue: DEFAULT_SETTINGS.copyImagePadding,
+      formatValue: (value) => `${clampCopyImagePadding(value)}px`
+    },
+    {
+      key: 'copyImageFontFamily',
+      type: 'select',
+      group: 'capture',
+      label: '图片字体',
+      options: [
+        { label: '跟随当前界面', value: 'inherit' },
+        { label: '系统无衬线', value: 'system-sans' },
+        { label: '衬线体', value: 'serif' },
+        { label: '等宽体', value: 'monospace' }
+      ],
+      defaultValue: DEFAULT_SETTINGS.copyImageFontFamily
+    },
     // 快捷设置：保留在“...”菜单中便于快速调整
     // 数学公式：是否使用 $ / $$ 作为分隔符
     {
@@ -893,6 +962,21 @@ export function createSettingsManager(appContext) {
     }
     if (key === 'mainUiBlurRadius' || key === 'messageBlurRadius' || key === 'chatInputBlurRadius') {
       return clampBlurRadiusPx(value);
+    }
+    if (key === 'copyImageWidth') {
+      return clampCopyImageWidth(value);
+    }
+    if (key === 'copyImageFontSize') {
+      return clampCopyImageFontSize(value);
+    }
+    if (key === 'copyImageScale') {
+      return clampCopyImageScale(value);
+    }
+    if (key === 'copyImagePadding') {
+      return clampCopyImagePadding(value);
+    }
+    if (key === 'copyImageFontFamily') {
+      return normalizeCopyImageFontFamily(value);
     }
     if (key === 'backgroundMessageBlurRadius') {
       return clampBackgroundMessageBlurRadius(value);
@@ -1228,6 +1312,7 @@ export function createSettingsManager(appContext) {
       layout: '布局',
       behavior: '行为',
       input: '输入',
+      capture: '图片导出',
       title: '对话标题',
       advanced: '高级',
       other: '其他'
@@ -2753,6 +2838,40 @@ export function createSettingsManager(appContext) {
     const n = Number(input);
     if (!Number.isFinite(n)) return DEFAULT_SETTINGS.backgroundMessageBlurRadius;
     return Math.round(Math.min(120, Math.max(0, n)));
+  }
+
+  function clampCopyImageWidth(input) {
+    const n = Number(input);
+    if (!Number.isFinite(n)) return DEFAULT_SETTINGS.copyImageWidth;
+    return Math.round(Math.min(1600, Math.max(0, n)));
+  }
+
+  function clampCopyImageFontSize(input) {
+    const n = Number(input);
+    if (!Number.isFinite(n)) return DEFAULT_SETTINGS.copyImageFontSize;
+    return Math.round(Math.min(32, Math.max(0, n)));
+  }
+
+  function clampCopyImageScale(input) {
+    const n = Number(input);
+    if (!Number.isFinite(n)) return DEFAULT_SETTINGS.copyImageScale;
+    const clamped = Math.min(4, Math.max(1, n));
+    const stepped = Math.round(clamped * 4) / 4;
+    return Number(stepped.toFixed(2));
+  }
+
+  function clampCopyImagePadding(input) {
+    const n = Number(input);
+    if (!Number.isFinite(n)) return DEFAULT_SETTINGS.copyImagePadding;
+    return Math.round(Math.min(64, Math.max(0, n)));
+  }
+
+  function normalizeCopyImageFontFamily(input) {
+    const normalized = String(input || '').trim().toLowerCase();
+    if (normalized === 'system-sans') return 'system-sans';
+    if (normalized === 'serif') return 'serif';
+    if (normalized === 'monospace') return 'monospace';
+    return 'inherit';
   }
 
   function getScrollMinimapWidthBounds() {

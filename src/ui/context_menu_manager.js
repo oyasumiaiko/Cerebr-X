@@ -59,12 +59,90 @@ export function createContextMenuManager(appContext) {
   const chatHistoryManager = services.chatHistoryManager;
   const chatHistory = chatHistoryManager.chatHistory; // The actual history data object
   const apiManager = services.apiManager;
+  const settingsManager = services.settingsManager;
 
   // Private state
   let currentMessageElement = null;
   let currentMessageContainer = null;
   let currentCodeBlock = null;
   let isEditing = false;
+
+  const MESSAGE_IMAGE_EXPORT_DEFAULTS = {
+    widthPx: 0,         // 0 = 跟随消息当前宽度
+    fontSizePx: 0,      // 0 = 跟随消息当前字号
+    resolutionScale: 1, // 1x = 原始像素比
+    paddingPx: 15,
+    fontFamilyKey: 'inherit'
+  };
+
+  const MESSAGE_IMAGE_EXPORT_FONT_FAMILY_MAP = {
+    inherit: '',
+    'system-sans': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif',
+    serif: '"Noto Serif SC", "Source Han Serif SC", "Songti SC", "Times New Roman", serif',
+    monospace: '"JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace'
+  };
+
+  function clampNumberInRange(value, min, max, fallback, step = 0) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return fallback;
+    const clamped = Math.min(max, Math.max(min, numeric));
+    if (step > 0) {
+      const stepped = Math.round(clamped / step) * step;
+      return Number(stepped.toFixed(2));
+    }
+    return Math.round(clamped);
+  }
+
+  function normalizeExportFontFamilyKey(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'system-sans') return 'system-sans';
+    if (normalized === 'serif') return 'serif';
+    if (normalized === 'monospace') return 'monospace';
+    return 'inherit';
+  }
+
+  /**
+   * 读取“复制为图片”导出参数。
+   * 说明：设置由 settings_manager 做过一次规范化，这里再兜底一次，避免异常值导致截图失败。
+   */
+  function resolveMessageImageExportOptions() {
+    const widthPx = clampNumberInRange(
+      settingsManager?.getSetting?.('copyImageWidth'),
+      0,
+      1600,
+      MESSAGE_IMAGE_EXPORT_DEFAULTS.widthPx
+    );
+    const fontSizePx = clampNumberInRange(
+      settingsManager?.getSetting?.('copyImageFontSize'),
+      0,
+      32,
+      MESSAGE_IMAGE_EXPORT_DEFAULTS.fontSizePx
+    );
+    const resolutionScale = clampNumberInRange(
+      settingsManager?.getSetting?.('copyImageScale'),
+      1,
+      4,
+      MESSAGE_IMAGE_EXPORT_DEFAULTS.resolutionScale,
+      0.25
+    );
+    const paddingPx = clampNumberInRange(
+      settingsManager?.getSetting?.('copyImagePadding'),
+      0,
+      64,
+      MESSAGE_IMAGE_EXPORT_DEFAULTS.paddingPx
+    );
+    const fontFamilyKey = normalizeExportFontFamilyKey(
+      settingsManager?.getSetting?.('copyImageFontFamily') || MESSAGE_IMAGE_EXPORT_DEFAULTS.fontFamilyKey
+    );
+    return {
+      widthPx,
+      fontSizePx,
+      resolutionScale,
+      paddingPx,
+      fontFamilyKey,
+      fontFamilyCss: MESSAGE_IMAGE_EXPORT_FONT_FAMILY_MAP[fontFamilyKey] || ''
+    };
+  }
 
   function resolveMessageContainer(messageElement) {
     if (!messageElement) return chatContainer;
@@ -918,14 +996,19 @@ export function createContextMenuManager(appContext) {
    * 通过先构造离屏快照并将其作为捕获根节点，可以从根本上保证高度正确。
    *
    * @param {HTMLElement} messageElement
+   * @param {{widthPx?: number, fontSizePx?: number, fontFamilyCss?: string}} [options]
    * @returns {{ node: HTMLElement, width: number, height: number, cleanup: Function }}
    */
-  function createMessageScreenshotSnapshot(messageElement) {
+  function createMessageScreenshotSnapshot(messageElement, options = {}) {
     const sourceRect = messageElement.getBoundingClientRect();
     const fallbackWidth = Math.max(
       1,
       Math.ceil(sourceRect.width || messageElement.offsetWidth || messageElement.scrollWidth || 1)
     );
+    const requestedWidth = Number(options?.widthPx);
+    const targetWidth = Number.isFinite(requestedWidth) && requestedWidth > 0
+      ? Math.max(1, Math.round(requestedWidth))
+      : fallbackWidth;
 
     const stagingHost = document.createElement('div');
     stagingHost.style.position = 'fixed';
@@ -935,7 +1018,7 @@ export function createContextMenuManager(appContext) {
     stagingHost.style.opacity = '0';
     stagingHost.style.zIndex = '-1';
     stagingHost.style.contain = 'layout style paint';
-    stagingHost.style.width = `${fallbackWidth}px`;
+    stagingHost.style.width = `${targetWidth}px`;
 
     const snapshotNode = messageElement.cloneNode(true);
     if (!(snapshotNode instanceof HTMLElement)) {
@@ -944,15 +1027,21 @@ export function createContextMenuManager(appContext) {
 
     // 复制当前消息的可见宽度，避免离屏环境因容器宽度变化导致换行与高度偏差。
     snapshotNode.style.boxSizing = 'border-box';
-    snapshotNode.style.width = `${fallbackWidth}px`;
-    snapshotNode.style.maxWidth = `${fallbackWidth}px`;
-    snapshotNode.style.minWidth = `${fallbackWidth}px`;
+    snapshotNode.style.width = `${targetWidth}px`;
+    snapshotNode.style.maxWidth = `${targetWidth}px`;
+    snapshotNode.style.minWidth = `${targetWidth}px`;
 
     // 截图快照不需要动画与过渡，强制静态化可避免捕获到中间帧。
     snapshotNode.style.animation = 'none';
     snapshotNode.style.transition = 'none';
     snapshotNode.style.transform = 'none';
     snapshotNode.style.opacity = '1';
+    if (Number.isFinite(Number(options?.fontSizePx)) && Number(options.fontSizePx) > 0) {
+      snapshotNode.style.fontSize = `${Math.round(Number(options.fontSizePx))}px`;
+    }
+    if (typeof options?.fontFamilyCss === 'string' && options.fontFamilyCss.trim()) {
+      snapshotNode.style.fontFamily = options.fontFamilyCss;
+    }
 
     // 根本修复：直接在快照树移除思考块，而不是在导出时做 filter。
     snapshotNode.querySelectorAll('.thoughts-content').forEach((node) => node.remove());
@@ -974,7 +1063,7 @@ export function createContextMenuManager(appContext) {
     document.body.appendChild(stagingHost);
 
     const rect = snapshotNode.getBoundingClientRect();
-    const width = Math.max(1, Math.ceil(Math.max(rect.width || 0, snapshotNode.scrollWidth || 0, fallbackWidth)));
+    const width = Math.max(1, Math.ceil(Math.max(rect.width || 0, snapshotNode.scrollWidth || 0, targetWidth)));
     const height = Math.max(1, Math.ceil(Math.max(rect.height || 0, snapshotNode.scrollHeight || 0)));
 
     const cleanup = () => {
@@ -1001,16 +1090,18 @@ export function createContextMenuManager(appContext) {
         // 显示加载状态
         const originalText = copyAsImageButton.innerHTML;
         copyAsImageButton.innerHTML = '<i class="far fa-spinner fa-spin"></i> 处理中...';
+        const exportOptions = resolveMessageImageExportOptions();
 
         // --- 1. 构建离屏快照（移除思考块）并生成原始 Canvas ---
-        snapshot = createMessageScreenshotSnapshot(currentMessageElement);
+        snapshot = createMessageScreenshotSnapshot(currentMessageElement, exportOptions);
         const originalCanvas = await domtoimage.toCanvas(snapshot.node, {
           width: snapshot.width,
-          height: snapshot.height
+          height: snapshot.height,
+          scale: exportOptions.resolutionScale
         });
 
         // --- 2. 创建带边距的新 Canvas ---
-        const padding = 15; // 设置边距大小 (像素)
+        const padding = Math.max(0, Math.round(exportOptions.paddingPx * exportOptions.resolutionScale));
         const newWidth = originalCanvas.width + 2 * padding;
         const newHeight = originalCanvas.height + 2 * padding;
 
