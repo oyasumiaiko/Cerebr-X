@@ -4678,7 +4678,7 @@ export function createChatHistoryUI(appContext) {
    */
 
   // ==========================================================================
-  //  聊天记录列表：标注“该会话已在其它标签页打开”（右上角绿点）并提供跳转
+  //  聊天记录列表：标注“正在生成 / 已打开”状态并提供跨标签页跳转
   // ==========================================================================
 
   let streamingConversationUnsubscribe = null;
@@ -4690,6 +4690,19 @@ export function createChatHistoryUI(appContext) {
       .map((id) => (typeof id === 'string' ? id.trim() : ''))
       .filter(Boolean);
     return new Set(normalizedIds);
+  }
+
+  function refreshConversationItemStatusBadgeWrap(item) {
+    if (!item) return;
+    const statusWrap = item.querySelector('.info-status-badges');
+    if (!statusWrap) return;
+
+    const hasVisibleBadge = Array.from(statusWrap.children).some((child) => {
+      if (!(child instanceof HTMLElement)) return false;
+      return !child.hidden;
+    });
+    statusWrap.hidden = !hasVisibleBadge;
+    statusWrap.setAttribute('aria-hidden', hasVisibleBadge ? 'false' : 'true');
   }
 
   function updateConversationItemStreamingUi(item, conversationId, streamingIdSet = null) {
@@ -4704,6 +4717,7 @@ export function createChatHistoryUI(appContext) {
     item.classList.toggle('is-streaming', isStreaming);
     streamingWrap.hidden = !isStreaming;
     streamingWrap.setAttribute('aria-hidden', isStreaming ? 'false' : 'true');
+    refreshConversationItemStatusBadgeWrap(item);
   }
 
   function refreshStreamingUiIfPanelVisible() {
@@ -4765,17 +4779,22 @@ export function createChatHistoryUI(appContext) {
 
   function updateConversationItemOpenTabUi(item, conversationId) {
     if (!item || !conversationId) return;
-    const dot = item.querySelector('.chat-history-open-dot');
-    if (!dot) return;
+    const openWrap = item.querySelector('.info-open-wrap');
+    const openBadge = item.querySelector('.info-open-state');
+    if (!openWrap || !openBadge) return;
 
     const { tabs, selfTabId, otherTabs } = getConversationOpenTabsState(conversationId);
     const isOpen = tabs.length > 0;
     const isOpenElsewhere = otherTabs.length > 0;
 
     if (!isOpen) {
-      dot.classList.remove('active');
-      dot.title = '';
-      dot.dataset.openStateKey = '';
+      openWrap.hidden = true;
+      openWrap.setAttribute('aria-hidden', 'true');
+      openBadge.classList.remove('is-jumpable');
+      openBadge.title = '';
+      openBadge.dataset.openStateKey = '';
+      openBadge.setAttribute('aria-disabled', 'true');
+      refreshConversationItemStatusBadgeWrap(item);
       return;
     }
 
@@ -4786,14 +4805,18 @@ export function createChatHistoryUI(appContext) {
     const nextKey = `${tabs.length}:${isOpenElsewhere ? 1 : 0}`;
 
     // 性能/体验：避免在存在性快照频繁更新时重复写 title 导致浏览器 tooltip 抖动
-    if (dot.dataset.openStateKey !== nextKey) {
-      dot.dataset.openStateKey = nextKey;
-      dot.title = nextTitle;
-    } else if (dot.title !== nextTitle) {
-      dot.title = nextTitle;
+    if (openBadge.dataset.openStateKey !== nextKey) {
+      openBadge.dataset.openStateKey = nextKey;
+      openBadge.title = nextTitle;
+    } else if (openBadge.title !== nextTitle) {
+      openBadge.title = nextTitle;
     }
 
-    dot.classList.add('active');
+    openWrap.hidden = false;
+    openWrap.setAttribute('aria-hidden', 'false');
+    openBadge.classList.toggle('is-jumpable', isOpenElsewhere);
+    openBadge.setAttribute('aria-disabled', isOpenElsewhere ? 'false' : 'true');
+    refreshConversationItemStatusBadgeWrap(item);
   }
 
   function refreshOpenTabUiIfPanelVisible() {
@@ -5647,15 +5670,6 @@ export function createChatHistoryUI(appContext) {
     infoContent.appendChild(createInfoSpan('info-time', chatTimeSpan));
     infoContent.appendChild(createSeparator());
     infoContent.appendChild(statsWrap);
-    const streamingWrap = document.createElement('span');
-    streamingWrap.className = 'info-streaming-wrap';
-    streamingWrap.hidden = true;
-    streamingWrap.setAttribute('aria-hidden', 'true');
-    streamingWrap.appendChild(createSeparator());
-    const streamingBadge = createInfoSpan('info-streaming', '生成中');
-    streamingBadge.title = '该会话正在流式生成';
-    streamingWrap.appendChild(streamingBadge);
-    infoContent.appendChild(streamingWrap);
     if (apiLockInfo) {
       const apiLockSpan = document.createElement('span');
       apiLockSpan.className = 'info-api-lock';
@@ -5675,6 +5689,35 @@ export function createChatHistoryUI(appContext) {
     }
     infoContent.appendChild(createSeparator());
     infoContent.appendChild(createInfoSpan('info-domain', domain));
+
+    const statusBadges = document.createElement('span');
+    statusBadges.className = 'info-status-badges';
+    statusBadges.hidden = true;
+    statusBadges.setAttribute('aria-hidden', 'true');
+
+    const streamingWrap = document.createElement('span');
+    streamingWrap.className = 'info-streaming-wrap';
+    streamingWrap.hidden = true;
+    streamingWrap.setAttribute('aria-hidden', 'true');
+    const streamingBadge = createInfoSpan('info-streaming', '生成中');
+    streamingBadge.title = '该会话正在流式生成';
+    streamingWrap.appendChild(streamingBadge);
+    statusBadges.appendChild(streamingWrap);
+
+    const openWrap = document.createElement('span');
+    openWrap.className = 'info-open-wrap';
+    openWrap.hidden = true;
+    openWrap.setAttribute('aria-hidden', 'true');
+    const openBadge = createInfoSpan('info-open-state', '已打开');
+    openBadge.dataset.openStateKey = '';
+    openBadge.setAttribute('role', 'button');
+    openBadge.setAttribute('aria-label', '该会话已在标签页打开');
+    openBadge.setAttribute('aria-disabled', 'true');
+    openWrap.appendChild(openBadge);
+    statusBadges.appendChild(openWrap);
+
+    infoContent.appendChild(statusBadges);
+
     // URL 快速筛选模式下，为每条会话标注“匹配等级”，便于用户理解来源范围
     // - 等级越小越严格（越接近当前页面 URL）
     // - 鼠标悬停可查看匹配前缀
@@ -5703,25 +5746,19 @@ export function createChatHistoryUI(appContext) {
     mainDiv.appendChild(infoDiv);
 
     item.appendChild(mainDiv);
-    // 右上角“已打开”绿点：不占布局空间，只在会话已被其它标签页/当前标签页打开时显示。
-    const openDot = document.createElement('button');
-    openDot.className = 'chat-history-open-dot';
-    openDot.type = 'button';
-    openDot.tabIndex = -1; // 避免在键盘 Tab 流中“抢焦点”，不影响主列表的使用体验
-    openDot.setAttribute('aria-label', '该会话已在标签页打开');
-    openDot.dataset.openStateKey = '';
-    openDot.addEventListener('click', async (e) => {
+    // “已打开”状态徽标：放在信息行末尾，保持与“生成中”一致的视觉风格。
+    openBadge.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
       if (!conversationPresence?.focusConversation) return;
-      if (openDot.dataset.busy === '1') return;
+      if (openBadge.dataset.busy === '1') return;
 
       // 只有当“其它标签页”确实存在时才跳转（避免跳回当前标签页造成困惑）
       const { otherTabs } = getConversationOpenTabsState(conv.id);
       if (!Array.isArray(otherTabs) || otherTabs.length === 0) return;
 
       try {
-        openDot.dataset.busy = '1';
+        openBadge.dataset.busy = '1';
         const selfTabId = conversationPresence.getSelfTabId?.() ?? null;
         const result = await conversationPresence.focusConversation(conv.id, { excludeTabId: selfTabId });
         if (result?.status === 'ok') {
@@ -5732,10 +5769,9 @@ export function createChatHistoryUI(appContext) {
           showNotification?.({ message: '跳转失败', type: 'error', duration: 1800 });
         }
       } finally {
-        openDot.dataset.busy = '';
+        openBadge.dataset.busy = '';
       }
     });
-    item.appendChild(openDot);
 
     // 预览 tooltip 元信息：供 Alt 预览模式使用（按住 Alt 才展示）
     const hoverMeta = {

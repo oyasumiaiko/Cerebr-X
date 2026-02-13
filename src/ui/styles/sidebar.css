@@ -4837,36 +4837,6 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 .chat-history-item-main {
     flex: 1 1 auto;
     min-width: 0;
-    /* 右上角会渲染“已打开”绿点（绝对定位，不占布局），这里预留一点右侧空间避免与文字重叠 */
-    padding-right: 18px;
-}
-
-/* 会话“已打开”提示：右上角小绿点（不占布局空间） */
-.chat-history-open-dot {
-    position: absolute;
-    top: 8px;
-    right: 6px;
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    background: var(--cerebr-green);
-    border: 1px solid color-mix(in srgb, var(--cerebr-green) 62%, transparent);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--cerebr-bg-color) 88%, transparent);
-    padding: 0;
-    margin: 0;
-    opacity: 0;
-    pointer-events: none;
-    cursor: pointer;
-}
-
-.chat-history-open-dot.active {
-    opacity: 0.92;
-    pointer-events: auto;
-}
-
-.chat-history-open-dot:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--cerebr-green) 70%, white);
-    outline-offset: 2px;
 }
 
 /* 聊天记录条目预览 tooltip（替代浏览器原生 title tooltip） */
@@ -5035,14 +5005,20 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 
 .chat-history-item .info {
     font-size: smaller;
-    color: var(--cerebr-text-color);
+    color: color-mix(in srgb, var(--cerebr-text-color) 80%, transparent);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
 }
 
 .chat-history-item .info .info-content {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .chat-history-item .info .info-separator {
@@ -5082,16 +5058,30 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     gap: 3px;
 }
 
-.chat-history-item .info .info-streaming-wrap {
+.chat-history-item .info .info-status-badges {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.chat-history-item .info .info-status-badges[hidden] {
+    display: none !important;
+}
+
+.chat-history-item .info .info-streaming-wrap,
+.chat-history-item .info .info-open-wrap {
     display: inline-flex;
     align-items: center;
 }
 
-.chat-history-item .info .info-streaming-wrap[hidden] {
+.chat-history-item .info .info-streaming-wrap[hidden],
+.chat-history-item .info .info-open-wrap[hidden] {
     display: none !important;
 }
 
-.chat-history-item .info .info-streaming {
+.chat-history-item .info .info-streaming,
+.chat-history-item .info .info-open-state {
     display: inline-flex;
     align-items: center;
     gap: 5px;
@@ -5104,12 +5094,21 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     font-weight: 500;
 }
 
-.chat-history-item .info .info-streaming::before {
+.chat-history-item .info .info-streaming::before,
+.chat-history-item .info .info-open-state::before {
     content: '';
     width: 6px;
     height: 6px;
     border-radius: 50%;
     background: var(--cerebr-green);
+}
+
+.chat-history-item .info .info-open-state {
+    cursor: default;
+}
+
+.chat-history-item .info .info-open-state.is-jumpable {
+    cursor: pointer;
 }
 
 .chat-history-item .info .info-api-lock {
