@@ -907,30 +907,93 @@ export function createContextMenuManager(appContext) {
   }
 
   /**
+   * 创建“消息截图专用快照”：
+   * - 在离屏容器中克隆当前消息，避免直接改动可见 DOM 产生闪烁；
+   * - 在克隆节点中移除思考块（包含标题与正文），让布局自然回流；
+   * - 返回可供 dom-to-image 捕获的节点与准确尺寸。
+   *
+   * 设计说明：
+   * dom-to-image 的 filter 只会过滤克隆树节点，但默认画布尺寸仍基于传入原节点计算。
+   * 如果只用 filter 隐藏 thoughts-content，可能出现“内容没了但高度还在”的底部空白。
+   * 通过先构造离屏快照并将其作为捕获根节点，可以从根本上保证高度正确。
+   *
+   * @param {HTMLElement} messageElement
+   * @returns {{ node: HTMLElement, width: number, height: number, cleanup: Function }}
+   */
+  function createMessageScreenshotSnapshot(messageElement) {
+    const sourceRect = messageElement.getBoundingClientRect();
+    const fallbackWidth = Math.max(
+      1,
+      Math.ceil(sourceRect.width || messageElement.offsetWidth || messageElement.scrollWidth || 1)
+    );
+
+    const stagingHost = document.createElement('div');
+    stagingHost.style.position = 'fixed';
+    stagingHost.style.left = '-100000px';
+    stagingHost.style.top = '0';
+    stagingHost.style.pointerEvents = 'none';
+    stagingHost.style.opacity = '0';
+    stagingHost.style.zIndex = '-1';
+    stagingHost.style.contain = 'layout style paint';
+    stagingHost.style.width = `${fallbackWidth}px`;
+
+    const snapshotNode = messageElement.cloneNode(true);
+    if (!(snapshotNode instanceof HTMLElement)) {
+      throw new Error('消息截图快照创建失败：克隆节点类型无效');
+    }
+
+    // 复制当前消息的可见宽度，避免离屏环境因容器宽度变化导致换行与高度偏差。
+    snapshotNode.style.boxSizing = 'border-box';
+    snapshotNode.style.width = `${fallbackWidth}px`;
+    snapshotNode.style.maxWidth = `${fallbackWidth}px`;
+    snapshotNode.style.minWidth = `${fallbackWidth}px`;
+
+    // 截图快照不需要动画与过渡，强制静态化可避免捕获到中间帧。
+    snapshotNode.style.animation = 'none';
+    snapshotNode.style.transition = 'none';
+    snapshotNode.style.transform = 'none';
+    snapshotNode.style.opacity = '1';
+
+    // 根本修复：直接在快照树移除思考块，而不是在导出时做 filter。
+    snapshotNode.querySelectorAll('.thoughts-content').forEach((node) => node.remove());
+
+    stagingHost.appendChild(snapshotNode);
+    document.body.appendChild(stagingHost);
+
+    const rect = snapshotNode.getBoundingClientRect();
+    const width = Math.max(1, Math.ceil(Math.max(rect.width || 0, snapshotNode.scrollWidth || 0, fallbackWidth)));
+    const height = Math.max(1, Math.ceil(Math.max(rect.height || 0, snapshotNode.scrollHeight || 0)));
+
+    const cleanup = () => {
+      if (stagingHost.parentNode) {
+        stagingHost.parentNode.removeChild(stagingHost);
+      }
+    };
+
+    return {
+      node: snapshotNode,
+      width,
+      height,
+      cleanup
+    };
+  }
+
+  /**
    * 将消息元素复制为图片并复制到剪贴板
    */
   async function copyMessageAsImage() {
     if (currentMessageElement) {
+      let snapshot = null;
       try {
         // 显示加载状态
         const originalText = copyAsImageButton.innerHTML;
         copyAsImageButton.innerHTML = '<i class="far fa-spinner fa-spin"></i> 处理中...';
 
-        // 移除临时添加内边距的代码
-        // const originalPadding = currentMessageElement.style.padding;
-        // currentMessageElement.style.padding = '15px'; 
-        
-        // --- 1. 使用 dom-to-image 生成原始 Canvas ---
-        const originalCanvas = await domtoimage.toCanvas(currentMessageElement, {
-          // 不指定背景色，尝试捕获实际背景
-          // 需求：右键“复制为图片”时隐藏思考内容块，避免截图包含该区域。
-          filter: (node) => {
-            if (!(node instanceof Element)) return true;
-            if (node.classList?.contains('thoughts-content')) return false;
-            // 兼容：有些节点可能是 thoughts-content 的子孙节点
-            if (typeof node.closest === 'function' && node.closest('.thoughts-content')) return false;
-            return true;
-          }
+        // --- 1. 构建离屏快照（移除思考块）并生成原始 Canvas ---
+        snapshot = createMessageScreenshotSnapshot(currentMessageElement);
+        const originalCanvas = await domtoimage.toCanvas(snapshot.node, {
+          width: snapshot.width,
+          height: snapshot.height
         });
 
         // --- 2. 创建带边距的新 Canvas ---
@@ -1018,6 +1081,10 @@ export function createContextMenuManager(appContext) {
           copyAsImageButton.innerHTML = '<i class="far fa-image"></i> 复制为图片'; 
           hideContextMenu();
         }, 1000);
+      } finally {
+        if (snapshot?.cleanup) {
+          snapshot.cleanup();
+        }
       }
     }
   }
