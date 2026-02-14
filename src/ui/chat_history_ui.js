@@ -2657,6 +2657,7 @@ export function createChatHistoryUI(appContext) {
       if (!entry) continue;
 
       const messageId = normalizeThreadIdentifier(message?.id);
+      const anchorMessageId = normalizeThreadIdentifier(message?.threadAnchorId);
       const isHiddenSelection = !!message?.threadHiddenSelection;
       const timestamp = resolveConversationMessageTimestamp(message);
       const messagePlainText = summarizeThreadOverviewText(extractMessagePlainText(message), 56);
@@ -2671,6 +2672,9 @@ export function createChatHistoryUI(appContext) {
       }
       if (messageId) {
         entry.lastMessageId = messageId;
+      }
+      if (!entry.anchorMessageId && anchorMessageId) {
+        entry.anchorMessageId = anchorMessageId;
       }
 
       const rootMessageId = normalizeThreadIdentifier(message?.threadRootId);
@@ -2723,14 +2727,30 @@ export function createChatHistoryUI(appContext) {
       const displayMessageCount = item.visibleMessageCount > 0
         ? item.visibleMessageCount
         : item.messageCount;
+      const anchorNode = item.anchorMessageId ? messageMap.get(item.anchorMessageId) : null;
+      const anchorPreviewText = summarizeThreadOverviewText(extractMessagePlainText(anchorNode), 50);
       return {
         ...item,
         order: index + 1,
         displayMessageCount,
         displayText: item.selectionText || item.previewText || '（暂无划词文本）',
-        focusMessageId: item.focusMessageId || item.latestMessageId || item.lastMessageId || item.rootMessageId || ''
+        focusMessageId: item.focusMessageId || item.latestMessageId || item.lastMessageId || item.rootMessageId || '',
+        anchorPreviewText
       };
     });
+  }
+
+  function buildThreadOverviewSummaryLine(item) {
+    const countText = `共 ${Number(item?.displayMessageCount || 0)} 条`;
+    const activityTimestamp = Number(item?.latestTimestamp) || Number(item?.createdAt) || 0;
+    const activityText = activityTimestamp > 0
+      ? formatRelativeTime(new Date(activityTimestamp))
+      : '暂无活动';
+    const quoteText = summarizeThreadOverviewText(
+      item?.selectionText || item?.displayText || '',
+      36
+    ) || '（暂无划词引用）';
+    return `${countText} · ${activityText} · 「${quoteText}」`;
   }
 
   function createConversationThreadOverviewElement(conversation) {
@@ -2758,58 +2778,64 @@ export function createChatHistoryUI(appContext) {
     const list = document.createElement('div');
     list.className = 'conversation-thread-overview__list';
 
+    const groupedItems = [];
+    const groupIndexByAnchor = new Map();
     for (const item of items) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'conversation-thread-overview__item';
-      button.dataset.threadId = item.threadId;
-      if (item.focusMessageId) {
-        button.dataset.focusMessageId = item.focusMessageId;
+      const key = item.anchorMessageId || '__ungrouped__';
+      if (!groupIndexByAnchor.has(key)) {
+        groupIndexByAnchor.set(key, groupedItems.length);
+        groupedItems.push({
+          key,
+          anchorPreviewText: item.anchorPreviewText || '',
+          items: []
+        });
       }
-      button.title = item.selectionText || item.previewText || item.threadId;
-
-      const top = document.createElement('div');
-      top.className = 'conversation-thread-overview__item-top';
-
-      const tag = document.createElement('span');
-      tag.className = 'conversation-thread-overview__item-tag';
-      tag.textContent = `线程 ${item.order}`;
-
-      const text = document.createElement('span');
-      text.className = 'conversation-thread-overview__item-text';
-      text.textContent = item.displayText;
-
-      top.appendChild(tag);
-      top.appendChild(text);
-
-      const meta = document.createElement('div');
-      meta.className = 'conversation-thread-overview__item-meta';
-      const activityTimestamp = Number(item.latestTimestamp) || Number(item.createdAt) || 0;
-      const activityText = activityTimestamp > 0
-        ? formatRelativeTime(new Date(activityTimestamp))
-        : '暂无活动';
-      meta.textContent = `消息 ${item.displayMessageCount} · ${activityText}`;
-
-      button.appendChild(top);
-      button.appendChild(meta);
-
-      button.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const targetThreadId = button.dataset.threadId || '';
-        if (!targetThreadId) return;
-        const focusMessageId = button.dataset.focusMessageId || '';
-        const enterThread = services.selectionThreadManager?.enterThread;
-        if (typeof enterThread !== 'function') return;
-        Promise.resolve(enterThread(targetThreadId, focusMessageId ? { focusMessageId } : {}))
-          .catch((error) => {
-            console.warn('[chat_history_ui] 线程总览跳转失败', error);
-            showNotification?.({ message: '线程打开失败，请稍后重试', type: 'warning', duration: 1800 });
-          });
-      });
-
-      list.appendChild(button);
+      groupedItems[groupIndexByAnchor.get(key)].items.push(item);
     }
+
+    groupedItems.forEach((group, groupOffset) => {
+      const groupSection = document.createElement('div');
+      groupSection.className = 'conversation-thread-overview__group';
+
+      const groupHeader = document.createElement('div');
+      groupHeader.className = 'conversation-thread-overview__group-header';
+      const groupLabel = group.anchorPreviewText || '关联消息';
+      groupHeader.textContent = `消息 ${groupOffset + 1} · ${groupLabel} · ${group.items.length} 个线程`;
+      groupHeader.title = groupLabel;
+      groupSection.appendChild(groupHeader);
+
+      for (const item of group.items) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'conversation-thread-overview__item conversation-thread-overview__item--single-line';
+        button.dataset.threadId = item.threadId;
+        if (item.focusMessageId) {
+          button.dataset.focusMessageId = item.focusMessageId;
+        }
+        const summaryLine = buildThreadOverviewSummaryLine(item);
+        button.textContent = summaryLine;
+        button.title = summaryLine;
+
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const targetThreadId = button.dataset.threadId || '';
+          if (!targetThreadId) return;
+          const focusMessageId = button.dataset.focusMessageId || '';
+          const enterThread = services.selectionThreadManager?.enterThread;
+          if (typeof enterThread !== 'function') return;
+          Promise.resolve(enterThread(targetThreadId, focusMessageId ? { focusMessageId } : {}))
+            .catch((error) => {
+              console.warn('[chat_history_ui] 线程总览跳转失败', error);
+              showNotification?.({ message: '线程打开失败，请稍后重试', type: 'warning', duration: 1800 });
+            });
+        });
+
+        groupSection.appendChild(button);
+      }
+
+      list.appendChild(groupSection);
+    });
 
     wrapper.appendChild(header);
     wrapper.appendChild(list);

@@ -1129,7 +1129,28 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
 .conversation-thread-overview__list {
     display: flex;
     flex-direction: column;
+    gap: 8px;
+}
+
+.conversation-thread-overview__group {
+    display: flex;
+    flex-direction: column;
     gap: 6px;
+    padding-top: 2px;
+}
+
+.conversation-thread-overview__group + .conversation-thread-overview__group {
+    border-top: 1px dashed color-mix(in srgb, var(--cerebr-border-color) 65%, transparent);
+    padding-top: 8px;
+}
+
+.conversation-thread-overview__group-header {
+    font-size: 0.75em;
+    color: color-mix(in srgb, var(--cerebr-text-color) 72%, transparent);
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .conversation-thread-overview__item {
@@ -1150,6 +1171,16 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
     text-align: left;
     cursor: pointer;
     transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.conversation-thread-overview__item--single-line {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.8em;
+    line-height: 1.35;
+    padding: 6px 10px;
 }
 
 .conversation-thread-overview__item:hover {
