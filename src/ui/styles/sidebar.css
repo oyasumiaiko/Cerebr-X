@@ -5323,6 +5323,10 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     align-items: center;
 }
 
+.chat-history-item .info .info-open-wrap {
+    gap: 4px;
+}
+
 .chat-history-item .info .info-streaming-wrap[hidden],
 .chat-history-item .info .info-background-complete-wrap[hidden],
 .chat-history-item .info .info-open-wrap[hidden] {
@@ -5344,6 +5348,10 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     border: 1px solid color-mix(in srgb, var(--status-pill-color) 52%, transparent);
     white-space: nowrap;
     font-weight: 600;
+}
+
+.chat-history-item .info .info-open-state[hidden] {
+    display: none !important;
 }
 
 .chat-history-item .info .info-streaming::before {

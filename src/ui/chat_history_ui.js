@@ -5447,8 +5447,9 @@ export function createChatHistoryUI(appContext) {
   function updateConversationItemOpenTabUi(item, conversationId) {
     if (!item || !conversationId) return;
     const openWrap = item.querySelector('.info-open-wrap');
-    const openBadge = item.querySelector('.info-open-state');
-    if (!openWrap || !openBadge) return;
+    const openCurrentBadge = item.querySelector('.info-open-state-current');
+    const openElsewhereBadge = item.querySelector('.info-open-state-elsewhere');
+    if (!openWrap || !openCurrentBadge || !openElsewhereBadge) return;
 
     const { tabs, selfTabId, otherTabs } = getConversationOpenTabsState(conversationId);
     const isOpen = tabs.length > 0;
@@ -5459,41 +5460,71 @@ export function createChatHistoryUI(appContext) {
     if (!isOpen) {
       openWrap.hidden = true;
       openWrap.setAttribute('aria-hidden', 'true');
-      openBadge.classList.remove('is-jumpable');
-      openBadge.classList.remove('is-open-current');
-      openBadge.classList.remove('is-open-elsewhere');
-      openBadge.title = '';
-      openBadge.dataset.openStateKey = '';
-      openBadge.textContent = '已打开';
-      openBadge.setAttribute('aria-disabled', 'true');
+      openCurrentBadge.hidden = true;
+      openCurrentBadge.setAttribute('aria-hidden', 'true');
+      openCurrentBadge.title = '';
+      openCurrentBadge.dataset.openStateKey = '';
+      openCurrentBadge.setAttribute('aria-disabled', 'true');
+      openElsewhereBadge.hidden = true;
+      openElsewhereBadge.setAttribute('aria-hidden', 'true');
+      openElsewhereBadge.classList.remove('is-jumpable');
+      openElsewhereBadge.title = '';
+      openElsewhereBadge.dataset.openStateKey = '';
+      openElsewhereBadge.setAttribute('aria-disabled', 'true');
       refreshConversationItemStatusBadgeWrap(item);
       return;
     }
 
     const tooltip = buildOpenTabsTooltipText(tabs, selfTabId);
-    const nextTitle = isOpenElsewhere
+    const nextElsewhereTitle = isOpenElsewhere
       ? (tooltip ? `${tooltip}\n\n点击跳转到已打开的标签页` : '点击跳转到已打开的标签页')
-      : (tooltip || '该会话已在当前标签页打开');
-    const nextKey = `${tabs.length}:${isOpenElsewhere ? 1 : 0}:${isOpenInCurrentTab ? 1 : 0}`;
-    const nextBadgeText = isOpenElsewhere ? '已打开' : '当前打开';
+      : '';
+    const nextCurrentTitle = isOpenInCurrentTab
+      ? (tooltip || '该会话已在当前标签页打开')
+      : '';
 
-    // 性能/体验：避免在存在性快照频繁更新时重复写 title 导致浏览器 tooltip 抖动
-    if (openBadge.dataset.openStateKey !== nextKey) {
-      openBadge.dataset.openStateKey = nextKey;
-      openBadge.title = nextTitle;
-    } else if (openBadge.title !== nextTitle) {
-      openBadge.title = nextTitle;
-    }
+    const updateBadgeTooltip = (badge, key, title) => {
+      if (!badge) return;
+      if (badge.dataset.openStateKey !== key) {
+        badge.dataset.openStateKey = key;
+        badge.title = title;
+      } else if (badge.title !== title) {
+        badge.title = title;
+      }
+    };
 
-    openWrap.hidden = false;
-    openWrap.setAttribute('aria-hidden', 'false');
-    openBadge.classList.toggle('is-jumpable', isOpenElsewhere);
-    openBadge.classList.toggle('is-open-current', !isOpenElsewhere && isOpenInCurrentTab);
-    openBadge.classList.toggle('is-open-elsewhere', isOpenElsewhere);
-    if (openBadge.textContent !== nextBadgeText) {
-      openBadge.textContent = nextBadgeText;
+    openCurrentBadge.hidden = !isOpenInCurrentTab;
+    openCurrentBadge.setAttribute('aria-hidden', isOpenInCurrentTab ? 'false' : 'true');
+    if (isOpenInCurrentTab) {
+      updateBadgeTooltip(
+        openCurrentBadge,
+        `current:${tabs.length}:${isOpenElsewhere ? 1 : 0}`,
+        nextCurrentTitle
+      );
+    } else {
+      openCurrentBadge.title = '';
+      openCurrentBadge.dataset.openStateKey = '';
     }
-    openBadge.setAttribute('aria-disabled', isOpenElsewhere ? 'false' : 'true');
+    openCurrentBadge.setAttribute('aria-disabled', 'true');
+
+    openElsewhereBadge.hidden = !isOpenElsewhere;
+    openElsewhereBadge.setAttribute('aria-hidden', isOpenElsewhere ? 'false' : 'true');
+    openElsewhereBadge.classList.toggle('is-jumpable', isOpenElsewhere);
+    if (isOpenElsewhere) {
+      updateBadgeTooltip(
+        openElsewhereBadge,
+        `elsewhere:${otherTabs.length}:${isOpenInCurrentTab ? 1 : 0}`,
+        nextElsewhereTitle
+      );
+    } else {
+      openElsewhereBadge.title = '';
+      openElsewhereBadge.dataset.openStateKey = '';
+    }
+    openElsewhereBadge.setAttribute('aria-disabled', isOpenElsewhere ? 'false' : 'true');
+
+    const hasAnyOpenBadge = isOpenInCurrentTab || isOpenElsewhere;
+    openWrap.hidden = !hasAnyOpenBadge;
+    openWrap.setAttribute('aria-hidden', hasAnyOpenBadge ? 'false' : 'true');
     refreshConversationItemStatusBadgeWrap(item);
   }
 
@@ -6395,12 +6426,28 @@ export function createChatHistoryUI(appContext) {
     openWrap.className = 'info-open-wrap';
     openWrap.hidden = true;
     openWrap.setAttribute('aria-hidden', 'true');
-    const openBadge = createInfoSpan('info-open-state', '已打开');
-    openBadge.dataset.openStateKey = '';
-    openBadge.setAttribute('role', 'button');
-    openBadge.setAttribute('aria-label', '该会话已在标签页打开');
-    openBadge.setAttribute('aria-disabled', 'true');
-    openWrap.appendChild(openBadge);
+    const openCurrentBadge = createInfoSpan(
+      'info-open-state info-open-state-current is-open-current',
+      '当前打开'
+    );
+    openCurrentBadge.hidden = true;
+    openCurrentBadge.setAttribute('aria-hidden', 'true');
+    openCurrentBadge.dataset.openStateKey = '';
+    openCurrentBadge.setAttribute('aria-label', '该会话已在当前标签页打开');
+    openCurrentBadge.setAttribute('aria-disabled', 'true');
+    openWrap.appendChild(openCurrentBadge);
+
+    const openElsewhereBadge = createInfoSpan(
+      'info-open-state info-open-state-elsewhere is-open-elsewhere',
+      '已打开'
+    );
+    openElsewhereBadge.hidden = true;
+    openElsewhereBadge.setAttribute('aria-hidden', 'true');
+    openElsewhereBadge.dataset.openStateKey = '';
+    openElsewhereBadge.setAttribute('role', 'button');
+    openElsewhereBadge.setAttribute('aria-label', '该会话已在其它标签页打开');
+    openElsewhereBadge.setAttribute('aria-disabled', 'true');
+    openWrap.appendChild(openElsewhereBadge);
     statusBadges.appendChild(openWrap);
 
     infoContent.appendChild(statusBadges);
@@ -6434,18 +6481,18 @@ export function createChatHistoryUI(appContext) {
 
     item.appendChild(mainDiv);
     // “已打开”状态徽标：放在信息行末尾，保持与“生成中”一致的视觉风格。
-    openBadge.addEventListener('click', async (e) => {
+    openElsewhereBadge.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
       if (!conversationPresence?.focusConversation) return;
-      if (openBadge.dataset.busy === '1') return;
+      if (openElsewhereBadge.dataset.busy === '1') return;
 
       // 只有当“其它标签页”确实存在时才跳转（避免跳回当前标签页造成困惑）
       const { otherTabs } = getConversationOpenTabsState(conv.id);
       if (!Array.isArray(otherTabs) || otherTabs.length === 0) return;
 
       try {
-        openBadge.dataset.busy = '1';
+        openElsewhereBadge.dataset.busy = '1';
         const selfTabId = conversationPresence.getSelfTabId?.() ?? null;
         const result = await conversationPresence.focusConversation(conv.id, { excludeTabId: selfTabId });
         if (result?.status === 'ok') {
@@ -6456,7 +6503,7 @@ export function createChatHistoryUI(appContext) {
           showNotification?.({ message: '跳转失败', type: 'error', duration: 1800 });
         }
       } finally {
-        openBadge.dataset.busy = '';
+        openElsewhereBadge.dataset.busy = '';
       }
     });
 
