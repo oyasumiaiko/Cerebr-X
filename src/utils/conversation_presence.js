@@ -44,6 +44,8 @@ export function createConversationPresence(appContext) {
   let openConversations = {};
   let pendingEmptySnapshotTimer = null;
   let pendingEmptySnapshot = null;
+  let pendingEmptySnapshotSeq = 0;
+  let lastSnapshotSeq = 0;
 
   const listeners = new Set();
   let reconnectTimer = null;
@@ -84,25 +86,41 @@ export function createConversationPresence(appContext) {
       pendingEmptySnapshotTimer = null;
     }
     pendingEmptySnapshot = null;
+    pendingEmptySnapshotSeq = 0;
   }
 
   function applySnapshot(snapshot) {
     const nextSnapshot = safeObject(snapshot?.openConversations || snapshot);
+    const nextSeqRaw = Number(snapshot?.snapshotSeq);
+    const hasNextSeq = Number.isFinite(nextSeqRaw) && nextSeqRaw >= 0;
+    const nextSeq = hasNextSeq ? nextSeqRaw : lastSnapshotSeq;
+
+    if (hasNextSeq && nextSeq < lastSnapshotSeq) {
+      return;
+    }
+    if (nextSeq > lastSnapshotSeq) {
+      lastSnapshotSeq = nextSeq;
+    }
+
     const hasCurrentEntries = hasOpenConversationEntries(openConversations);
     const hasNextEntries = hasOpenConversationEntries(nextSnapshot);
 
-    // 关键防闪烁：
-    // - SW 重启/Port 重连时，常先收到一次空快照，随后才会收到真实快照；
-    // - 这里对“非空 -> 空”的变化做短暂延迟，若窗口内收到非空快照则直接覆盖。
     if (!hasNextEntries && hasCurrentEntries) {
       pendingEmptySnapshot = nextSnapshot;
+      pendingEmptySnapshotSeq = nextSeq;
       if (pendingEmptySnapshotTimer) {
         clearTimeout(pendingEmptySnapshotTimer);
       }
       pendingEmptySnapshotTimer = setTimeout(() => {
         pendingEmptySnapshotTimer = null;
+        if (pendingEmptySnapshotSeq && pendingEmptySnapshotSeq < lastSnapshotSeq) {
+          pendingEmptySnapshot = null;
+          pendingEmptySnapshotSeq = 0;
+          return;
+        }
         openConversations = safeObject(pendingEmptySnapshot);
         pendingEmptySnapshot = null;
+        pendingEmptySnapshotSeq = 0;
         emitChange();
       }, EMPTY_SNAPSHOT_GUARD_MS);
       return;

@@ -45,6 +45,16 @@ const CONVERSATION_PRESENCE_PORT_NAME = 'cerebr-conversation-presence';
 const conversationPresencePorts = new Set();
 /** @type {Map<chrome.runtime.Port, ConversationPresenceInfo>} */
 const conversationPresenceByPort = new Map();
+const PRESENCE_DISCONNECT_GRACE_MS = 2000;
+const conversationPresenceDisconnectTimers = new Map();
+let conversationPresenceSnapshotSeq = 0;
+
+function getConversationPresenceSnapshotSeq(bump = false) {
+  if (bump) {
+    conversationPresenceSnapshotSeq += 1;
+  }
+  return conversationPresenceSnapshotSeq;
+}
 
 function normalizeConversationId(value) {
   if (typeof value !== 'string') return null;
@@ -101,11 +111,13 @@ function buildOpenConversationSnapshot(conversationIds = null) {
 
 function broadcastOpenConversationSnapshot() {
   const snapshot = buildOpenConversationSnapshot(null);
+  const snapshotSeq = getConversationPresenceSnapshotSeq(true);
   for (const port of conversationPresencePorts) {
     try {
       port.postMessage({
         type: 'OPEN_CONVERSATIONS_SNAPSHOT',
         openConversations: snapshot,
+        snapshotSeq,
         timestamp: Date.now()
       });
     } catch (_) {}
@@ -113,6 +125,11 @@ function broadcastOpenConversationSnapshot() {
 }
 
 function removeConversationPresencePort(port) {
+  const timer = conversationPresenceDisconnectTimers.get(port);
+  if (timer) {
+    clearTimeout(timer);
+    conversationPresenceDisconnectTimers.delete(port);
+  }
   try { conversationPresencePorts.delete(port); } catch (_) {}
   try { conversationPresenceByPort.delete(port); } catch (_) {}
 }
@@ -135,8 +152,12 @@ function registerConversationPresencePort(port) {
   conversationPresenceByPort.set(port, info);
 
   port.onDisconnect.addListener(() => {
-    removeConversationPresencePort(port);
-    broadcastOpenConversationSnapshot();
+    const timer = setTimeout(() => {
+      conversationPresenceDisconnectTimers.delete(port);
+      removeConversationPresencePort(port);
+      broadcastOpenConversationSnapshot();
+    }, PRESENCE_DISCONNECT_GRACE_MS);
+    conversationPresenceDisconnectTimers.set(port, timer);
   });
 
   port.onMessage.addListener((message) => {
@@ -173,6 +194,7 @@ function registerConversationPresencePort(port) {
       windowId: info.windowId,
       frameId: info.frameId,
       openConversations: buildOpenConversationSnapshot(null),
+      snapshotSeq: getConversationPresenceSnapshotSeq(false),
       timestamp: Date.now()
     });
   } catch (_) {}
@@ -331,6 +353,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({
       status: 'ok',
       openConversations: snapshot,
+      snapshotSeq: getConversationPresenceSnapshotSeq(false),
       requesterTabId: Number.isFinite(Number(sender?.tab?.id)) ? Number(sender.tab.id) : null,
       timestamp: Date.now()
     });
