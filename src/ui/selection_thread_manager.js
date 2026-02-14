@@ -77,6 +77,7 @@ export function createSelectionThreadManager(appContext) {
   const THREAD_LAYOUT_STORAGE_KEY = 'thread_layout_prefs';
   const THREAD_LAYOUT_SYNC_MIN_INTERVAL_MS = 15000;
   const THREAD_LAYOUT_SYNC_DEBOUNCE_MS = 800;
+  const THREAD_ANCHOR_VIEWPORT_CENTER = 0.5;
   let threadLayoutPrefsPromise = null;
   const threadLayoutSyncState = {
     timer: null,
@@ -964,6 +965,17 @@ export function createSelectionThreadManager(appContext) {
     return raw.split(',').map(item => item.trim()).filter(Boolean);
   }
 
+  function syncActiveThreadHighlightState() {
+    if (!chatContainer) return;
+    const activeThreadId = state.activeThreadId || '';
+    const highlights = chatContainer.querySelectorAll('.thread-highlight');
+    highlights.forEach((node) => {
+      const threadIds = parseThreadIdsFromHighlight(node);
+      const isActive = !!(activeThreadId && threadIds.includes(activeThreadId));
+      node.classList.toggle('thread-highlight--active-thread', isActive);
+    });
+  }
+
   function buildSelectionInfoFromHighlight(target) {
     const selectionText = target?.dataset?.selectionText || target?.textContent || '';
     const matchIndex = Number.isFinite(Number(target?.dataset?.matchIndex))
@@ -1789,6 +1801,7 @@ export function createSelectionThreadManager(appContext) {
     ranges.forEach((rangeGroup) => {
       applyHighlightRange(textContainer, rangeGroup);
     });
+    syncActiveThreadHighlightState();
   }
 
   function clearSelectionRanges() {
@@ -2267,26 +2280,20 @@ export function createSelectionThreadManager(appContext) {
     const normalizedOptions = (options && typeof options === 'object') ? options : {};
     const preferredPercent = Number.isFinite(normalizedOptions.preferredViewportPercent)
       ? clampNumber(normalizedOptions.preferredViewportPercent, 0, 1)
-      : null;
+      : THREAD_ANCHOR_VIEWPORT_CENTER;
 
     // 进入线程时让左侧主聊天尽量对齐到“线程对应的高亮位置”，找不到高亮时回退到锚点消息。
     const applyScroll = () => {
       if (!chatContainer || !targetElement) return;
       const containerRect = chatContainer.getBoundingClientRect();
       const targetRect = targetElement.getBoundingClientRect();
-      const style = window.getComputedStyle(chatContainer);
       const delta = targetRect.top - containerRect.top;
       const baseScrollTop = Number.isFinite(chatContainer.scrollTop) ? chatContainer.scrollTop : 0;
-      const rawTop = preferredPercent == null
-        ? (() => {
-            const paddingTop = parseFloat(style.paddingTop) || 0;
-            return baseScrollTop + delta - paddingTop;
-          })()
-        : (() => {
-            const containerHeight = containerRect.height || chatContainer.clientHeight || 0;
-            const desiredOffset = containerHeight * preferredPercent;
-            return baseScrollTop + delta - desiredOffset;
-          })();
+      const rawTop = (() => {
+        const containerHeight = containerRect.height || chatContainer.clientHeight || 0;
+        const desiredOffset = containerHeight * preferredPercent;
+        return baseScrollTop + delta - desiredOffset;
+      })();
       const maxTop = Math.max(0, chatContainer.scrollHeight - chatContainer.clientHeight);
       const nextTop = Math.max(0, Math.min(rawTop, maxTop));
       chatContainer.scrollTo({ top: nextTop, behavior: 'auto' });
@@ -2319,15 +2326,15 @@ export function createSelectionThreadManager(appContext) {
       showNotification?.({ message: '未找到对应的划词对话', type: 'warning' });
       return false;
     }
-    const anchorViewportSnapshot = captureMainChatAnchorViewportSnapshot(threadId, info.anchorMessageId);
     state.activeThreadId = threadId;
     state.activeAnchorMessageId = info.anchorMessageId;
     state.activeSelectionText = info.annotation?.selectionText || '';
+    syncActiveThreadHighlightState();
     document.body.classList.add('thread-mode-active');
     updateThreadPanelTitle(state.activeSelectionText);
     applyThreadLayout();
     scrollMainChatToThreadAnchor(threadId, info.anchorMessageId, {
-      preferredViewportPercent: anchorViewportSnapshot?.viewportPercent
+      preferredViewportPercent: THREAD_ANCHOR_VIEWPORT_CENTER
     });
     await renderThreadMessages(threadId, options);
     return true;
@@ -2437,6 +2444,7 @@ export function createSelectionThreadManager(appContext) {
     state.activeThreadId = null;
     state.activeAnchorMessageId = null;
     state.activeSelectionText = '';
+    syncActiveThreadHighlightState();
     document.body.classList.remove('thread-mode-active');
     if (threadPanel) threadPanel.setAttribute('aria-hidden', 'true');
     if (threadContainer) threadContainer.innerHTML = '';

@@ -1327,6 +1327,18 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
     background-color: color-mix(in srgb, var(--cerebr-highlight) 18%, transparent);
 }
 
+/* 当前正在查看的线程高亮：与普通划词高亮区分，便于快速确认“当前线程锚点”。 */
+.thread-highlight.thread-highlight--active-thread {
+    color: color-mix(in srgb, var(--cerebr-highlight) 88%, #ffffff 12%);
+    background-color: color-mix(in srgb, var(--cerebr-highlight) 28%, transparent);
+    text-decoration-style: solid;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--cerebr-highlight) 46%, transparent);
+}
+
+.thread-highlight.thread-highlight--active-thread:hover {
+    background-color: color-mix(in srgb, var(--cerebr-highlight) 34%, transparent);
+}
+
 /* 侧栏模式：隐藏锚点之后的消息 */
 .thread-hidden-message {
     display: none !important;
