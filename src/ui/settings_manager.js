@@ -18,7 +18,6 @@ import { queueStorageSet, queueStoragePrime } from '../utils/storage_write_queue
  * @param {HTMLElement} appContext.dom.scaleFactorSlider - 缩放比例滑块元素
  * @param {HTMLElement} appContext.dom.scaleValueDisplay - 缩放比例显示值元素
  * @param {HTMLElement} appContext.dom.autoScrollSwitch - 自动滚动开关元素
- * @param {HTMLElement} appContext.dom.clearOnSearchSwitch - 划词搜索清空聊天开关元素
  * @param {HTMLElement} appContext.dom.sendChatHistorySwitch - 发送聊天历史开关元素
  * @param {HTMLElement} appContext.dom.sidebarPositionSwitch - 侧边栏位置开关元素
  * @param {HTMLElement} appContext.dom.stopAtTopSwitch - 滚动到顶部时停止开关元素
@@ -50,7 +49,6 @@ export function createSettingsManager(appContext) {
   const scaleFactorSlider = dom.scaleFactor;
   const scaleValueDisplay = dom.scaleValue;
   const autoScrollSwitch = dom.autoScrollSwitch;
-  const clearOnSearchSwitch = dom.clearOnSearchSwitch;
   const sendChatHistorySwitch = dom.sendChatHistorySwitch;
   const autoRetrySwitch = dom.autoRetrySwitch;
   const sidebarPositionSwitch = dom.sidebarPositionSwitch;
@@ -95,7 +93,6 @@ export function createSettingsManager(appContext) {
     lineHeight: 1.5, // Added for better text readability control
     chatWidth: 100, // Percentage of sidebar width
     autoScroll: true,
-    clearOnSearch: true, // This might be specific to a search feature, not a general setting
     shouldSendChatHistory: true,
     // 对话标题生成：默认关闭，避免未配置时触发额外请求
     autoGenerateConversationTitle: false,
@@ -565,17 +562,6 @@ export function createSettingsManager(appContext) {
       group: 'behavior',
       defaultValue: DEFAULT_SETTINGS.stopAtTop,
       apply: (v) => applyStopAtTop(v)
-    },
-    // 划词搜索清空聊天
-    {
-      uiHidden: true,
-      key: 'clearOnSearch',
-      type: 'toggle',
-      id: 'clear-on-search-switch',
-      label: '划词搜索时清空聊天',
-      group: 'behavior',
-      defaultValue: DEFAULT_SETTINGS.clearOnSearch,
-      apply: (v) => applyClearOnSearch(v)
     },
     // 发送聊天历史
     {
@@ -2950,14 +2936,6 @@ export function createSettingsManager(appContext) {
     }
   }
   
-  // 应用划词搜索清空聊天设置
-  function applyClearOnSearch(enabled) {
-    // 更新UI元素
-    if (clearOnSearchSwitch) {
-      clearOnSearchSwitch.checked = enabled;
-    }
-  }
-  
   // 应用发送聊天历史设置
   function applySendChatHistory(enabled) {
     // 更新UI元素
@@ -3206,8 +3184,6 @@ export function createSettingsManager(appContext) {
   // 设置滚动到顶部时停止
   function setStopAtTop(enabled) { setSetting('stopAtTop', enabled); }
   
-  // 设置划词搜索清空聊天
-  function setClearOnSearch(enabled) { setSetting('clearOnSearch', enabled); }
   
   // 设置发送聊天历史
   function setSendChatHistory(enabled) { setSetting('shouldSendChatHistory', enabled); }
@@ -3289,7 +3265,6 @@ export function createSettingsManager(appContext) {
     setScaleFactor,
     setAutoScroll,
     setStopAtTop,
-    setClearOnSearch,
     setSendChatHistory,
     setAutoRetry,
     setSidebarPosition,

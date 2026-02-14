@@ -4592,12 +4592,6 @@ export function createMessageSender(appContext) {
       const prompts = promptSettingsManager.getPrompts();
 
       if (selectedText) {
-        // 检查是否需要清空聊天记录
-        // 统一改为通过 settingsManager 获取，避免分散读取存储
-        const clearOnSearch = settingsManager?.getSetting('clearOnSearch');
-        if (clearOnSearch !== false) { // 默认为true
-          await chatHistoryUI.clearChatHistory();
-        }
 
         // 根据模型名称决定使用哪个提示词
         // forceQuery为true时, 强制使用 'query' 提示词
