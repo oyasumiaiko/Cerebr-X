@@ -2805,7 +2805,7 @@ export function createChatHistoryUI(appContext) {
       const groupHeader = document.createElement('div');
       groupHeader.className = 'conversation-thread-overview__group-header';
       const groupLabel = group.anchorPreviewText || '关联消息';
-      groupHeader.textContent = `消息 ${groupOffset + 1} · ${groupLabel} · ${group.items.length} 个线程`;
+      groupHeader.textContent = `${groupLabel} · ${group.items.length} 个线程`;
       groupHeader.title = groupLabel;
       groupSection.appendChild(groupHeader);
 
