@@ -5433,6 +5433,25 @@ export function createChatHistoryUI(appContext) {
     return lines.join('\n');
   }
 
+  function buildOtherOpenTabsTooltipText(otherTabs) {
+    const list = Array.isArray(otherTabs) ? otherTabs : [];
+    if (list.length === 0) return '';
+
+    const lines = [`已在 ${list.length} 个其他标签页打开`];
+    const maxLines = Math.min(6, list.length);
+    for (let i = 0; i < maxLines; i++) {
+      const t = list[i] || {};
+      const tabId = Number.isFinite(Number(t.tabId)) ? Number(t.tabId) : null;
+      const title = typeof t.title === 'string' ? t.title.trim() : '';
+      const url = typeof t.url === 'string' ? t.url.trim() : '';
+      const main = title || url || (tabId !== null ? `tab ${tabId}` : 'tab');
+      lines.push(`其它：${main}`);
+      if (title && url && url !== title) lines.push(url);
+    }
+    if (list.length > maxLines) lines.push(`… 还有 ${list.length - maxLines} 个标签页`);
+    return lines.join('\n');
+  }
+
   function getConversationOpenTabsState(conversationId) {
     if (!conversationPresence?.getConversationTabs) return { tabs: [], selfTabId: null, otherTabs: [] };
     const tabs = conversationPresence.getConversationTabs(conversationId) || [];
@@ -5476,8 +5495,9 @@ export function createChatHistoryUI(appContext) {
     }
 
     const tooltip = buildOpenTabsTooltipText(tabs, selfTabId);
+    const otherTabsTooltip = buildOtherOpenTabsTooltipText(otherTabs);
     const nextElsewhereTitle = isOpenElsewhere
-      ? (tooltip ? `${tooltip}\n\n点击跳转到已打开的标签页` : '点击跳转到已打开的标签页')
+      ? (otherTabsTooltip ? `${otherTabsTooltip}\n\n点击跳转到已打开的标签页` : '点击跳转到已打开的标签页')
       : '';
     const nextCurrentTitle = isOpenInCurrentTab
       ? (tooltip || '该会话已在当前标签页打开')
