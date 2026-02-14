@@ -73,6 +73,7 @@ export function createChatHistoryUI(appContext) {
   let threadOverviewDrawerPanel = null;
   let threadOverviewHasContent = false;
   let threadOverviewExpanded = false;
+  let threadOverviewPinned = false;
   let threadOverviewHandleVisible = false;
   let threadOverviewDrawerEventsBound = false;
   let threadOverviewDrawerResizeObserver = null;
@@ -2861,16 +2862,18 @@ export function createChatHistoryUI(appContext) {
     if (!threadOverviewDrawer || !threadOverviewDrawerHandle || !threadOverviewDrawerPanel) return;
     const hasContent = !!threadOverviewHasContent;
     const isOpen = hasContent && threadOverviewExpanded;
+    const isPinned = hasContent && threadOverviewPinned && isOpen;
     const showHandle = hasContent && (threadOverviewHandleVisible || isOpen);
 
     threadOverviewDrawer.classList.toggle('is-available', hasContent);
     threadOverviewDrawer.classList.toggle('is-open', isOpen);
+    threadOverviewDrawer.classList.toggle('is-pinned', isPinned);
     threadOverviewDrawer.classList.toggle('is-handle-visible', showHandle);
     threadOverviewDrawer.setAttribute('aria-hidden', hasContent ? 'false' : 'true');
 
     threadOverviewDrawerHandle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-    threadOverviewDrawerHandle.setAttribute('aria-label', isOpen ? '收起线程抽屉' : '展开线程抽屉');
-    threadOverviewDrawerHandle.title = isOpen ? '收起线程抽屉' : '展开线程抽屉';
+    threadOverviewDrawerHandle.setAttribute('aria-label', isOpen ? '收起线程抽屉' : '展开并固定线程抽屉');
+    threadOverviewDrawerHandle.title = isOpen ? '收起线程抽屉' : '展开并固定线程抽屉';
     threadOverviewDrawerPanel.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
   }
 
@@ -2882,13 +2885,13 @@ export function createChatHistoryUI(appContext) {
     syncThreadOverviewDrawerState();
   }
 
-  function setThreadOverviewExpanded(expanded) {
+  function setThreadOverviewExpanded(expanded, options = {}) {
     const nextExpanded = !!expanded && threadOverviewHasContent;
     if (threadOverviewExpanded === nextExpanded) return;
+    const keepHandleVisible = options?.keepHandleVisible === true;
     threadOverviewExpanded = nextExpanded;
-    if (!threadOverviewExpanded) {
-      // 关闭后保留标记可见，允许用户连续点击同一位置再次展开。
-      threadOverviewHandleVisible = !!threadOverviewHasContent;
+    if (!threadOverviewExpanded && !keepHandleVisible) {
+      threadOverviewHandleVisible = false;
     }
     syncThreadOverviewDrawerGeometry();
     syncThreadOverviewDrawerState();
@@ -2910,6 +2913,10 @@ export function createChatHistoryUI(appContext) {
     // 仅在鼠标靠近主聊天顶部时显示“下拉标记”，避免常驻占位影响阅读。
     chatContainer.addEventListener('mousemove', (event) => {
       if (!threadOverviewHasContent) return;
+      if (threadOverviewPinned) {
+        setThreadOverviewHandleVisible(true);
+        return;
+      }
       if (threadOverviewExpanded) {
         setThreadOverviewHandleVisible(true);
         return;
@@ -2919,12 +2926,12 @@ export function createChatHistoryUI(appContext) {
     }, { passive: true });
 
     chatContainer.addEventListener('mouseleave', () => {
-      if (threadOverviewExpanded) return;
+      if (threadOverviewPinned || threadOverviewExpanded) return;
       setThreadOverviewHandleVisible(false);
     });
 
     chatContainer.addEventListener('scroll', () => {
-      if (threadOverviewExpanded) return;
+      if (threadOverviewPinned || threadOverviewExpanded) return;
       setThreadOverviewHandleVisible(false);
     }, { passive: true });
 
@@ -2972,14 +2979,25 @@ export function createChatHistoryUI(appContext) {
     handle.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      setThreadOverviewExpanded(!threadOverviewExpanded);
+      if (!threadOverviewHasContent) return;
+      if (threadOverviewPinned) {
+        threadOverviewPinned = false;
+        threadOverviewHandleVisible = true;
+        setThreadOverviewExpanded(false, { keepHandleVisible: true });
+        return;
+      }
+      threadOverviewPinned = true;
+      threadOverviewHandleVisible = true;
+      setThreadOverviewExpanded(true, { keepHandleVisible: true });
     });
     handle.addEventListener('mouseenter', () => {
       if (!threadOverviewHasContent) return;
       setThreadOverviewHandleVisible(true);
+      if (threadOverviewPinned) return;
+      setThreadOverviewExpanded(true, { keepHandleVisible: true });
     });
     handle.addEventListener('mouseleave', () => {
-      if (threadOverviewExpanded) return;
+      if (threadOverviewPinned || threadOverviewExpanded) return;
       setThreadOverviewHandleVisible(false);
     });
 
@@ -2990,6 +3008,13 @@ export function createChatHistoryUI(appContext) {
     drawer.appendChild(handle);
     drawer.appendChild(panel);
     chatLayout.appendChild(drawer);
+
+    // 悬停展开：鼠标离开整个抽屉区域时自动收起（仅对未固定状态生效）。
+    drawer.addEventListener('mouseleave', () => {
+      if (!threadOverviewHasContent || threadOverviewPinned) return;
+      setThreadOverviewExpanded(false);
+      setThreadOverviewHandleVisible(false);
+    });
 
     threadOverviewDrawer = drawer;
     threadOverviewDrawerHandle = handle;
@@ -3005,6 +3030,7 @@ export function createChatHistoryUI(appContext) {
   function clearThreadOverviewDrawer() {
     threadOverviewHasContent = false;
     threadOverviewExpanded = false;
+    threadOverviewPinned = false;
     threadOverviewHandleVisible = false;
     if (threadOverviewDrawerPanel) {
       threadOverviewDrawerPanel.innerHTML = '';
@@ -3025,7 +3051,10 @@ export function createChatHistoryUI(appContext) {
     threadOverviewDrawerPanel.innerHTML = '';
     threadOverviewDrawerPanel.appendChild(overviewElement);
     threadOverviewHasContent = true;
-    if (threadOverviewExpanded) {
+    if (threadOverviewPinned) {
+      threadOverviewExpanded = true;
+      threadOverviewHandleVisible = true;
+    } else if (threadOverviewExpanded) {
       threadOverviewHandleVisible = true;
     } else {
       threadOverviewHandleVisible = false;
