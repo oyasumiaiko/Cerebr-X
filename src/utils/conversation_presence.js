@@ -15,6 +15,8 @@
  */
 
 const PRESENCE_PORT_NAME = 'cerebr-conversation-presence';
+// 防抖窗口：用于吞掉 Service Worker 重连瞬间的空快照，避免"已打开"徽章闪烁。
+const EMPTY_SNAPSHOT_GUARD_MS = 1200;
 
 function normalizeConversationId(value) {
   if (typeof value !== 'string') return null;
@@ -40,6 +42,8 @@ export function createConversationPresence(appContext) {
   let selfTabIdConfirmed = false;
   let activeConversationId = null;
   let openConversations = {};
+  let pendingEmptySnapshotTimer = null;
+  let pendingEmptySnapshot = null;
 
   const listeners = new Set();
   let reconnectTimer = null;
@@ -64,8 +68,48 @@ export function createConversationPresence(appContext) {
     }
   }
 
+  function hasOpenConversationEntries(snapshot) {
+    const obj = safeObject(snapshot);
+    const keys = Object.keys(obj);
+    for (let i = 0; i < keys.length; i += 1) {
+      const list = obj[keys[i]];
+      if (Array.isArray(list) && list.length > 0) return true;
+    }
+    return false;
+  }
+
+  function clearPendingEmptySnapshot() {
+    if (pendingEmptySnapshotTimer) {
+      clearTimeout(pendingEmptySnapshotTimer);
+      pendingEmptySnapshotTimer = null;
+    }
+    pendingEmptySnapshot = null;
+  }
+
   function applySnapshot(snapshot) {
-    openConversations = safeObject(snapshot?.openConversations || snapshot);
+    const nextSnapshot = safeObject(snapshot?.openConversations || snapshot);
+    const hasCurrentEntries = hasOpenConversationEntries(openConversations);
+    const hasNextEntries = hasOpenConversationEntries(nextSnapshot);
+
+    // 关键防闪烁：
+    // - SW 重启/Port 重连时，常先收到一次空快照，随后才会收到真实快照；
+    // - 这里对“非空 -> 空”的变化做短暂延迟，若窗口内收到非空快照则直接覆盖。
+    if (!hasNextEntries && hasCurrentEntries) {
+      pendingEmptySnapshot = nextSnapshot;
+      if (pendingEmptySnapshotTimer) {
+        clearTimeout(pendingEmptySnapshotTimer);
+      }
+      pendingEmptySnapshotTimer = setTimeout(() => {
+        pendingEmptySnapshotTimer = null;
+        openConversations = safeObject(pendingEmptySnapshot);
+        pendingEmptySnapshot = null;
+        emitChange();
+      }, EMPTY_SNAPSHOT_GUARD_MS);
+      return;
+    }
+
+    clearPendingEmptySnapshot();
+    openConversations = nextSnapshot;
     emitChange();
   }
 
@@ -183,6 +227,7 @@ export function createConversationPresence(appContext) {
 
     port.onDisconnect.addListener(() => {
       port = null;
+      clearPendingEmptySnapshot();
       scheduleReconnect();
     });
 
