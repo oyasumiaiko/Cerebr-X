@@ -1022,12 +1022,83 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
     white-space: pre-wrap;
 }
 
-/* 聊天顶部线程总览：集中展示当前会话的全部划词线程入口。 */
+/* 主聊天顶部线程抽屉：通过“边缘下拉标记”展开，不占用消息列表首行空间。 */
+.conversation-thread-overview-drawer {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: min(760px, calc(100% - 26px));
+    transform: translateX(-50%);
+    z-index: 9;
+    pointer-events: none;
+}
+
+.conversation-thread-overview-drawer__handle {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    height: 18px;
+    margin: 0 auto;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 68%, transparent);
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+    background: color-mix(in srgb, var(--cerebr-input-bg) 93%, transparent);
+    color: color-mix(in srgb, var(--cerebr-text-color) 72%, transparent);
+    box-shadow: 0 6px 12px color-mix(in srgb, #000 16%, transparent);
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity 0.16s ease, transform 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+    cursor: pointer;
+}
+
+.conversation-thread-overview-drawer__handle:hover {
+    color: var(--cerebr-highlight);
+    border-color: color-mix(in srgb, var(--cerebr-highlight) 56%, transparent);
+}
+
+.conversation-thread-overview-drawer__handle i {
+    font-size: 0.72rem;
+    transition: transform 0.16s ease;
+}
+
+.conversation-thread-overview-drawer.is-handle-visible .conversation-thread-overview-drawer__handle,
+.conversation-thread-overview-drawer.is-open .conversation-thread-overview-drawer__handle {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.conversation-thread-overview-drawer.is-open .conversation-thread-overview-drawer__handle i {
+    transform: rotate(180deg);
+}
+
+.conversation-thread-overview-drawer__panel {
+    margin-top: 6px;
+    opacity: 0;
+    transform: translateY(-10px);
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.conversation-thread-overview-drawer.is-open {
+    pointer-events: auto;
+}
+
+.conversation-thread-overview-drawer.is-open .conversation-thread-overview-drawer__panel {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+/* 抽屉内容本体：集中展示当前会话的全部划词线程入口。 */
 .conversation-thread-overview {
     display: flex;
     flex-direction: column;
     font-size: var(--cerebr-font-size);
     gap: 8px;
+    max-height: min(48vh, 360px);
+    overflow-y: auto;
     padding: 10px 12px;
     border-radius: 10px;
     border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 68%, transparent);

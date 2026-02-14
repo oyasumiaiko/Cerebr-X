@@ -49,6 +49,7 @@ export function createChatHistoryUI(appContext) {
   } = appContext;
 
   // Destructure dependencies from appContext
+  const chatLayout = dom.chatLayout;
   const chatContainer = dom.chatContainer;
   const chatInputElement = dom.messageInput; 
   const appendMessage = services.messageProcessor.appendMessage;
@@ -64,6 +65,16 @@ export function createChatHistoryUI(appContext) {
   // const getCurrentConversationChain = services.chatHistoryManager.getCurrentConversationChain;
   const showNotification = utils.showNotification;
   const conversationPresence = services.conversationPresence;
+
+  // 线程总览抽屉状态：用于“主聊天顶部悬浮入口 + 点击展开/收起”的交互。
+  const THREAD_OVERVIEW_TOP_TRIGGER_PX = 20;
+  let threadOverviewDrawer = null;
+  let threadOverviewDrawerHandle = null;
+  let threadOverviewDrawerPanel = null;
+  let threadOverviewHasContent = false;
+  let threadOverviewExpanded = false;
+  let threadOverviewHandleVisible = false;
+  let threadOverviewDrawerEventsBound = false;
 
   let currentConversationId = null;
   // 记录上次关闭面板时的标签名，Esc 重新打开时优先恢复；首次加载为空则回退到“history”。
@@ -1389,6 +1400,7 @@ export function createChatHistoryUI(appContext) {
       services.selectionThreadManager?.resetForClearChat?.();
       services.chatHistoryManager.clearHistory();
       chatContainer.innerHTML = '';
+      clearThreadOverviewDrawer();
       emitConversationApiContextChanged();
     }
 
@@ -2802,6 +2814,152 @@ export function createChatHistoryUI(appContext) {
     return wrapper;
   }
 
+  function syncThreadOverviewDrawerState() {
+    if (!threadOverviewDrawer || !threadOverviewDrawerHandle || !threadOverviewDrawerPanel) return;
+    const hasContent = !!threadOverviewHasContent;
+    const isOpen = hasContent && threadOverviewExpanded;
+    const showHandle = hasContent && (threadOverviewHandleVisible || isOpen);
+
+    threadOverviewDrawer.classList.toggle('is-available', hasContent);
+    threadOverviewDrawer.classList.toggle('is-open', isOpen);
+    threadOverviewDrawer.classList.toggle('is-handle-visible', showHandle);
+    threadOverviewDrawer.setAttribute('aria-hidden', hasContent ? 'false' : 'true');
+
+    threadOverviewDrawerHandle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    threadOverviewDrawerHandle.setAttribute('aria-label', isOpen ? '收起线程抽屉' : '展开线程抽屉');
+    threadOverviewDrawerHandle.title = isOpen ? '收起线程抽屉' : '展开线程抽屉';
+    threadOverviewDrawerPanel.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  }
+
+  function setThreadOverviewHandleVisible(visible) {
+    const nextVisible = !!visible && threadOverviewHasContent;
+    if (threadOverviewHandleVisible === nextVisible) return;
+    threadOverviewHandleVisible = nextVisible;
+    syncThreadOverviewDrawerState();
+  }
+
+  function setThreadOverviewExpanded(expanded) {
+    const nextExpanded = !!expanded && threadOverviewHasContent;
+    if (threadOverviewExpanded === nextExpanded) return;
+    threadOverviewExpanded = nextExpanded;
+    if (!threadOverviewExpanded) {
+      threadOverviewHandleVisible = false;
+    }
+    syncThreadOverviewDrawerState();
+  }
+
+  function shouldShowThreadOverviewHandleAt(clientX, clientY) {
+    if (!chatContainer || !threadOverviewHasContent) return false;
+    const rect = chatContainer.getBoundingClientRect();
+    const inHorizontalRange = clientX >= rect.left && clientX <= rect.right;
+    if (!inHorizontalRange) return false;
+    const relativeTop = clientY - rect.top;
+    return relativeTop >= -2 && relativeTop <= THREAD_OVERVIEW_TOP_TRIGGER_PX;
+  }
+
+  function bindThreadOverviewDrawerEventsOnce() {
+    if (threadOverviewDrawerEventsBound || !chatContainer) return;
+    threadOverviewDrawerEventsBound = true;
+
+    // 仅在鼠标靠近主聊天顶部时显示“下拉标记”，避免常驻占位影响阅读。
+    chatContainer.addEventListener('mousemove', (event) => {
+      if (!threadOverviewHasContent) return;
+      if (threadOverviewExpanded) {
+        setThreadOverviewHandleVisible(true);
+        return;
+      }
+      const shouldShow = shouldShowThreadOverviewHandleAt(event.clientX, event.clientY);
+      setThreadOverviewHandleVisible(shouldShow);
+    }, { passive: true });
+
+    chatContainer.addEventListener('mouseleave', () => {
+      if (threadOverviewExpanded) return;
+      setThreadOverviewHandleVisible(false);
+    });
+
+    chatContainer.addEventListener('scroll', () => {
+      if (threadOverviewExpanded) return;
+      setThreadOverviewHandleVisible(false);
+    }, { passive: true });
+  }
+
+  function ensureThreadOverviewDrawer() {
+    if (!chatLayout) return null;
+    if (threadOverviewDrawer && threadOverviewDrawer.isConnected) return threadOverviewDrawer;
+
+    const drawer = document.createElement('div');
+    drawer.className = 'conversation-thread-overview-drawer';
+    drawer.setAttribute('aria-hidden', 'true');
+
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.className = 'conversation-thread-overview-drawer__handle';
+    handle.innerHTML = '<i class="fa-solid fa-chevron-down" aria-hidden="true"></i>';
+    handle.setAttribute('aria-label', '展开线程抽屉');
+    handle.setAttribute('aria-expanded', 'false');
+    handle.title = '展开线程抽屉';
+    handle.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setThreadOverviewExpanded(!threadOverviewExpanded);
+    });
+    handle.addEventListener('mouseenter', () => {
+      if (!threadOverviewHasContent) return;
+      setThreadOverviewHandleVisible(true);
+    });
+    handle.addEventListener('mouseleave', () => {
+      if (threadOverviewExpanded) return;
+      setThreadOverviewHandleVisible(false);
+    });
+
+    const panel = document.createElement('div');
+    panel.className = 'conversation-thread-overview-drawer__panel';
+    panel.setAttribute('aria-hidden', 'true');
+
+    drawer.appendChild(handle);
+    drawer.appendChild(panel);
+    chatLayout.appendChild(drawer);
+
+    threadOverviewDrawer = drawer;
+    threadOverviewDrawerHandle = handle;
+    threadOverviewDrawerPanel = panel;
+
+    bindThreadOverviewDrawerEventsOnce();
+    syncThreadOverviewDrawerState();
+    return drawer;
+  }
+
+  function clearThreadOverviewDrawer() {
+    threadOverviewHasContent = false;
+    threadOverviewExpanded = false;
+    threadOverviewHandleVisible = false;
+    if (threadOverviewDrawerPanel) {
+      threadOverviewDrawerPanel.innerHTML = '';
+    }
+    syncThreadOverviewDrawerState();
+  }
+
+  function renderConversationThreadOverviewDrawer(conversation) {
+    ensureThreadOverviewDrawer();
+    if (!threadOverviewDrawerPanel) return;
+
+    const overviewElement = createConversationThreadOverviewElement(conversation);
+    if (!overviewElement) {
+      clearThreadOverviewDrawer();
+      return;
+    }
+
+    threadOverviewDrawerPanel.innerHTML = '';
+    threadOverviewDrawerPanel.appendChild(overviewElement);
+    threadOverviewHasContent = true;
+    if (threadOverviewExpanded) {
+      threadOverviewHandleVisible = true;
+    } else {
+      threadOverviewHandleVisible = false;
+    }
+    syncThreadOverviewDrawerState();
+  }
+
   /**
    * 加载选中的对话记录到当前聊天窗口
    * @param {Object} conversation - 对话记录对象
@@ -2824,6 +2982,7 @@ export function createChatHistoryUI(appContext) {
     
     // 清空当前聊天容器
     chatContainer.innerHTML = '';
+    renderConversationThreadOverviewDrawer(fullConversation);
 
     // 性能优化：
     // - 预热下载根目录缓存：避免首次遇到图片时触发 chrome.storage.local 读取造成额外卡顿；
@@ -2832,10 +2991,6 @@ export function createChatHistoryUI(appContext) {
     //   “继续本页对话”属于快速恢复场景，这里移除 batch-load，确保视觉行为与之前一致。
     try { await loadDownloadRoot(); } catch (_) {}
     const fragment = document.createDocumentFragment();
-    const threadOverviewElement = createConversationThreadOverviewElement(fullConversation);
-    if (threadOverviewElement) {
-      fragment.appendChild(threadOverviewElement);
-    }
 
     const extractInlineImgSrcs = (html) => {
       const set = new Set();
@@ -3139,6 +3294,7 @@ export function createChatHistoryUI(appContext) {
     services.selectionThreadManager?.resetForClearChat?.();
     // 清空聊天容器和内存中的聊天记录
     chatContainer.innerHTML = '';
+    clearThreadOverviewDrawer();
     // 修改: 直接调用 services.chatHistoryManager.clearHistory()
     services.chatHistoryManager.clearHistory();
     // 重置当前会话ID，确保下次发送新消息创建新会话
