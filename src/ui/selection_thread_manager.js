@@ -1290,6 +1290,16 @@ export function createSelectionThreadManager(appContext) {
     return null;
   }
 
+  function refreshThreadOverviewDrawerSafely() {
+    const refresh = chatHistoryUI?.refreshActiveConversationThreadOverviewDrawer;
+    if (typeof refresh !== 'function') return;
+    try {
+      refresh();
+    } catch (error) {
+      console.warn('[selection_thread_manager] 刷新线程总览失败:', error);
+    }
+  }
+
   function findThreadBySelection(anchorNode, selectionText, matchIndex = null, selectionStartOffset = null) {
     const threads = findThreadsBySelection(anchorNode, selectionText, matchIndex, selectionStartOffset);
     return threads.length ? threads[0] : null;
@@ -2307,7 +2317,7 @@ export function createSelectionThreadManager(appContext) {
     const info = findThreadById(threadId);
     if (!info) {
       showNotification?.({ message: '未找到对应的划词对话', type: 'warning' });
-      return;
+      return false;
     }
     const anchorViewportSnapshot = captureMainChatAnchorViewportSnapshot(threadId, info.anchorMessageId);
     state.activeThreadId = threadId;
@@ -2320,6 +2330,7 @@ export function createSelectionThreadManager(appContext) {
       preferredViewportPercent: anchorViewportSnapshot?.viewportPercent
     });
     await renderThreadMessages(threadId, options);
+    return true;
   }
 
   function removeThreadMessageElements(messageId) {
@@ -2336,6 +2347,7 @@ export function createSelectionThreadManager(appContext) {
     const info = findThreadById(threadId);
     if (!info || !info.annotation) {
       showNotification?.({ message: '未找到要删除的划词对话', type: 'warning' });
+      refreshThreadOverviewDrawerSafely();
       return;
     }
 
@@ -2366,6 +2378,7 @@ export function createSelectionThreadManager(appContext) {
       await chatHistoryUI.saveCurrentConversation(true);
     }
 
+    refreshThreadOverviewDrawerSafely();
     showNotification?.({ message: '已删除划词对话', type: 'info' });
   }
 
@@ -2397,6 +2410,7 @@ export function createSelectionThreadManager(appContext) {
         savePromise.catch(() => {});
       }
     }
+    refreshThreadOverviewDrawerSafely();
     return true;
   }
 

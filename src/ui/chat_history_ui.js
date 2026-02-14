@@ -2724,21 +2724,23 @@ export function createChatHistoryUI(appContext) {
         return (a.threadId || '').localeCompare(b.threadId || '');
       });
 
-    return sortedItems.map((item, index) => {
-      const displayMessageCount = item.visibleMessageCount > 0
-        ? item.visibleMessageCount
-        : item.messageCount;
-      const anchorNode = item.anchorMessageId ? messageMap.get(item.anchorMessageId) : null;
-      const anchorPreviewText = summarizeThreadOverviewText(extractMessagePlainText(anchorNode), 50);
-      return {
-        ...item,
-        order: index + 1,
-        displayMessageCount,
-        displayText: item.selectionText || item.previewText || '（暂无划词文本）',
-        focusMessageId: item.focusMessageId || item.latestMessageId || item.lastMessageId || item.rootMessageId || '',
-        anchorPreviewText
-      };
-    });
+    return sortedItems
+      .map((item, index) => {
+        const displayMessageCount = item.visibleMessageCount > 0
+          ? item.visibleMessageCount
+          : item.messageCount;
+        const anchorNode = item.anchorMessageId ? messageMap.get(item.anchorMessageId) : null;
+        const anchorPreviewText = summarizeThreadOverviewText(extractMessagePlainText(anchorNode), 50);
+        return {
+          ...item,
+          order: index + 1,
+          displayMessageCount,
+          displayText: item.selectionText || item.previewText || '（暂无划词文本）',
+          focusMessageId: item.focusMessageId || item.latestMessageId || item.lastMessageId || item.rootMessageId || '',
+          anchorPreviewText
+        };
+      })
+      .filter(item => Number(item.displayMessageCount) > 0);
   }
 
   function buildThreadOverviewSummaryLine(item) {
@@ -2826,6 +2828,12 @@ export function createChatHistoryUI(appContext) {
           const enterThread = services.selectionThreadManager?.enterThread;
           if (typeof enterThread !== 'function') return;
           Promise.resolve(enterThread(targetThreadId, focusMessageId ? { focusMessageId } : {}))
+            .then((entered) => {
+              if (entered === false) {
+                // 线程可能已被其它入口删除，点击失败时即时刷新总览，移除失效条目。
+                refreshActiveConversationThreadOverviewDrawer();
+              }
+            })
             .catch((error) => {
               console.warn('[chat_history_ui] 线程总览跳转失败', error);
               showNotification?.({ message: '线程打开失败，请稍后重试', type: 'warning', duration: 1800 });
@@ -3061,6 +3069,26 @@ export function createChatHistoryUI(appContext) {
     }
     syncThreadOverviewDrawerGeometry();
     syncThreadOverviewDrawerState();
+  }
+
+  function refreshActiveConversationThreadOverviewDrawer() {
+    const activeMessages = Array.isArray(services.chatHistoryManager?.chatHistory?.messages)
+      ? services.chatHistoryManager.chatHistory.messages
+      : [];
+    if (!activeMessages.length) {
+      clearThreadOverviewDrawer();
+      return;
+    }
+
+    const baseConversation = (activeConversation && typeof activeConversation === 'object')
+      ? activeConversation
+      : {};
+    // 线程总览只依赖当前会话内存态，避免读取旧缓存导致删除后残留。
+    renderConversationThreadOverviewDrawer({
+      ...baseConversation,
+      id: currentConversationId || baseConversation.id || '',
+      messages: activeMessages
+    });
   }
 
   /**
@@ -12467,6 +12495,7 @@ export function createChatHistoryUI(appContext) {
     backupConversations,
     restoreConversations, 
     refreshChatHistory,
+    refreshActiveConversationThreadOverviewDrawer,
     updatePageInfo,
     getCurrentConversationId: () => currentConversationId,
     getActiveConversationApiLock,
