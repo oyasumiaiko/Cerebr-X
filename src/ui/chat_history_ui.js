@@ -7689,7 +7689,7 @@ export function createChatHistoryUI(appContext) {
   const CHAT_HISTORY_PANEL_PIN_DATASET_KEY = 'outsideClickPinned';
   const CHAT_HISTORY_PANEL_PIN_ATTRIBUTE = 'data-outside-click-pinned';
   const CHAT_HISTORY_PANEL_PIN_BUTTON_CLASS = 'chat-history-panel-pin-btn';
-  const CHAT_HISTORY_PANEL_PIN_BUTTON_HTML = '<i class="fa-solid fa-thumbtack-angle"></i>';
+  const CHAT_HISTORY_PANEL_PIN_BUTTON_HTML = '<i class="fa-solid fa-thumbtack"></i>';
 
   function isChatHistoryPanelPinned() {
     const panel = document.getElementById('chat-history-panel');
