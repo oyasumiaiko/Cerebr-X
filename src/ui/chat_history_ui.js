@@ -5829,7 +5829,7 @@ export function createChatHistoryUI(appContext) {
         const selfTabId = conversationPresence.getSelfTabId?.() ?? null;
         const result = await conversationPresence.focusConversation(conv.id, { excludeTabId: selfTabId });
         if (result?.status === 'ok') {
-          closeChatHistoryPanel();
+          // 保持 ESC 面板打开，方便跳转后继续在当前标签页查看/操作历史列表。
           return;
         }
         if (result?.status && result.status !== 'not_found') {
