@@ -365,7 +365,6 @@ body.standalone-mode {
 }
 
 /* 全局控件统一样式 */
-button,
 input[type="text"],
 input[type="number"],
 input[type="time"],
@@ -459,37 +458,6 @@ select {
     background-size: 6px 6px, 6px 6px, 1px 1.6em;
     background-repeat: no-repeat;
     padding-right: 2.5em;
-}
-
-button {
-    border: 1px solid transparent;
-    background: var(--cerebr-button-bg);
-    color: var(--cerebr-button-color);
-    padding: var(--cerebr-control-padding);
-    cursor: pointer;
-    font-weight: 500;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 38px;
-}
-
-button:hover {
-    background: var(--cerebr-button-hover-bg);
-}
-
-button:active {
-    background: var(--cerebr-button-active-bg);
-    transform: translateY(1px);
-}
-
-button:disabled {
-    background: var(--cerebr-button-disabled-bg);
-    color: var(--cerebr-button-disabled-color);
-    cursor: not-allowed;
-    box-shadow: none;
-    transform: none;
 }
 
 body.standalone-mode {
@@ -1029,44 +997,72 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
     left: 50%;
     width: min(760px, calc(100% - 26px));
     transform: translateX(-50%);
-    z-index: 9;
+    z-index: 1400;
     pointer-events: none;
 }
 
+/* 全屏线程双栏模式下，用纯 CSS 对齐到“主聊天列”的中线与宽度。 */
+.fullscreen-mode body.thread-mode-active .conversation-thread-overview-drawer {
+    left: calc(50% - (var(--cerebr-thread-right-width, var(--cerebr-fullscreen-width)) / 2));
+    width: min(760px, calc(var(--cerebr-thread-left-width, var(--cerebr-fullscreen-width)) - 26px));
+}
+
 .conversation-thread-overview-drawer__handle {
-    pointer-events: auto;
+    position: absolute;
+    top: 0;
+    left: 50%;
+    appearance: none;
+    font: inherit;
+    box-sizing: border-box;
+    pointer-events: none;
     display: inline-flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: center;
-    min-width: 34px;
-    height: 18px;
-    margin: 0 auto;
+    width: 118px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: color-mix(in srgb, var(--cerebr-text-color) 72%, transparent);
+    opacity: 0;
+    transform: translateX(-50%);
+    transition: opacity 0.14s ease, color 0.14s ease;
+    cursor: pointer;
+    z-index: 2;
+}
+
+.conversation-thread-overview-drawer__handle::before {
+    content: '';
+    position: absolute;
+    inset: 0;
     border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 68%, transparent);
     border-top: none;
-    border-radius: 0 0 10px 10px;
+    border-radius: 0 0 72px 72px / 0 0 24px 24px;
     background: color-mix(in srgb, var(--cerebr-input-bg) 93%, transparent);
-    color: color-mix(in srgb, var(--cerebr-text-color) 72%, transparent);
+    backdrop-filter: blur(var(--cerebr-main-ui-blur-radius, 0px));
+    -webkit-backdrop-filter: blur(var(--cerebr-main-ui-blur-radius, 0px));
     box-shadow: 0 6px 12px color-mix(in srgb, #000 16%, transparent);
-    opacity: 0;
-    transform: translateY(-8px);
-    transition: opacity 0.16s ease, transform 0.16s ease, color 0.16s ease, border-color 0.16s ease;
-    cursor: pointer;
 }
 
 .conversation-thread-overview-drawer__handle:hover {
     color: var(--cerebr-highlight);
+}
+
+.conversation-thread-overview-drawer__handle:hover::before {
     border-color: color-mix(in srgb, var(--cerebr-highlight) 56%, transparent);
 }
 
 .conversation-thread-overview-drawer__handle i {
-    font-size: 0.72rem;
-    transition: transform 0.16s ease;
+    position: relative;
+    z-index: 1;
+    font-size: 0.78rem;
+    margin-bottom: 3px;
 }
 
 .conversation-thread-overview-drawer.is-handle-visible .conversation-thread-overview-drawer__handle,
 .conversation-thread-overview-drawer.is-open .conversation-thread-overview-drawer__handle {
     opacity: 1;
-    transform: translateY(0);
+    pointer-events: auto;
 }
 
 .conversation-thread-overview-drawer.is-open .conversation-thread-overview-drawer__handle i {
@@ -1074,11 +1070,14 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
 }
 
 .conversation-thread-overview-drawer__panel {
-    margin-top: 6px;
+    margin-top: 0;
     opacity: 0;
-    transform: translateY(-10px);
+    transform: scaleY(0.96);
+    transform-origin: top center;
     pointer-events: none;
     transition: opacity 0.18s ease, transform 0.18s ease;
+    position: relative;
+    z-index: 1;
 }
 
 .conversation-thread-overview-drawer.is-open {
@@ -1087,7 +1086,7 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
 
 .conversation-thread-overview-drawer.is-open .conversation-thread-overview-drawer__panel {
     opacity: 1;
-    transform: translateY(0);
+    transform: scaleY(1);
     pointer-events: auto;
 }
 
@@ -1099,10 +1098,12 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
     gap: 8px;
     max-height: min(48vh, 360px);
     overflow-y: auto;
-    padding: 10px 12px;
-    border-radius: 10px;
+    padding: 24px 12px 10px;
+    border-radius: 0 0 10px 10px;
     border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 68%, transparent);
     background: color-mix(in srgb, var(--cerebr-input-bg) 90%, transparent);
+    backdrop-filter: blur(var(--cerebr-main-ui-blur-radius, 0px));
+    -webkit-backdrop-filter: blur(var(--cerebr-main-ui-blur-radius, 0px));
     box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
 }
 
@@ -1133,6 +1134,8 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
 
 .conversation-thread-overview__item {
     appearance: none;
+    font: inherit;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -1145,7 +1148,6 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
     background: color-mix(in srgb, var(--cerebr-bg-color) 84%, transparent);
     color: var(--cerebr-text-color);
     text-align: left;
-    font: inherit;
     cursor: pointer;
     transition: border-color 0.16s ease, background-color 0.16s ease;
 }
@@ -2656,8 +2658,37 @@ input:checked + .slider::before {
 }
 
 .backup-button {
+    border: 1px solid transparent;
+    background: var(--cerebr-button-bg);
+    color: var(--cerebr-button-color);
+    padding: var(--cerebr-control-padding);
+    cursor: pointer;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
     width: 100%;
     justify-content: center;
+    gap: 8px;
+    min-height: 38px;
+    border-radius: var(--cerebr-control-radius);
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.1s ease;
+}
+
+.backup-button:hover {
+    background: var(--cerebr-button-hover-bg);
+}
+
+.backup-button:active {
+    background: var(--cerebr-button-active-bg);
+    transform: translateY(1px);
+}
+
+.backup-button:disabled {
+    background: var(--cerebr-button-disabled-bg);
+    color: var(--cerebr-button-disabled-color);
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
 }
 
 .backup-panel-hint {
@@ -6105,7 +6136,37 @@ body.chat-history-panel-resizing {
 }
 
 .db-stats-entry-button {
+    border: 1px solid transparent;
+    background: var(--cerebr-button-bg);
+    color: var(--cerebr-button-color);
+    padding: var(--cerebr-control-padding);
+    cursor: pointer;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 38px;
     min-width: 120px;
+    border-radius: var(--cerebr-control-radius);
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.1s ease;
+}
+
+.db-stats-entry-button:hover {
+    background: var(--cerebr-button-hover-bg);
+}
+
+.db-stats-entry-button:active {
+    background: var(--cerebr-button-active-bg);
+    transform: translateY(1px);
+}
+
+.db-stats-entry-button:disabled {
+    background: var(--cerebr-button-disabled-bg);
+    color: var(--cerebr-button-disabled-color);
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
 }
 
 .db-stats-entry-status {
@@ -6596,7 +6657,7 @@ body.chat-history-panel-resizing {
   flex: 1;
   min-width: 0;
 }
-.clear-filter-btn {
+#chat-history-panel .clear-filter-btn {
   background: none;
   border: none;
   color: inherit;
@@ -6605,12 +6666,12 @@ body.chat-history-panel-resizing {
   cursor: pointer;
   margin-left: 5px;
 }
-.clear-filter-btn:hover {
+#chat-history-panel .clear-filter-btn:hover {
   background-color: rgba(0, 0, 0, 0.1);
 }
 
 /* 聊天记录面板：当前 URL 快速筛选按钮 */
-.url-filter-btn {
+#chat-history-panel .url-filter-btn {
   background: none;
   border: 1px solid transparent;
   color: inherit;
@@ -6621,21 +6682,21 @@ body.chat-history-panel-resizing {
   border-radius: 4px;
 }
 
-.url-filter-btn:hover {
+#chat-history-panel .url-filter-btn:hover {
   background-color: var(--cerebr-hover-color);
 }
 
-.url-filter-btn.active {
+#chat-history-panel .url-filter-btn.active {
   background: var(--cerebr-control-bg);
   border-color: var(--cerebr-control-border);
 }
 
-.url-filter-btn:disabled {
+#chat-history-panel .url-filter-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.search-syntax-btn {
+#chat-history-panel .search-syntax-btn {
   border: 1px solid var(--cerebr-control-border);
   background: transparent;
   color: inherit;
@@ -6652,12 +6713,12 @@ body.chat-history-panel-resizing {
   box-shadow: none;
 }
 
-.search-syntax-btn:hover {
+#chat-history-panel .search-syntax-btn:hover {
   background: var(--cerebr-control-bg-hover);
   border-color: var(--cerebr-control-border-hover);
 }
 
-.search-syntax-btn:active {
+#chat-history-panel .search-syntax-btn:active {
   background: var(--cerebr-control-bg);
   transform: none;
 }

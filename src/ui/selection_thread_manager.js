@@ -181,8 +181,17 @@ export function createSelectionThreadManager(appContext) {
 
   function handleTopEdgeMouseMove(event) {
     if (!state.activeThreadId || !threadBannerEl) return;
+    if (!threadContainer) return;
+    const pointerX = Number(event?.clientX);
+    const pointerY = Number(event?.clientY);
+    if (!Number.isFinite(pointerX) || !Number.isFinite(pointerY)) return;
+
+    const containerRect = threadContainer.getBoundingClientRect();
     const threshold = getThreadBannerTopEdgeThreshold();
-    const nearTop = (event?.clientY ?? 9999) <= threshold;
+    // 仅在“线程列表容器”顶部附近触发 peek，避免鼠标到屏幕顶端任意位置都误触发。
+    const withinHorizontal = pointerX >= containerRect.left && pointerX <= containerRect.right;
+    const relativeY = pointerY - containerRect.top;
+    const nearTop = withinHorizontal && relativeY >= -2 && relativeY <= threshold;
     if (nearTop === state.bannerTopEdgeActive) return;
     state.bannerTopEdgeActive = nearTop;
     updateThreadBannerPeek();

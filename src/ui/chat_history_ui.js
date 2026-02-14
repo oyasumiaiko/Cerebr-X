@@ -75,6 +75,8 @@ export function createChatHistoryUI(appContext) {
   let threadOverviewExpanded = false;
   let threadOverviewHandleVisible = false;
   let threadOverviewDrawerEventsBound = false;
+  let threadOverviewDrawerResizeObserver = null;
+  let threadOverviewDrawerLayoutObserver = null;
 
   let currentConversationId = null;
   // 记录上次关闭面板时的标签名，Esc 重新打开时优先恢复；首次加载为空则回退到“history”。
@@ -2814,6 +2816,21 @@ export function createChatHistoryUI(appContext) {
     return wrapper;
   }
 
+  function syncThreadOverviewDrawerGeometry() {
+    if (!threadOverviewDrawer || !chatLayout || !chatContainer) return;
+    const layoutRect = chatLayout.getBoundingClientRect();
+    const chatRect = chatContainer.getBoundingClientRect();
+    if (!layoutRect.width || !chatRect.width) return;
+
+    const centerX = (chatRect.left - layoutRect.left) + (chatRect.width / 2);
+    const targetWidth = Math.max(320, Math.min(760, Math.max(0, chatRect.width - 26)));
+    const drawerLeft = centerX;
+    const drawerWidth = targetWidth;
+
+    threadOverviewDrawer.style.setProperty('--thread-overview-drawer-left', `${drawerLeft}px`);
+    threadOverviewDrawer.style.setProperty('--thread-overview-drawer-width', `${drawerWidth}px`);
+  }
+
   function syncThreadOverviewDrawerState() {
     if (!threadOverviewDrawer || !threadOverviewDrawerHandle || !threadOverviewDrawerPanel) return;
     const hasContent = !!threadOverviewHasContent;
@@ -2835,6 +2852,7 @@ export function createChatHistoryUI(appContext) {
     const nextVisible = !!visible && threadOverviewHasContent;
     if (threadOverviewHandleVisible === nextVisible) return;
     threadOverviewHandleVisible = nextVisible;
+    syncThreadOverviewDrawerGeometry();
     syncThreadOverviewDrawerState();
   }
 
@@ -2843,8 +2861,10 @@ export function createChatHistoryUI(appContext) {
     if (threadOverviewExpanded === nextExpanded) return;
     threadOverviewExpanded = nextExpanded;
     if (!threadOverviewExpanded) {
-      threadOverviewHandleVisible = false;
+      // 关闭后保留标记可见，允许用户连续点击同一位置再次展开。
+      threadOverviewHandleVisible = !!threadOverviewHasContent;
     }
+    syncThreadOverviewDrawerGeometry();
     syncThreadOverviewDrawerState();
   }
 
@@ -2881,6 +2901,31 @@ export function createChatHistoryUI(appContext) {
       if (threadOverviewExpanded) return;
       setThreadOverviewHandleVisible(false);
     }, { passive: true });
+
+    window.addEventListener('resize', () => {
+      syncThreadOverviewDrawerGeometry();
+    }, { passive: true });
+
+    if (typeof ResizeObserver === 'function' && !threadOverviewDrawerResizeObserver) {
+      threadOverviewDrawerResizeObserver = new ResizeObserver(() => {
+        syncThreadOverviewDrawerGeometry();
+      });
+      if (chatLayout) {
+        threadOverviewDrawerResizeObserver.observe(chatLayout);
+      }
+      threadOverviewDrawerResizeObserver.observe(chatContainer);
+    }
+
+    if (typeof MutationObserver === 'function' && !threadOverviewDrawerLayoutObserver) {
+      threadOverviewDrawerLayoutObserver = new MutationObserver(() => {
+        // 线程模式切换会通过 body class 改变聊天列宽度，这里补一次几何同步避免位置漂移。
+        syncThreadOverviewDrawerGeometry();
+      });
+      threadOverviewDrawerLayoutObserver.observe(document.body, {
+        attributes: true,
+        attributeFilter: ['class']
+      });
+    }
   }
 
   function ensureThreadOverviewDrawer() {
@@ -2925,7 +2970,9 @@ export function createChatHistoryUI(appContext) {
     threadOverviewDrawerPanel = panel;
 
     bindThreadOverviewDrawerEventsOnce();
+    syncThreadOverviewDrawerGeometry();
     syncThreadOverviewDrawerState();
+    requestAnimationFrame(() => syncThreadOverviewDrawerGeometry());
     return drawer;
   }
 
@@ -2957,6 +3004,7 @@ export function createChatHistoryUI(appContext) {
     } else {
       threadOverviewHandleVisible = false;
     }
+    syncThreadOverviewDrawerGeometry();
     syncThreadOverviewDrawerState();
   }
 
