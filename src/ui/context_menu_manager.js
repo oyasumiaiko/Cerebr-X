@@ -718,7 +718,8 @@ export function createContextMenuManager(appContext) {
     // 除了当前消息为 updating 外，只要有任意 AI 消息处于 updating（包括“正在等待回复”的占位消息），也显示“停止更新”
     const hasUpdating = (container) => !!container?.querySelector?.('.ai-message.updating, .loading-message.updating');
     const anyUpdating = hasUpdating(chatContainer) || hasUpdating(threadContainer);
-    if (messageElement.classList.contains('updating') || anyUpdating) {
+    const hasAbortableRequest = !!messageSender?.hasAbortableRequest?.(messageElement);
+    if (messageElement.classList.contains('updating') || anyUpdating || hasAbortableRequest) {
       stopUpdateButton.style.display = 'flex';
     } else {
       stopUpdateButton.style.display = 'none';

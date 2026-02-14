@@ -189,6 +189,7 @@ export function createMessageSender(appContext) {
    * - 现在将每一次请求视为独立 attempt，便于实现“按消息粒度的停止生成 / 自动重试”。
    */
   const activeAttempts = new Map();
+  const pendingRetryAttempts = new Map();
   // 对外暴露“哪些会话正在流式生成”，供 ESC 聊天记录面板做实时标记。
   const streamingConversationListeners = new Set();
   const backgroundCompletedConversationIds = new Set();
@@ -211,11 +212,16 @@ export function createMessageSender(appContext) {
   // 临时模式状态不再写入 sessionStorage，改由父页面在内存里同步，避免 F5 刷新仍保留旧状态。
 
   function collectStreamingConversationIds() {
-    if (!activeAttempts.size) return [];
+    if (!activeAttempts.size && !pendingRetryAttempts.size) return [];
     const ids = new Set();
     for (const attempt of activeAttempts.values()) {
       if (!attempt || attempt.finished) continue;
       const boundId = normalizeConversationId(attempt.boundConversationId);
+      if (!boundId) continue;
+      ids.add(boundId);
+    }
+    for (const retryTask of pendingRetryAttempts.values()) {
+      const boundId = normalizeConversationId(retryTask?.boundConversationId);
       if (!boundId) continue;
       ids.add(boundId);
     }
@@ -976,6 +982,107 @@ export function createMessageSender(appContext) {
 
   function normalizeConversationId(value) {
     return (typeof value === 'string' && value.trim()) ? value.trim() : '';
+  }
+
+
+  function resolveAbortTarget(target) {
+    const isElementTarget = target && typeof target === 'object' && target.nodeType === 1;
+    const targetElement = isElementTarget ? target : null;
+    const targetId = typeof target === 'string'
+      ? target
+      : (isElementTarget ? target.getAttribute('data-message-id') : null);
+    return {
+      targetElement,
+      normalizedTargetId: normalizeConversationId(targetId)
+    };
+  }
+
+  function doesAttemptMatchAbortTarget(attempt, targetElement, normalizedTargetId) {
+    if (!attempt || attempt.finished) return false;
+    const attemptAiId = normalizeConversationId(attempt?.aiMessageId);
+    const attemptParentMessageId = normalizeConversationId(attempt?.parentMessageIdForAi)
+      || normalizeConversationId(attempt?.threadContext?.parentMessageIdForAi);
+    const matchesById = !!(
+      normalizedTargetId
+      && (attemptAiId === normalizedTargetId || attemptParentMessageId === normalizedTargetId)
+    );
+    const matchesByLoading = !!(targetElement && attempt.loadingMessage === targetElement);
+    return matchesById || matchesByLoading;
+  }
+
+  function doesRetryTaskMatchAbortTarget(task, normalizedTargetId) {
+    if (!task || !normalizedTargetId) return false;
+    const taskAiId = normalizeConversationId(task?.targetAiMessageId);
+    const taskParentId = normalizeConversationId(task?.parentMessageId);
+    return taskAiId === normalizedTargetId || taskParentId === normalizedTargetId;
+  }
+
+  function cancelPendingRetryTask(task, reason = 'aborted') {
+    if (!task) return false;
+    try { if (task.timerId) clearTimeout(task.timerId); } catch (_) {}
+    pendingRetryAttempts.delete(task.id);
+    notifyStreamingConversationStateChanged();
+
+    if (typeof task.resolve === 'function') {
+      const abortError = new Error(reason || 'aborted');
+      abortError.name = 'AbortError';
+      try {
+        task.resolve({ ok: false, error: abortError, aborted: true });
+      } catch (_) {}
+    }
+    return true;
+  }
+
+  function scheduleRetryTask({
+    delayMs = 0,
+    retryHint = {},
+    override = {},
+    boundConversationId = '',
+    targetAiMessageId = '',
+    parentMessageId = ''
+  } = {}) {
+    const safeDelayMs = Math.max(0, Number.isFinite(delayMs) ? delayMs : 0);
+    return new Promise((resolve) => {
+      const retryTask = {
+        id: `retry_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        timerId: null,
+        resolve,
+        boundConversationId: normalizeConversationId(boundConversationId),
+        targetAiMessageId: normalizeConversationId(targetAiMessageId),
+        parentMessageId: normalizeConversationId(parentMessageId)
+      };
+      pendingRetryAttempts.set(retryTask.id, retryTask);
+      notifyStreamingConversationStateChanged();
+
+      retryTask.timerId = setTimeout(async () => {
+        if (!pendingRetryAttempts.has(retryTask.id)) return;
+        pendingRetryAttempts.delete(retryTask.id);
+        notifyStreamingConversationStateChanged();
+        resolve(await sendMessageCore({ ...retryHint, ...override }));
+      }, safeDelayMs);
+    });
+  }
+
+  function hasAbortableRequest(target = null) {
+    if (!activeAttempts.size && !pendingRetryAttempts.size) return false;
+    if (!target) return true;
+
+    const { targetElement, normalizedTargetId } = resolveAbortTarget(target);
+    if (!targetElement && !normalizedTargetId) {
+      return activeAttempts.size > 0 || pendingRetryAttempts.size > 0;
+    }
+
+    for (const attempt of activeAttempts.values()) {
+      if (doesAttemptMatchAbortTarget(attempt, targetElement, normalizedTargetId)) {
+        return true;
+      }
+    }
+    for (const retryTask of pendingRetryAttempts.values()) {
+      if (doesRetryTaskMatchAbortTarget(retryTask, normalizedTargetId)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function resolveAttemptAiNode(attemptState, messageId) {
@@ -2988,12 +3095,20 @@ export function createMessageSender(appContext) {
         resolvedApiConfig,
         api
       };
-      const retry = (delayMs = 0, override = {}) => new Promise((resolve) => {
-        setTimeout(async () => {
-          // 重试直接复用核心发送逻辑，避免重复解析 UI 输入状态。
-          resolve(await sendMessageCore({ ...retryHint, ...override }));
-        }, Math.max(0, delayMs));
-      });
+      const retry = (delayMs = 0, override = {}) => {
+        const mergedHint = { ...retryHint, ...override };
+        const retryBoundConversationId = normalizeConversationId(attempt?.boundConversationId)
+          || normalizeConversationId(currentConversationId)
+          || normalizeConversationId(chatHistoryUI?.getCurrentConversationId?.());
+        return scheduleRetryTask({
+          delayMs,
+          retryHint,
+          override,
+          boundConversationId: retryBoundConversationId,
+          targetAiMessageId: normalizeConversationId(mergedHint.targetAiMessageId),
+          parentMessageId: normalizeConversationId(mergedHint.messageId)
+        });
+      };
 
       const canAutoRetry = autoRetryEnabled && autoRetryAttempt < (MAX_AUTO_RETRY_ATTEMPTS - 1);
       if (canAutoRetry) {
@@ -4513,48 +4628,42 @@ export function createMessageSender(appContext) {
    * 中止当前请求
    * @public
    * @param {HTMLElement|string} [target] - 可选：要中止的目标消息元素或其 data-message-id；缺省时中止所有请求
+   * @param {{ strictTarget?: boolean }} [options] - strictTarget=true 时仅中止精确命中的请求，不回退到“最近一次请求”
    */
   function abortCurrentRequest(target, options = {}) {
-    if (!activeAttempts.size) return false;
+    if (!activeAttempts.size && !pendingRetryAttempts.size) return false;
 
     let abortedAny = false;
-    const isElementTarget = target && typeof target === 'object' && target.nodeType === 1;
-    const targetElement = isElementTarget ? target : null;
-    const targetId = typeof target === 'string'
-      ? target
-      : (isElementTarget ? target.getAttribute('data-message-id') : null);
-    const normalizedTargetId = normalizeConversationId(targetId);
     const strictTarget = !!(options && typeof options === 'object' && options.strictTarget);
+    const { targetElement, normalizedTargetId } = resolveAbortTarget(target);
 
     if (targetElement || normalizedTargetId) {
-      // 按消息粒度中止：仅终止与指定消息/占位符绑定的那一路请求
       for (const attempt of activeAttempts.values()) {
-        const attemptAiId = normalizeConversationId(attempt?.aiMessageId);
-        const attemptParentMessageId = normalizeConversationId(attempt?.parentMessageIdForAi)
-          || normalizeConversationId(attempt?.threadContext?.parentMessageIdForAi);
-        const matchesById = !!(
-          normalizedTargetId
-          && (attemptAiId === normalizedTargetId || attemptParentMessageId === normalizedTargetId)
-        );
-        const matchesByLoading = !!(targetElement && attempt.loadingMessage === targetElement);
-        if (matchesById || matchesByLoading) {
-          attempt.manualAbort = true;
-          try { attempt.controller?.abort(); } catch (e) { console.error('中止当前请求失败:', e); }
-          abortedAny = true;
-        }
+        if (!doesAttemptMatchAbortTarget(attempt, targetElement, normalizedTargetId)) continue;
+        attempt.manualAbort = true;
+        try { attempt.controller?.abort(); } catch (e) { console.error('中止当前请求失败:', e); }
+        abortedAny = true;
       }
 
-      // 如果未能定位到对应 attempt，则退回为中止最近一次请求（向后兼容旧行为）
+      for (const retryTask of Array.from(pendingRetryAttempts.values())) {
+        if (!doesRetryTaskMatchAbortTarget(retryTask, normalizedTargetId)) continue;
+        abortedAny = cancelPendingRetryTask(retryTask, 'retry canceled by manual abort') || abortedAny;
+      }
+
       if (!abortedAny && !strictTarget) {
-        const lastAttempt = Array.from(activeAttempts.values()).slice(-1)[0];
+        const lastAttempt = Array.from(activeAttempts.values()).slice(-1)[0] || null;
         if (lastAttempt) {
           lastAttempt.manualAbort = true;
           try { lastAttempt.controller?.abort(); } catch (e) { console.error('中止当前请求失败:', e); }
           abortedAny = true;
+        } else {
+          const lastRetryTask = Array.from(pendingRetryAttempts.values()).slice(-1)[0] || null;
+          if (lastRetryTask) {
+            abortedAny = cancelPendingRetryTask(lastRetryTask, 'retry canceled by manual abort') || abortedAny;
+          }
         }
       }
     } else {
-      // 无显式目标：用于“清空聊天”等场景，直接中止所有进行中的请求
       for (const attempt of activeAttempts.values()) {
         if (attempt.finished) continue;
         attempt.manualAbort = true;
@@ -4562,8 +4671,11 @@ export function createMessageSender(appContext) {
         abortedAny = true;
       }
 
+      for (const retryTask of Array.from(pendingRetryAttempts.values())) {
+        abortedAny = cancelPendingRetryTask(retryTask, 'retry canceled by global abort') || abortedAny;
+      }
+
       if (abortedAny) {
-        // 全局中止时，立即清理整体 UI 状态，防止残留 glow / updating
         isProcessingMessage = false;
         shouldAutoScroll = false;
         try {
@@ -4670,6 +4782,7 @@ export function createMessageSender(appContext) {
     getSlashCommandHints,
     getStreamingConversationIds,
     getBackgroundCompletedConversationIds,
-    subscribeStreamingConversationState
+    subscribeStreamingConversationState,
+    hasAbortableRequest
   };
 } 
