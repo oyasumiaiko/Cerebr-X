@@ -1022,6 +1022,104 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
     white-space: pre-wrap;
 }
 
+/* 聊天顶部线程总览：集中展示当前会话的全部划词线程入口。 */
+.conversation-thread-overview {
+    display: flex;
+    flex-direction: column;
+    font-size: var(--cerebr-font-size);
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 68%, transparent);
+    background: color-mix(in srgb, var(--cerebr-input-bg) 90%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
+}
+
+.conversation-thread-overview__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.conversation-thread-overview__title {
+    font-size: 0.83em;
+    font-weight: 600;
+    color: var(--cerebr-text-color);
+    letter-spacing: 0.01em;
+}
+
+.conversation-thread-overview__count {
+    font-size: 0.78em;
+    color: color-mix(in srgb, var(--cerebr-text-color) 70%, transparent);
+}
+
+.conversation-thread-overview__list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.conversation-thread-overview__item {
+    appearance: none;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: 4px;
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 62%, transparent);
+    background: color-mix(in srgb, var(--cerebr-bg-color) 84%, transparent);
+    color: var(--cerebr-text-color);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+    transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.conversation-thread-overview__item:hover {
+    border-color: color-mix(in srgb, var(--cerebr-highlight) 52%, transparent);
+    background: color-mix(in srgb, var(--cerebr-highlight) 8%, var(--cerebr-bg-color) 92%);
+}
+
+.conversation-thread-overview__item:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--cerebr-highlight) 70%, transparent);
+    outline-offset: 1px;
+}
+
+.conversation-thread-overview__item-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.conversation-thread-overview__item-tag {
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 0.76em;
+    font-weight: 600;
+    color: var(--cerebr-highlight);
+    background: color-mix(in srgb, var(--cerebr-highlight) 12%, transparent);
+}
+
+.conversation-thread-overview__item-text {
+    min-width: 0;
+    font-size: 0.83em;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.conversation-thread-overview__item-meta {
+    font-size: 0.76em;
+    color: color-mix(in srgb, var(--cerebr-text-color) 68%, transparent);
+}
+
 /* 移除隐藏滚动条的样式 */
 /* #chat-container::-webkit-scrollbar {
     display: none;

@@ -2510,6 +2510,298 @@ export function createChatHistoryUI(appContext) {
     showNotification?.({ message: reasonText, type: 'warning', duration: 2200 });
   }
 
+  function normalizeThreadIdentifier(value) {
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  function summarizeThreadOverviewText(text, maxLength = 72) {
+    const normalized = typeof text === 'string'
+      ? text.replace(/\s+/g, ' ').trim()
+      : '';
+    if (!normalized) return '';
+    if (normalized.length <= maxLength) return normalized;
+    return `${normalized.slice(0, maxLength)}…`;
+  }
+
+  /**
+   * 从会话消息中提取“线程总览”数据：
+   * - 优先以锚点消息上的 threadAnnotations 为准；
+   * - 再用线程消息（threadId/threadRootId）补齐计数、活跃时间和焦点消息。
+   *
+   * 这样可以覆盖“注解存在但线程消息尚少”与“历史数据缺字段”的混合场景。
+   *
+   * @param {Object} conversation
+   * @returns {Array<Object>}
+   */
+  function collectConversationThreadOverviewItems(conversation) {
+    const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+    if (!messages.length) return [];
+
+    const threadMap = new Map();
+    const threadIdByRootId = new Map();
+    const messageMap = new Map();
+
+    const ensureThreadEntry = (threadId) => {
+      if (!threadId) return null;
+      if (!threadMap.has(threadId)) {
+        threadMap.set(threadId, {
+          threadId,
+          anchorMessageId: '',
+          rootMessageId: '',
+          firstMessageId: '',
+          lastMessageId: '',
+          latestMessageId: '',
+          focusMessageId: '',
+          selectionText: '',
+          previewText: '',
+          createdAt: 0,
+          latestTimestamp: 0,
+          messageCount: 0,
+          visibleMessageCount: 0
+        });
+      }
+      return threadMap.get(threadId);
+    };
+
+    for (const message of messages) {
+      const messageId = normalizeThreadIdentifier(message?.id);
+      if (messageId) {
+        messageMap.set(messageId, message);
+      }
+      const annotations = Array.isArray(message?.threadAnnotations) ? message.threadAnnotations : [];
+      for (const annotation of annotations) {
+        const threadId = normalizeThreadIdentifier(annotation?.id);
+        if (!threadId) continue;
+        const entry = ensureThreadEntry(threadId);
+        if (!entry) continue;
+
+        if (!entry.anchorMessageId && messageId) {
+          entry.anchorMessageId = messageId;
+        }
+
+        const selectionText = summarizeThreadOverviewText(annotation?.selectionText || '');
+        if (!entry.selectionText && selectionText) {
+          entry.selectionText = selectionText;
+        }
+
+        const rootMessageId = normalizeThreadIdentifier(annotation?.rootMessageId);
+        if (!entry.rootMessageId && rootMessageId) {
+          entry.rootMessageId = rootMessageId;
+        }
+        if (rootMessageId && !threadIdByRootId.has(rootMessageId)) {
+          threadIdByRootId.set(rootMessageId, threadId);
+        }
+
+        const lastMessageId = normalizeThreadIdentifier(annotation?.lastMessageId);
+        if (!entry.lastMessageId && lastMessageId) {
+          entry.lastMessageId = lastMessageId;
+        }
+
+        const createdAt = Number(annotation?.createdAt);
+        if (Number.isFinite(createdAt) && createdAt > 0) {
+          entry.createdAt = Math.max(entry.createdAt, createdAt);
+        }
+      }
+    }
+
+    const resolveThreadIdFromMessage = (message) => {
+      const directThreadId = normalizeThreadIdentifier(message?.threadId);
+      if (directThreadId) return directThreadId;
+
+      const rootMessageId = normalizeThreadIdentifier(message?.threadRootId);
+      if (rootMessageId && threadIdByRootId.has(rootMessageId)) {
+        return threadIdByRootId.get(rootMessageId) || '';
+      }
+
+      const anchorMessageId = normalizeThreadIdentifier(message?.threadAnchorId);
+      if (!anchorMessageId) return '';
+      const anchorNode = messageMap.get(anchorMessageId);
+      const annotations = Array.isArray(anchorNode?.threadAnnotations) ? anchorNode.threadAnnotations : [];
+      if (!annotations.length) return '';
+
+      if (rootMessageId) {
+        const matched = annotations.find(item => (
+          normalizeThreadIdentifier(item?.rootMessageId) === rootMessageId
+          && normalizeThreadIdentifier(item?.id)
+        ));
+        if (matched?.id) {
+          return normalizeThreadIdentifier(matched.id);
+        }
+      }
+
+      if (annotations.length === 1) {
+        return normalizeThreadIdentifier(annotations[0]?.id);
+      }
+
+      return '';
+    };
+
+    for (const message of messages) {
+      const threadId = resolveThreadIdFromMessage(message);
+      if (!threadId) continue;
+      const entry = ensureThreadEntry(threadId);
+      if (!entry) continue;
+
+      const messageId = normalizeThreadIdentifier(message?.id);
+      const isHiddenSelection = !!message?.threadHiddenSelection;
+      const timestamp = resolveConversationMessageTimestamp(message);
+      const messagePlainText = summarizeThreadOverviewText(extractMessagePlainText(message), 56);
+
+      entry.messageCount += 1;
+      if (!isHiddenSelection) {
+        entry.visibleMessageCount += 1;
+      }
+
+      if (messageId && !entry.firstMessageId) {
+        entry.firstMessageId = messageId;
+      }
+      if (messageId) {
+        entry.lastMessageId = messageId;
+      }
+
+      const rootMessageId = normalizeThreadIdentifier(message?.threadRootId);
+      if (!entry.rootMessageId && rootMessageId) {
+        entry.rootMessageId = rootMessageId;
+      }
+      if (rootMessageId && !threadIdByRootId.has(rootMessageId)) {
+        threadIdByRootId.set(rootMessageId, threadId);
+      }
+
+      if (!entry.selectionText) {
+        const selectionText = summarizeThreadOverviewText(message?.threadSelectionText || '');
+        if (selectionText) {
+          entry.selectionText = selectionText;
+        }
+      }
+
+      if (!isHiddenSelection && messagePlainText) {
+        entry.previewText = messagePlainText;
+      }
+
+      if (timestamp > entry.latestTimestamp) {
+        entry.latestTimestamp = timestamp;
+        if (messageId) {
+          entry.latestMessageId = messageId;
+          if (!isHiddenSelection) {
+            entry.focusMessageId = messageId;
+          }
+        }
+        if (!isHiddenSelection && messagePlainText) {
+          entry.previewText = messagePlainText;
+        }
+      }
+
+      if (!entry.focusMessageId && messageId && !isHiddenSelection) {
+        entry.focusMessageId = messageId;
+      }
+    }
+
+    const sortedItems = Array.from(threadMap.values())
+      .filter(item => item.messageCount > 0 || item.selectionText || item.previewText || item.rootMessageId)
+      .sort((a, b) => {
+        const aTs = Number(a.latestTimestamp) || Number(a.createdAt) || 0;
+        const bTs = Number(b.latestTimestamp) || Number(b.createdAt) || 0;
+        if (aTs !== bTs) return bTs - aTs;
+        return (a.threadId || '').localeCompare(b.threadId || '');
+      });
+
+    return sortedItems.map((item, index) => {
+      const displayMessageCount = item.visibleMessageCount > 0
+        ? item.visibleMessageCount
+        : item.messageCount;
+      return {
+        ...item,
+        order: index + 1,
+        displayMessageCount,
+        displayText: item.selectionText || item.previewText || '（暂无划词文本）',
+        focusMessageId: item.focusMessageId || item.latestMessageId || item.lastMessageId || item.rootMessageId || ''
+      };
+    });
+  }
+
+  function createConversationThreadOverviewElement(conversation) {
+    const items = collectConversationThreadOverviewItems(conversation);
+    if (!items.length) return null;
+
+    const wrapper = document.createElement('section');
+    wrapper.className = 'conversation-thread-overview';
+    wrapper.setAttribute('aria-label', '对话线程总览');
+
+    const header = document.createElement('div');
+    header.className = 'conversation-thread-overview__header';
+
+    const title = document.createElement('div');
+    title.className = 'conversation-thread-overview__title';
+    title.textContent = '对话线程';
+
+    const count = document.createElement('div');
+    count.className = 'conversation-thread-overview__count';
+    count.textContent = `共 ${items.length} 个`;
+
+    header.appendChild(title);
+    header.appendChild(count);
+
+    const list = document.createElement('div');
+    list.className = 'conversation-thread-overview__list';
+
+    for (const item of items) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'conversation-thread-overview__item';
+      button.dataset.threadId = item.threadId;
+      if (item.focusMessageId) {
+        button.dataset.focusMessageId = item.focusMessageId;
+      }
+      button.title = item.selectionText || item.previewText || item.threadId;
+
+      const top = document.createElement('div');
+      top.className = 'conversation-thread-overview__item-top';
+
+      const tag = document.createElement('span');
+      tag.className = 'conversation-thread-overview__item-tag';
+      tag.textContent = `线程 ${item.order}`;
+
+      const text = document.createElement('span');
+      text.className = 'conversation-thread-overview__item-text';
+      text.textContent = item.displayText;
+
+      top.appendChild(tag);
+      top.appendChild(text);
+
+      const meta = document.createElement('div');
+      meta.className = 'conversation-thread-overview__item-meta';
+      const activityTimestamp = Number(item.latestTimestamp) || Number(item.createdAt) || 0;
+      const activityText = activityTimestamp > 0
+        ? formatRelativeTime(new Date(activityTimestamp))
+        : '暂无活动';
+      meta.textContent = `消息 ${item.displayMessageCount} · ${activityText}`;
+
+      button.appendChild(top);
+      button.appendChild(meta);
+
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const targetThreadId = button.dataset.threadId || '';
+        if (!targetThreadId) return;
+        const focusMessageId = button.dataset.focusMessageId || '';
+        const enterThread = services.selectionThreadManager?.enterThread;
+        if (typeof enterThread !== 'function') return;
+        Promise.resolve(enterThread(targetThreadId, focusMessageId ? { focusMessageId } : {}))
+          .catch((error) => {
+            console.warn('[chat_history_ui] 线程总览跳转失败', error);
+            showNotification?.({ message: '线程打开失败，请稍后重试', type: 'warning', duration: 1800 });
+          });
+      });
+
+      list.appendChild(button);
+    }
+
+    wrapper.appendChild(header);
+    wrapper.appendChild(list);
+    return wrapper;
+  }
+
   /**
    * 加载选中的对话记录到当前聊天窗口
    * @param {Object} conversation - 对话记录对象
@@ -2540,6 +2832,10 @@ export function createChatHistoryUI(appContext) {
     //   “继续本页对话”属于快速恢复场景，这里移除 batch-load，确保视觉行为与之前一致。
     try { await loadDownloadRoot(); } catch (_) {}
     const fragment = document.createDocumentFragment();
+    const threadOverviewElement = createConversationThreadOverviewElement(fullConversation);
+    if (threadOverviewElement) {
+      fragment.appendChild(threadOverviewElement);
+    }
 
     const extractInlineImgSrcs = (html) => {
       const set = new Set();
