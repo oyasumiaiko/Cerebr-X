@@ -2,15 +2,23 @@
 <img src="./icons/icon128.png">
 </p>
 
-<p align="center">
-<a href="https://chromewebstore.google.com/detail/cerebr/kjojanemcpiamhohkcpcddpkbnciojkj">
-    <img src="https://img.shields.io/chrome-web-store/v/kjojanemcpiamhohkcpcddpkbnciojkj?color=blue&label=Chrome%20Store&logo=google-chrome&logoColor=white" alt="Chrome Web Store">
-</a>
-</p>
-
 [English](./README.md) | [Simplified Chinese](./README_CN.md)
 
 # 🧠 Cerebr - Intelligent AI Assistant
+
+## ⚠️ Current Status (Local Load Only)
+
+- This version is **not published** on the Chrome Web Store.
+- This is a personal-use project. Features are **not stable** and may change at any time.
+- You must clone the repository locally and restore submodules before use:
+
+```bash
+git clone <repo-url>
+cd Cerebr
+git submodule update --init --recursive
+```
+
+- Then open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the repository root.
 
 ## 📸 Feature Highlights
 

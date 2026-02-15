@@ -2,15 +2,23 @@
 <img src="./icons/icon128.png">
 </p>
 
-<p align="center">
-<a href="https://chromewebstore.google.com/detail/cerebr/kjojanemcpiamhohkcpcddpkbnciojkj">
-    <img src="https://img.shields.io/chrome-web-store/v/kjojanemcpiamhohkcpcddpkbnciojkj?color=blue&label=Chrome%20商店&logo=google-chrome&logoColor=white" alt="Chrome Web Store">
-</a>
-</p>
-
 [English](./README.md) | [简体中文](./README_CN.md)
 
 # 🧠 Cerebr - 智能 AI 助手
+
+## ⚠️ 当前状态（仅支持本地加载）
+
+- 当前版本**未发布到 Chrome 插件商店**。
+- 这是一个个人自用项目，功能并不稳定，可能随时修改。
+- 使用前必须先将仓库 `git clone` 到本地，并还原 submodule：
+
+```bash
+git clone <仓库地址>
+cd Cerebr
+git submodule update --init --recursive
+```
+
+- 然后打开 `chrome://extensions`，启用**开发者模式**，点击**加载已解压的扩展程序**并选择仓库根目录。
 
 ## 📸 功能预览
 
