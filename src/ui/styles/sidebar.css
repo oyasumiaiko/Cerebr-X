@@ -5576,12 +5576,14 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 /* 右键菜单：聊天记录上下文菜单 */
 .chat-history-context-menu {
     position: fixed;
-    background: var(--cerebr-bg-color);
-    border: 1px solid var(--cerebr-border-color);
+    background: color-mix(in srgb, var(--cerebr-bg-color) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 82%, transparent);
     border-radius: 4px;
     padding: 4px 0;
     z-index: 10001;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(var(--cerebr-main-ui-blur-radius, 0px));
+    -webkit-backdrop-filter: blur(var(--cerebr-main-ui-blur-radius, 0px));
 }
 
 /* 右键菜单选项 */
