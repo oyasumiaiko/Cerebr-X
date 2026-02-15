@@ -114,16 +114,30 @@ export function mergeConversationSaveMetadataState(input = {}) {
 
     const summarySource = normalizeOptionalTrimmedString(existingConversation.summarySource);
     summarySourceToSave = summarySource || null;
+    const isManualSummary = summarySource === 'manual';
+    const existingSummary = normalizeOptionalTrimmedString(existingConversation.summary);
+    const normalizedSummaryCandidate = normalizeOptionalTrimmedString(summaryCandidate);
+    const candidateLooksSummary = normalizedSummaryCandidate.startsWith('[总结]');
+    const existingLooksSummary = existingSummary.startsWith('[总结]');
+    const shouldSyncSummaryWithMetadata = !isManualSummary
+      && !!normalizedSummaryCandidate
+      && (candidateLooksSummary || existingLooksSummary);
 
     const parentConversationId = normalizeOptionalTrimmedString(existingConversation.parentConversationId);
     const forkedFromMessageId = normalizeOptionalTrimmedString(existingConversation.forkedFromMessageId);
     parentConversationIdToSave = parentConversationId || null;
     forkedFromMessageIdToSave = forkedFromMessageId || null;
 
-    if (existingConversation.summary) {
-      summaryToSave = existingConversation.summary;
+    // 总结类会话（[总结] 前缀）在非手动重命名场景下，始终跟随元数据标题重算，避免 SPA 页面切换后出现“URL/标题已更新但列表标题旧值残留”。
+    if (shouldSyncSummaryWithMetadata) {
+      summaryToSave = normalizedSummaryCandidate;
+      if (!summarySourceToSave) {
+        summarySourceToSave = 'default';
+      }
+    } else if (existingSummary) {
+      summaryToSave = existingSummary;
     } else if (existingConversation.title) {
-      summaryToSave = summaryFromExistingTitle;
+      summaryToSave = summaryFromExistingTitle || normalizedSummaryCandidate;
     }
   }
 

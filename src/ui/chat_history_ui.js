@@ -6256,6 +6256,18 @@ export function createChatHistoryUI(appContext) {
     return { label, isValid, title };
   }
 
+  function resolveConversationListSummary(conversation) {
+    const rawSummary = (typeof conversation?.summary === 'string') ? conversation.summary.trim() : '';
+    const summarySource = (typeof conversation?.summarySource === 'string') ? conversation.summarySource.trim() : '';
+    const title = (typeof conversation?.title === 'string') ? conversation.title.trim() : '';
+    const isSummaryTag = rawSummary.startsWith('[总结]');
+    // 非手动标题下，summary 列表标题与元数据 title 同步，避免出现“预览元数据正确、列表标题滞后”的错位。
+    if (isSummaryTag && summarySource !== 'manual') {
+      return title ? `[总结] ${title}` : '[总结]';
+    }
+    return rawSummary || '无摘要';
+  }
+
   function createConversationItemElement(conv, highlightPlan, isPinned) {
     const item = document.createElement('div');
     item.className = 'chat-history-item';
@@ -6285,7 +6297,7 @@ export function createChatHistoryUI(appContext) {
 
     const summaryDiv = document.createElement('div');
     summaryDiv.className = 'summary';
-    let displaySummary = conv.summary || '无摘要';
+    const displaySummary = resolveConversationListSummary(conv);
     const highlightTerms = Array.isArray(highlightPlan?.termsLower) && highlightPlan.termsLower.length
       ? highlightPlan.termsLower
       : (Array.isArray(highlightPlan?.terms) ? highlightPlan.terms : []);
@@ -6530,7 +6542,7 @@ export function createChatHistoryUI(appContext) {
     // 预览 tooltip 元信息：供 Ctrl 预览模式使用（按住 Ctrl 才展示）
     const hoverMeta = {
       conversationId: conv.id,
-      title: (typeof conv?.summary === 'string' && conv.summary.trim()) ? conv.summary.trim() : '无摘要',
+      title: displaySummary,
       meta: displayInfos,
       submeta: [conv?.title, conv?.url].map(v => (typeof v === 'string' ? v.trim() : '')).filter(Boolean).join(' · ')
     };
