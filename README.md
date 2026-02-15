@@ -15,32 +15,52 @@
 ## 📸 Feature Highlights
 
 ### Main interface
-![Main interface](./statics/readme/readme-main-ui.png)
+<p align="center">
+  <img src="./statics/readme/readme-main-ui.png" alt="Main interface" width="720" height="848" />
+</p>
 
 ### One-click web page summary, or one-click YouTube video summary with subtitle extensions
-![One-click summary](./statics/readme/readme-one-click-summary.png)
+<p align="center">
+  <img src="./statics/readme/readme-one-click-summary.png" alt="One-click summary" width="1200" height="515" />
+</p>
 
 ### Powerful chat history management and fast full-text search
-![Chat history management 1](./statics/readme/readme-history-search-1.png)
-![Chat history management 2](./statics/readme/readme-history-search-2.png)
+<p align="center">
+  <img src="./statics/readme/readme-history-search-1.png" alt="Chat history management 1" width="760" height="894" />
+</p>
+<p align="center">
+  <img src="./statics/readme/readme-history-search-2.png" alt="Chat history management 2" width="620" height="864" />
+</p>
 
 ### Detailed customizable personalization and color themes
-![Theme customization](./statics/readme/readme-theme-customization.png)
+<p align="center">
+  <img src="./statics/readme/readme-theme-customization.png" alt="Theme customization" width="520" height="710" />
+</p>
 
 ### Auto-name conversations with specified APIs and custom prompts, plus custom image export layout, resolution, and appearance
-![Auto title and export settings](./statics/readme/readme-auto-title-and-export-settings.png)
+<p align="center">
+  <img src="./statics/readme/readme-auto-title-and-export-settings.png" alt="Auto title and export settings" width="560" height="584" />
+</p>
 
 ### Unified chat history gallery for quickly viewing all images in conversations
-![Chat image gallery](./statics/readme/readme-image-gallery.png)
+<p align="center">
+  <img src="./statics/readme/readme-image-gallery.png" alt="Chat image gallery" width="620" height="866" />
+</p>
 
 ### Fullscreen conversation mode and thread mode for selecting message snippets and quickly explaining them with custom prompts
-![Fullscreen and thread mode](./statics/readme/readme-fullscreen-thread-mode.png)
+<p align="center">
+  <img src="./statics/readme/readme-fullscreen-thread-mode.png" alt="Fullscreen and thread mode" width="1200" height="626" />
+</p>
 
 Explore any rabbit hole you want to explore.
 
 ### One-click export messages into custom-sized and custom-layout images for fast sharing
-![Message export 1](./statics/readme/readme-export-image-1.png)
-![Message export 2](./statics/readme/readme-export-image-2.png)
+<p align="center">
+  <img src="./statics/readme/readme-export-image-1.png" alt="Message export 1" width="840" height="632" />
+</p>
+<p align="center">
+  <img src="./statics/readme/readme-export-image-2.png" alt="Message export 2" width="420" height="1313" />
+</p>
 
 ## ✨ Core Features
 

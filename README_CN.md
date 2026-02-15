@@ -15,32 +15,52 @@
 ## 📸 功能预览
 
 ### 主界面
-![主界面](./statics/readme/readme-main-ui.png)
+<p align="center">
+  <img src="./statics/readme/readme-main-ui.png" alt="主界面" width="720" height="848" />
+</p>
 
 ### 一键总结网页，或配合 YouTube 字幕插件一键总结 YouTube 视频
-![一键总结网页与 YouTube 视频](./statics/readme/readme-one-click-summary.png)
+<p align="center">
+  <img src="./statics/readme/readme-one-click-summary.png" alt="一键总结网页与 YouTube 视频" width="1200" height="515" />
+</p>
 
 ### 强大的聊天记录管理和快速聊天记录全文搜索
-![聊天记录管理与搜索 1](./statics/readme/readme-history-search-1.png)
-![聊天记录管理与搜索 2](./statics/readme/readme-history-search-2.png)
+<p align="center">
+  <img src="./statics/readme/readme-history-search-1.png" alt="聊天记录管理与搜索 1" width="760" height="894" />
+</p>
+<p align="center">
+  <img src="./statics/readme/readme-history-search-2.png" alt="聊天记录管理与搜索 2" width="620" height="864" />
+</p>
 
 ### 详细的自定义个性化配色设置
-![个性化配色设置](./statics/readme/readme-theme-customization.png)
+<p align="center">
+  <img src="./statics/readme/readme-theme-customization.png" alt="个性化配色设置" width="520" height="710" />
+</p>
 
 ### 使用指定 API 和自定义提示词为对话自动命名，自定义图片导出布局、分辨率和外观格式
-![自动命名与导出设置](./statics/readme/readme-auto-title-and-export-settings.png)
+<p align="center">
+  <img src="./statics/readme/readme-auto-title-and-export-settings.png" alt="自动命名与导出设置" width="560" height="584" />
+</p>
 
 ### 统一的聊天记录相册，快速查看聊天记录中的所有图片
-![聊天记录相册](./statics/readme/readme-image-gallery.png)
+<p align="center">
+  <img src="./statics/readme/readme-image-gallery.png" alt="聊天记录相册" width="620" height="866" />
+</p>
 
 ### 全屏对话模式与线程模式，允许对聊天记录中的文本片段划词并使用自定义提示词快速解释，并深入对话
-![全屏对话与线程模式](./statics/readme/readme-fullscreen-thread-mode.png)
+<p align="center">
+  <img src="./statics/readme/readme-fullscreen-thread-mode.png" alt="全屏对话与线程模式" width="1200" height="626" />
+</p>
 
 探索任何一个你想探索的兔子洞。
 
 ### 对消息一键导出为自定义大小和布局的图片，方便快速分享
-![消息导出图片 1](./statics/readme/readme-export-image-1.png)
-![消息导出图片 2](./statics/readme/readme-export-image-2.png)
+<p align="center">
+  <img src="./statics/readme/readme-export-image-1.png" alt="消息导出图片 1" width="840" height="632" />
+</p>
+<p align="center">
+  <img src="./statics/readme/readme-export-image-2.png" alt="消息导出图片 2" width="420" height="1313" />
+</p>
 
 ## ✨ 核心特性
 
