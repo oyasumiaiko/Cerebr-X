@@ -3758,11 +3758,14 @@ export function createChatHistoryUI(appContext) {
       const handleKeydown = (event) => {
         if (event.key === 'Escape') {
           event.preventDefault();
+          // 拦截 Esc，避免透传到底层面板/菜单导致“关闭两层 UI”的连锁行为。
+          event.stopPropagation();
           finish(null);
           return;
         }
         if (event.key === 'Enter' && !multiline) {
           event.preventDefault();
+          event.stopPropagation();
           attemptConfirm();
         }
       };
@@ -3770,9 +3773,14 @@ export function createChatHistoryUI(appContext) {
       cancelButton.addEventListener('click', () => finish(null));
       confirmButton.addEventListener('click', attemptConfirm);
       root.addEventListener('mousedown', (event) => {
+        // 屏蔽事件冒泡，防止外层文档级 click/mousedown 监听器误判为“点击空白处”而关闭其它菜单。
+        event.stopPropagation();
         if (event.target === root) {
           finish(null);
         }
+      });
+      root.addEventListener('click', (event) => {
+        event.stopPropagation();
       });
       document.addEventListener('keydown', handleKeydown, true);
       document.body.appendChild(root);
