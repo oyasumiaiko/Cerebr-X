@@ -5506,7 +5506,6 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 
 #chat-history-panel .panel-header .chat-history-panel-pin-btn i {
     pointer-events: none;
-    font-size: 13px;
 }
 
 #chat-history-panel .panel-header .chat-history-panel-pin-btn.is-active {

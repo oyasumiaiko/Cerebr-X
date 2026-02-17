@@ -8727,7 +8727,7 @@ export function createChatHistoryUI(appContext) {
   const CHAT_HISTORY_PANEL_PIN_DATASET_KEY = 'outsideClickPinned';
   const CHAT_HISTORY_PANEL_PIN_ATTRIBUTE = 'data-outside-click-pinned';
   const CHAT_HISTORY_PANEL_PIN_BUTTON_CLASS = 'chat-history-panel-pin-btn';
-  const CHAT_HISTORY_PANEL_PIN_BUTTON_HTML = '<i class="fa-solid fa-thumbtack"></i>';
+  const CHAT_HISTORY_PANEL_PIN_BUTTON_HTML = '<i class="far fa-thumbtack"></i>';
   const CHAT_HISTORY_PANEL_FULLSCREEN_LAYOUT_STORAGE_KEY = 'cerebr.chat_history_panel_fullscreen_layout_v1';
   const CHAT_HISTORY_PANEL_LAYOUT_STORAGE_VERSION = 1;
 
