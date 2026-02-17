@@ -772,8 +772,25 @@ export function createSelectionThreadManager(appContext) {
 
     const titleDisplayName = matchedConfig?.displayName || node.apiDisplayName || '-';
     const titleModelId = matchedConfig?.modelName || node.apiModelId || '-';
-    const thoughtFlag = hasThoughtSignature ? ' | thought_signature: stored' : '';
-    footer.title = `API uuid: ${node.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}${thoughtFlag}`;
+    const normalizeToken = (value) => {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0) return null;
+      return Math.round(parsed);
+    };
+    const usage = (node.apiUsage && typeof node.apiUsage === 'object') ? node.apiUsage : null;
+    const promptTokens = normalizeToken(usage?.promptTokens ?? usage?.prompt_tokens);
+    const completionTokens = normalizeToken(usage?.completionTokens ?? usage?.completion_tokens);
+    const totalTokens = normalizeToken(usage?.totalTokens ?? usage?.total_tokens);
+    const titleLines = [
+      `API uuid: ${node.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}`
+    ];
+    if (hasThoughtSignature) {
+      titleLines.push('thought_signature: stored');
+    }
+    if (promptTokens != null) titleLines.push(`prompt_tokens: ${promptTokens}`);
+    if (completionTokens != null) titleLines.push(`completion_tokens: ${completionTokens}`);
+    if (totalTokens != null) titleLines.push(`total_tokens: ${totalTokens}`);
+    footer.title = titleLines.join('\n');
   }
 
   function collectThreadChain(annotation) {

@@ -1233,6 +1233,7 @@ export function createMessageSender(appContext) {
       apiUuid: null,
       apiDisplayName: '',
       apiModelId: '',
+      apiUsage: null,
       hasInlineImages: false,
       promptType: null,
       promptMeta: null,
@@ -2207,6 +2208,8 @@ export function createMessageSender(appContext) {
       node.thoughtSignatureSource = null;
       node.reasoning_content = null;
       node.tool_calls = null;
+      // 原地替换时清空旧的 token 用量，避免本次请求未回传 usage 时显示陈旧数据。
+      node.apiUsage = null;
       return true;
     } catch (_) {
       return false;
@@ -3358,6 +3361,34 @@ export function createMessageSender(appContext) {
 
   // Message composition itself is delegated to composeMessages in message_composer.js.
 
+  function normalizeApiUsageMeta(rawUsage) {
+    if (!rawUsage || typeof rawUsage !== 'object') return null;
+    const normalizeValue = (value) => {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0) return null;
+      return Math.round(parsed);
+    };
+    const promptTokens = normalizeValue(rawUsage.prompt_tokens ?? rawUsage.promptTokens);
+    const completionTokens = normalizeValue(rawUsage.completion_tokens ?? rawUsage.completionTokens);
+    const totalTokens = normalizeValue(rawUsage.total_tokens ?? rawUsage.totalTokens);
+    if (promptTokens == null && completionTokens == null && totalTokens == null) return null;
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens
+    };
+  }
+
+  function buildApiUsageTitleLines(rawUsage) {
+    const usage = normalizeApiUsageMeta(rawUsage);
+    if (!usage) return [];
+    const lines = [];
+    if (usage.promptTokens != null) lines.push(`prompt_tokens: ${usage.promptTokens}`);
+    if (usage.completionTokens != null) lines.push(`completion_tokens: ${usage.completionTokens}`);
+    if (usage.totalTokens != null) lines.push(`total_tokens: ${usage.totalTokens}`);
+    return lines;
+  }
+
   /**
    * 统一封装 AI 响应 UI 副作用：
    * - API 元信息落库 + footer 渲染；
@@ -3411,8 +3442,14 @@ export function createMessageSender(appContext) {
 
         const titleDisplayName = matchedConfig?.displayName || nodeLike.apiDisplayName || '-';
         const titleModelId = matchedConfig?.modelName || nodeLike.apiModelId || '-';
-        const thoughtFlag = hasThoughtSignature ? ' | thought_signature: stored' : '';
-        footer.title = `API uuid: ${nodeLike.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}${thoughtFlag}`;
+        const titleLines = [
+          `API uuid: ${nodeLike.apiUuid || '-'} | displayName: ${titleDisplayName} | model: ${titleModelId}`
+        ];
+        if (hasThoughtSignature) {
+          titleLines.push('thought_signature: stored');
+        }
+        titleLines.push(...buildApiUsageTitleLines(nodeLike.apiUsage));
+        footer.title = titleLines.join('\n');
       } catch (e) {
         console.warn('渲染API footer失败:', e);
       }
@@ -3437,6 +3474,27 @@ export function createMessageSender(appContext) {
         renderApiFooter(messageDiv || fallbackEl, node);
       } catch (e) {
         console.warn('记录/渲染API信息失败:', e);
+      }
+    }
+
+    function applyUsageMetaToMessage(messageId, rawUsage, messageDiv) {
+      try {
+        if (!messageId) return;
+        const usageMeta = normalizeApiUsageMeta(rawUsage);
+        if (!usageMeta) return;
+        const node = resolveAttemptAiNode(attemptState, messageId);
+        if (node) {
+          node.apiUsage = usageMeta;
+        }
+        const safeMessageId = escapeMessageIdForSelector(messageId);
+        const selector = safeMessageId ? `.message[data-message-id="${safeMessageId}"]` : '';
+        const fallbackEl = selector
+          ? (chatContainer.querySelector(selector)
+            || (threadContext?.container ? threadContext.container.querySelector(selector) : null))
+          : null;
+        renderApiFooter(messageDiv || fallbackEl, node);
+      } catch (e) {
+        console.warn('记录/渲染API用量失败:', e);
       }
     }
 
@@ -3484,6 +3542,7 @@ export function createMessageSender(appContext) {
     return {
       getUiContainer,
       applyApiMetaToMessage,
+      applyUsageMetaToMessage,
       renderApiFooter,
       promoteLoadingMessageToAi
     };
@@ -3510,6 +3569,7 @@ export function createMessageSender(appContext) {
     const {
       getUiContainer,
       applyApiMetaToMessage,
+      applyUsageMetaToMessage,
       renderApiFooter,
       promoteLoadingMessageToAi
     } = createResponseUiBindings({
@@ -3554,6 +3614,8 @@ export function createMessageSender(appContext) {
 	    let latestOpenAIReasoningContent = '';
 	    // OpenAI 兼容：累积 tool_calls（流式增量会把 function.arguments 分片输出）
 	    let latestOpenAIToolCalls = [];
+      // OpenAI 兼容：记录末尾 usage 分片（通常出现在 finish_reason=stop 的最后一个 chunk）。
+      let latestOpenAIUsage = null;
 		    // 当前流对应的 AI 消息 ID：
 		    // - 普通发送：首个 token 到达时新建消息并赋值；
 		    // - “原地替换”重新生成：sendMessageCore 会预先把 attempt.aiMessageId 设为目标消息ID，这里直接复用。
@@ -3788,9 +3850,12 @@ export function createMessageSender(appContext) {
 	    // 流式响应结束：强制刷新最后一帧，避免尾部 token 被节流合并后未能落到 UI。
 	    try { uiUpdateThrottler.flush({ force: true }); } catch (_) {}
 
-		    // 流式响应结束后，将“签名/推理元信息”写入当前 AI 消息节点，并刷新 footer 标记
+	    // 流式响应结束后，将“签名/推理元信息”写入当前 AI 消息节点，并刷新 footer 标记
 		    // - Gemini：Thought Signature（part-level thought_signature）
 		    // - OpenAI 兼容：thoughtSignature（message-level thoughtSignature + reasoning_content/tool_calls）
+      if (currentAiMessageId && latestOpenAIUsage) {
+        applyUsageMetaToMessage(currentAiMessageId, latestOpenAIUsage);
+      }
 		    if (currentAiMessageId && (latestGeminiThoughtSignature || latestOpenAIThoughtSignature || (Array.isArray(latestOpenAIToolCalls) && latestOpenAIToolCalls.length > 0))) {
 		      try {
 	        const node = resolveAttemptAiNode(attemptState, currentAiMessageId);
@@ -4099,6 +4164,13 @@ export function createMessageSender(appContext) {
       }
 
 	      const delta = data.choices?.[0]?.delta || {};
+      const usageFromChunk = normalizeApiUsageMeta(data?.usage);
+      if (usageFromChunk) {
+        latestOpenAIUsage = usageFromChunk;
+        if (currentAiMessageId) {
+          applyUsageMetaToMessage(currentAiMessageId, usageFromChunk);
+        }
+      }
 
 	      // 1) OpenAI 兼容：捕获推理签名（对应 reasoning_content/reasoning）
 	      const extractedThoughtSignature =
@@ -4180,6 +4252,7 @@ export function createMessageSender(appContext) {
     const {
       getUiContainer,
       applyApiMetaToMessage,
+      applyUsageMetaToMessage,
       renderApiFooter,
       promoteLoadingMessageToAi
     } = createResponseUiBindings({
@@ -4208,6 +4281,7 @@ export function createMessageSender(appContext) {
       const text = await response.text().catch(() => '');
       throw new Error(text || '解析响应失败');
     }
+    const responseUsageMeta = normalizeApiUsageMeta(json?.usage);
 
     // 错误处理（通用）
     if (json && json.error) {
@@ -4373,6 +4447,7 @@ export function createMessageSender(appContext) {
             // 重新生成（原地替换）：一旦开始写回新内容，旧签名就不再匹配，必须先清空
             clearBoundSignatureForRegenerate(existingMessageId, attemptState);
             applyApiMetaToMessage(existingMessageId, usedApiConfig, existingEl);
+            applyUsageMetaToMessage(existingMessageId, responseUsageMeta, existingEl);
             // 在历史节点上记录推理签名，并刷新 footer 标记
             if (thoughtSignature) {
               try {
@@ -4422,6 +4497,7 @@ export function createMessageSender(appContext) {
       bindAttemptAiMessage(attemptState, promotedId);
       try {
         const node = resolveAttemptAiNode(attemptState, promotedId);
+        applyUsageMetaToMessage(promotedId, responseUsageMeta, loadingMessage);
         if (node && thoughtSignature) {
           node.thoughtSignature = thoughtSignature;
           if (thoughtSignatureSource) node.thoughtSignatureSource = thoughtSignatureSource;
@@ -4463,6 +4539,7 @@ export function createMessageSender(appContext) {
         // 绑定本次 AI 消息到 attempt，便于按消息粒度中止/清理
         bindAttemptAiMessage(attemptState, messageId, createdNode);
         applyApiMetaToMessage(messageId, usedApiConfig);
+        applyUsageMetaToMessage(messageId, responseUsageMeta);
         updateThreadLastMessage(threadContext, messageId);
         if (thoughtSignature) {
           try {
@@ -4515,6 +4592,7 @@ export function createMessageSender(appContext) {
       // 绑定本次 AI 消息到 attempt，便于按消息粒度中止/清理
       bindAttemptAiMessage(attemptState, messageId);
       applyApiMetaToMessage(messageId, usedApiConfig, newAiMessageDiv);
+      applyUsageMetaToMessage(messageId, responseUsageMeta, newAiMessageDiv);
       updateThreadLastMessage(threadContext, messageId);
       // 在历史节点上记录推理签名，供后续多轮对话回传使用，并刷新 footer 标记
       if (thoughtSignature) {
