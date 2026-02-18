@@ -161,6 +161,28 @@ export function createContextMenuManager(appContext) {
     return chatContainer;
   }
 
+  function findAdjacentMessageElement(baseElement, direction = 'next') {
+    if (!baseElement) return null;
+    const usePrev = direction === 'previous';
+    let cursor = usePrev ? baseElement.previousElementSibling : baseElement.nextElementSibling;
+    while (cursor && !(cursor.classList && cursor.classList.contains('message'))) {
+      cursor = usePrev ? cursor.previousElementSibling : cursor.nextElementSibling;
+    }
+    return (cursor instanceof HTMLElement) ? cursor : null;
+  }
+
+  function canInsertBeforeMessage(baseElement) {
+    if (!baseElement) return false;
+    const baseMessageId = baseElement.getAttribute('data-message-id') || '';
+    if (!baseMessageId) return false;
+    const baseNode = findHistoryMessageById(baseMessageId);
+    if (!baseNode) return false;
+    const previousVisible = findAdjacentMessageElement(baseElement, 'previous');
+    if (previousVisible) return true;
+    if (baseNode.parentId) return true;
+    return typeof chatHistoryManager?.addMessageToTreeWithOptions === 'function';
+  }
+
   function findHistoryMessageById(messageId) {
     const id = (typeof messageId === 'string') ? messageId.trim() : '';
     if (!id || !chatHistoryManager?.chatHistory?.messages) return null;
@@ -789,6 +811,14 @@ export function createContextMenuManager(appContext) {
     if (insertMessageMenu) {
       insertMessageMenu.style.display = canShowInsertOptions ? 'flex' : 'none';
       if (canShowInsertOptions) {
+        const canInsertBefore = canInsertBeforeMessage(messageElement);
+        if (insertMessageSubmenuList) {
+          const beforeItems = insertMessageSubmenuList.querySelectorAll('.context-menu-submenu-item[data-insert-position="before"]');
+          beforeItems.forEach((item) => {
+            item.dataset.disabled = canInsertBefore ? 'false' : 'true';
+            item.classList.toggle('is-disabled', !canInsertBefore);
+          });
+        }
         updateSubmenuDirection(insertMessageMenu, insertMessageSubmenu);
       } else {
         closeContextSubmenu(insertMessageSubmenu, insertMessageMenu);
@@ -1062,16 +1092,7 @@ export function createContextMenuManager(appContext) {
         return null;
       }
 
-      // 找到“基准消息下方”的那条消息（如果存在），用于精确插入位置
-      const findNextMessageElement = (el) => {
-        let next = el ? el.nextElementSibling : null;
-        while (next && !(next.classList && next.classList.contains('message'))) {
-          next = next.nextElementSibling;
-        }
-        return next;
-      };
-
-      const nextMessageElement = findNextMessageElement(baseElement);
+      const nextMessageElement = findAdjacentMessageElement(baseElement, 'next');
       const nextMessageId = nextMessageElement
         ? (nextMessageElement.getAttribute('data-message-id') || null)
         : null;
@@ -1143,6 +1164,121 @@ export function createContextMenuManager(appContext) {
   }
 
   /**
+   * 在指定消息上方插入一条空白消息（支持“第一条消息之前”）。
+   *
+   * 关键场景：
+   * - 若存在可见前驱消息，等价于“在前驱之后插入”；
+   * - 若当前是容器首条可见消息，但历史上仍有 parent（例如线程首条可见消息的隐藏 root），
+   *   则挂到 parent 后并把 base 作为 next；
+   * - 若当前就是会话根消息，则创建新的根节点并把旧根挂到其下。
+   */
+  async function insertBlankMessageBefore(sender, baseElement, options = {}) {
+    let newMessageDiv = null;
+    try {
+      if (!baseElement) return null;
+      const targetContainer = currentMessageContainer || resolveMessageContainer(baseElement) || chatContainer;
+      const baseMessageId = baseElement.getAttribute('data-message-id') || '';
+      if (!baseMessageId) return null;
+      if (!chatHistoryManager || typeof chatHistoryManager.insertMessageAfter !== 'function') {
+        console.warn('insertMessageAfter 不存在，无法插入消息');
+        return null;
+      }
+      if (!messageProcessor || typeof messageProcessor.appendMessage !== 'function') {
+        console.warn('messageProcessor.appendMessage 不存在，无法插入消息');
+        return null;
+      }
+
+      const previousMessageElement = findAdjacentMessageElement(baseElement, 'previous');
+      if (previousMessageElement) {
+        return await insertBlankMessageAfter(sender, previousMessageElement, options);
+      }
+
+      const role = (sender === 'ai') ? 'assistant' : 'user';
+      const baseNode = findHistoryMessageById(baseMessageId);
+      if (!baseNode) return null;
+
+      let newNode = null;
+      if (baseNode.parentId) {
+        newNode = chatHistoryManager.insertMessageAfter(
+          baseNode.parentId,
+          role,
+          '',
+          { nextMessageId: baseMessageId }
+        );
+      } else {
+        if (typeof chatHistoryManager.addMessageToTreeWithOptions !== 'function') {
+          console.warn('addMessageToTreeWithOptions 不存在，无法在首条消息前插入');
+          return null;
+        }
+        newNode = chatHistoryManager.addMessageToTreeWithOptions(role, '', null, { preserveCurrentNode: true });
+        if (!newNode || !newNode.id) return null;
+        const historyMessages = chatHistoryManager?.chatHistory?.messages || [];
+        const createdIndex = historyMessages.findIndex((node) => node?.id === newNode.id);
+        const baseIndex = historyMessages.findIndex((node) => node?.id === baseMessageId);
+        if (createdIndex !== -1) {
+          historyMessages.splice(createdIndex, 1);
+        }
+        historyMessages.splice(baseIndex === -1 ? 0 : baseIndex, 0, newNode);
+        newNode.parentId = null;
+        newNode.children = [baseMessageId];
+        baseNode.parentId = newNode.id;
+        if (chatHistoryManager?.chatHistory) {
+          chatHistoryManager.chatHistory.root = newNode.id;
+        }
+      }
+      if (!newNode || !newNode.id) return null;
+
+      newMessageDiv = messageProcessor.appendMessage('', sender, true, null, null, null, null, null, {
+        container: targetContainer
+      });
+      if (!newMessageDiv) return null;
+      newMessageDiv.setAttribute('data-message-id', newNode.id);
+
+      if (sender === 'ai') {
+        const footer = newMessageDiv.querySelector('.api-footer');
+        if (!footer) {
+          const apiFooter = document.createElement('div');
+          apiFooter.className = 'api-footer';
+          newMessageDiv.appendChild(apiFooter);
+        }
+      }
+
+      if (baseElement.parentNode === targetContainer) {
+        targetContainer.insertBefore(newMessageDiv, baseElement);
+      } else if (newMessageDiv.parentNode !== targetContainer) {
+        targetContainer.prepend(newMessageDiv);
+      }
+
+      const shouldOpenEditor = options.openEditor === true;
+      if (shouldOpenEditor && !isEditing) {
+        try { startInlineEdit(newMessageDiv); } catch (e) { console.error('打开新插入消息的编辑器失败:', e); }
+      }
+      if (!options.skipSave) {
+        await chatHistoryUI.saveCurrentConversation(true);
+      }
+      return newMessageDiv;
+    } catch (e) {
+      console.error('插入空白消息失败:', e);
+      return null;
+    }
+  }
+
+  /**
+   * 在“当前右键选中的消息”上方插入一条空白消息。
+   * @param {'ai'|'user'} sender
+   */
+  async function insertBlankMessageAbove(sender) {
+    const baseElement = currentMessageElement;
+    try {
+      if (!baseElement) return;
+      hideContextMenu();
+      await insertBlankMessageBefore(sender, baseElement, { openEditor: true });
+    } finally {
+      hideContextMenu();
+    }
+  }
+
+  /**
    * 在“当前右键选中的消息”下方依次插入用户消息与 AI 消息，并打开用户消息编辑。
    */
   async function insertCombinedMessagesBelow() {
@@ -1152,6 +1288,32 @@ export function createContextMenuManager(appContext) {
       if (!baseElement) return;
       hideContextMenu();
       userMessageDiv = await insertBlankMessageAfter('user', baseElement, {
+        openEditor: false,
+        skipSave: true
+      });
+      if (!userMessageDiv) return;
+      await insertBlankMessageAfter('ai', userMessageDiv, { openEditor: false, skipSave: true });
+      if (!isEditing) {
+        try { startInlineEdit(userMessageDiv); } catch (e) { console.error('打开新插入用户消息的编辑器失败:', e); }
+      }
+      await chatHistoryUI.saveCurrentConversation(true);
+    } catch (e) {
+      console.error('同时插入消息失败:', e);
+    } finally {
+      hideContextMenu();
+    }
+  }
+
+  /**
+   * 在“当前右键选中的消息”上方依次插入用户消息与 AI 消息，并打开用户消息编辑。
+   */
+  async function insertCombinedMessagesAbove() {
+    let userMessageDiv = null;
+    const baseElement = currentMessageElement;
+    try {
+      if (!baseElement) return;
+      hideContextMenu();
+      userMessageDiv = await insertBlankMessageBefore('user', baseElement, {
         openEditor: false,
         skipSave: true
       });
@@ -1550,17 +1712,31 @@ export function createContextMenuManager(appContext) {
         if (!item) return;
         event.preventDefault();
         event.stopPropagation();
+        if (item.dataset.disabled === 'true') return;
         const insertType = item.dataset.insertType;
+        const insertPosition = item.dataset.insertPosition === 'before' ? 'before' : 'after';
         if (insertType === 'both') {
-          insertCombinedMessagesBelow();
+          if (insertPosition === 'before') {
+            insertCombinedMessagesAbove();
+          } else {
+            insertCombinedMessagesBelow();
+          }
           return;
         }
         if (insertType === 'user') {
-          insertBlankMessageBelow('user');
+          if (insertPosition === 'before') {
+            insertBlankMessageAbove('user');
+          } else {
+            insertBlankMessageBelow('user');
+          }
           return;
         }
         if (insertType === 'ai') {
-          insertBlankMessageBelow('ai');
+          if (insertPosition === 'before') {
+            insertBlankMessageAbove('ai');
+          } else {
+            insertBlankMessageBelow('ai');
+          }
         }
       });
     }

@@ -3551,6 +3551,20 @@ input:checked + .slider::before {
     gap: 2px;
 }
 
+.context-menu-submenu-section-title {
+    padding: 6px 10px 4px;
+    font-size: 11px;
+    color: color-mix(in srgb, var(--cerebr-text-color) 68%, transparent);
+    user-select: none;
+    pointer-events: none;
+}
+
+.context-menu-submenu-section-title--divider {
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid color-mix(in srgb, var(--cerebr-border-color) 55%, transparent);
+}
+
 .context-menu-submenu-item {
     padding: 8px 10px;
     border-radius: 6px;
@@ -3570,6 +3584,10 @@ input:checked + .slider::before {
 .context-menu-submenu-item.is-disabled {
     opacity: 0.6;
     cursor: default;
+}
+
+.context-menu-submenu-item.is-disabled:hover {
+    background-color: transparent;
 }
 
 /* 创建分支对话按钮样式 */
