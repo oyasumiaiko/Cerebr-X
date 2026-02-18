@@ -1980,6 +1980,25 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    width: 100%;
+}
+
+.settings-template-variable-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.settings-template-variable-group + .settings-template-variable-group {
+    padding-top: 6px;
+    border-top: 1px dashed color-mix(in srgb, var(--cerebr-border-color) 55%, transparent);
+}
+
+.settings-template-variable-group-title {
+    font-size: 0.78em;
+    opacity: 0.7;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
 }
 
 .settings-template-variable-chip {

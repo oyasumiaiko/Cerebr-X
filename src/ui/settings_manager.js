@@ -681,8 +681,9 @@ export function createSettingsManager(appContext) {
       rows: 5,
       placeholder: '示例：{{display_with_total_tokens_k}} 或 {{apiname}} · {{total_tokens_k}} tok',
       copyableVariablesTitle: '可用变量（点击复制）',
-      copyableVariablesHint: '已去除同义别名；点击即复制 {{变量名}}。',
+      copyableVariablesHint: '已去除同义别名；按分组换行展示，点击即复制 {{变量名}}。',
       copyableVariables: AI_FOOTER_TEMPLATE_VARIABLES,
+      hideClearButton: true,
       defaultValue: DEFAULT_SETTINGS.aiFooterTemplate,
       readFromUI: (el) => (typeof el?.value === 'string' ? el.value : ''),
       writeToUI: (el, value) => {
@@ -1611,7 +1612,7 @@ export function createSettingsManager(appContext) {
           }
           item.appendChild(input);
 
-          if (def.key !== 'conversationTitlePrompt') {
+          if (def.key !== 'conversationTitlePrompt' && def.hideClearButton !== true) {
             const actionBar = document.createElement('div');
             actionBar.className = 'settings-input-actions';
             const clearBtn = document.createElement('button');
@@ -1638,46 +1639,81 @@ export function createSettingsManager(appContext) {
             tooltipTitle.textContent = def.copyableVariablesTitle || '可用变量（点击复制）';
             tooltip.appendChild(tooltipTitle);
 
-            const variableList = document.createElement('div');
-            variableList.className = 'settings-template-variable-list';
-
+            const groupedVariables = new Map();
+            const groupOrder = [];
             def.copyableVariables.forEach((entry) => {
               const variableKey = (typeof entry === 'string' ? entry : entry?.key || '').trim();
               if (!variableKey) return;
-              const description = (typeof entry === 'object' && entry?.description)
-                ? String(entry.description).trim()
+              const groupName = (typeof entry === 'object' && entry?.group)
+                ? String(entry.group).trim()
                 : '';
-              const variableToken = `{{${variableKey}}}`;
-              const variableButton = document.createElement('button');
-              variableButton.type = 'button';
-              variableButton.className = 'settings-template-variable-chip';
-              variableButton.textContent = variableToken;
-              if (description) {
-                variableButton.title = `${variableKey}：${description}`;
+              const normalizedGroup = groupName || '__default__';
+              if (!groupedVariables.has(normalizedGroup)) {
+                groupedVariables.set(normalizedGroup, []);
+                groupOrder.push(normalizedGroup);
               }
-              variableButton.addEventListener('click', async (evt) => {
-                evt.preventDefault();
-                evt.stopPropagation();
-                const copied = await copyTextToClipboard(variableToken);
-                if (copied) {
-                  showNotification?.({
-                    message: `已复制 ${variableToken}`,
-                    type: 'success',
-                    duration: 1200
-                  });
-                } else {
-                  showNotification?.({
-                    message: '复制失败，请重试',
-                    type: 'error',
-                    duration: 1800
-                  });
-                }
-              });
-              variableList.appendChild(variableButton);
+              groupedVariables.get(normalizedGroup).push(entry);
             });
 
-            if (variableList.childElementCount > 0) {
-              tooltip.appendChild(variableList);
+            const shouldShowGroupTitle = groupOrder.length > 1;
+            groupOrder.forEach((groupName) => {
+              const entries = groupedVariables.get(groupName) || [];
+              if (!entries.length) return;
+              const groupSection = document.createElement('div');
+              groupSection.className = 'settings-template-variable-group';
+
+              if (shouldShowGroupTitle) {
+                const groupTitle = document.createElement('div');
+                groupTitle.className = 'settings-template-variable-group-title';
+                groupTitle.textContent = (groupName === '__default__') ? '其它' : groupName;
+                groupSection.appendChild(groupTitle);
+              }
+
+              const variableList = document.createElement('div');
+              variableList.className = 'settings-template-variable-list';
+
+              entries.forEach((entry) => {
+                const variableKey = (typeof entry === 'string' ? entry : entry?.key || '').trim();
+                if (!variableKey) return;
+                const description = (typeof entry === 'object' && entry?.description)
+                  ? String(entry.description).trim()
+                  : '';
+                const variableToken = `{{${variableKey}}}`;
+                const variableButton = document.createElement('button');
+                variableButton.type = 'button';
+                variableButton.className = 'settings-template-variable-chip';
+                variableButton.textContent = variableToken;
+                if (description) {
+                  variableButton.title = `${variableKey}：${description}`;
+                }
+                variableButton.addEventListener('click', async (evt) => {
+                  evt.preventDefault();
+                  evt.stopPropagation();
+                  const copied = await copyTextToClipboard(variableToken);
+                  if (copied) {
+                    showNotification?.({
+                      message: `已复制 ${variableToken}`,
+                      type: 'success',
+                      duration: 1200
+                    });
+                  } else {
+                    showNotification?.({
+                      message: '复制失败，请重试',
+                      type: 'error',
+                      duration: 1800
+                    });
+                  }
+                });
+                variableList.appendChild(variableButton);
+              });
+
+              if (variableList.childElementCount > 0) {
+                groupSection.appendChild(variableList);
+                tooltip.appendChild(groupSection);
+              }
+            });
+
+            if (tooltip.querySelector('.settings-template-variable-chip')) {
               const tooltipHintText = (typeof def.copyableVariablesHint === 'string')
                 ? def.copyableVariablesHint.trim()
                 : '';
