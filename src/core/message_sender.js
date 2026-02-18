@@ -3391,9 +3391,11 @@ export function createMessageSender(appContext) {
         }
         const allConfigs = (apiManager.getAllConfigs && apiManager.getAllConfigs()) || [];
         const footerTemplate = settingsManager?.getSetting?.('aiFooterTemplate');
+        const footerTooltipTemplate = settingsManager?.getSetting?.('aiFooterTooltipTemplate');
         const renderData = buildApiFooterRenderData(nodeLike, {
           allConfigs,
-          template: footerTemplate
+          template: footerTemplate,
+          tooltipTemplate: footerTooltipTemplate
         });
         footer.textContent = renderData.text;
         footer.title = renderData.title;

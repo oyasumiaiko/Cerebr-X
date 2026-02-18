@@ -6,6 +6,7 @@
  */
 
 export const DEFAULT_AI_FOOTER_TEMPLATE = '{{display_label}}';
+export const DEFAULT_AI_FOOTER_TOOLTIP_TEMPLATE = '{{tooltip_api_line}}\n{{tooltip_signature_line}}\n{{tooltip_usage_lines}}';
 
 // AI footer 可配置模板变量（去重后的“主变量”清单，供设置界面展示/复制）。
 export const AI_FOOTER_TEMPLATE_VARIABLES = Object.freeze([
@@ -27,10 +28,17 @@ export const AI_FOOTER_TEMPLATE_VARIABLES = Object.freeze([
   { key: 'total_tokens_k', group: 'Tokens', description: '总 tokens（k/m/b）' },
   { key: 'usage_line', group: 'Tokens', description: 'in/out/total 汇总（千分位）' },
   { key: 'usage_line_k', group: 'Tokens', description: 'in/out/total 汇总（k/m/b）' },
+  { key: 'tooltip_api_line', group: 'Tooltip 快捷行', description: 'API uuid/displayName/model 的整行文案' },
+  { key: 'tooltip_signature_line', group: 'Tooltip 快捷行', description: '有签名时输出 thought_signature: stored' },
+  { key: 'tooltip_usage_lines', group: 'Tooltip 快捷行', description: '按可用项拼接的 token 多行（prompt/completion/total）' },
+  { key: 'tooltip_prompt_tokens_line', group: 'Tooltip 快捷行', description: 'prompt_tokens 行（无值为空）' },
+  { key: 'tooltip_completion_tokens_line', group: 'Tooltip 快捷行', description: 'completion_tokens 行（无值为空）' },
+  { key: 'tooltip_total_tokens_line', group: 'Tooltip 快捷行', description: 'total_tokens 行（无值为空）' },
   { key: 'timestamp', group: '时间', description: '消息时间戳（毫秒）' },
   { key: 'time', group: '时间', description: '时间（HH:mm）' },
   { key: 'date', group: '时间', description: '智能日期（非本日显示 M/D，非本年显示 YYYY/M/D）' },
-  { key: 'datetime', group: '时间', description: '智能日期 + 时间（date + HH:mm）' }
+  { key: 'datetime', group: '时间', description: '智能日期 + 时间（date + HH:mm）' },
+  { key: 'datetime_full', group: '时间', description: '完整日期时间（YYYY/MM/DD HH:mm:ss）' }
 ]);
 
 function toTrimmedText(value) {
@@ -110,6 +118,17 @@ function formatTimeHhMm(date) {
   return `${hh}:${mm}`;
 }
 
+function formatFullDateTime(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  const yyyy = String(date.getFullYear());
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mi = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
+}
+
 function hasTemplateValue(value) {
   if (value == null) return false;
   if (typeof value === 'boolean') return value;
@@ -176,6 +195,7 @@ export function buildApiFooterContext(nodeLike, matchedConfig = null) {
   const displayName = toTrimmedText(matchedConfig?.displayName) || toTrimmedText(nodeLike?.apiDisplayName);
   const modelName = toTrimmedText(matchedConfig?.modelName) || toTrimmedText(nodeLike?.apiModelId);
   const apiName = displayName || modelName;
+  const apiUuid = toTrimmedText(nodeLike?.apiUuid);
   const hasThoughtSignature = !!nodeLike?.thoughtSignature;
   const usage = normalizeApiUsageMeta(nodeLike?.apiUsage);
   const timestampMs = normalizeTimestampMs(nodeLike?.timestamp);
@@ -191,6 +211,17 @@ export function buildApiFooterContext(nodeLike, matchedConfig = null) {
   const timeLabel = formatTimeHhMm(date);
   const dateLabel = formatSmartDateLabel(date);
   const dateTimeLabel = dateLabel ? `${dateLabel} ${timeLabel}`.trim() : timeLabel;
+  const fullDateTimeLabel = formatFullDateTime(date);
+  const tooltipApiLine = `API uuid: ${apiUuid || '-'} | displayName: ${displayName || '-'} | model: ${modelName || '-'}`;
+  const tooltipSignatureLine = hasThoughtSignature ? 'thought_signature: stored' : '';
+  const tooltipPromptTokensLine = (usage?.promptTokens != null) ? `prompt_tokens: ${usage.promptTokens}` : '';
+  const tooltipCompletionTokensLine = (usage?.completionTokens != null) ? `completion_tokens: ${usage.completionTokens}` : '';
+  const tooltipTotalTokensLine = (usage?.totalTokens != null) ? `total_tokens: ${usage.totalTokens}` : '';
+  const tooltipUsageLines = [
+    tooltipPromptTokensLine,
+    tooltipCompletionTokensLine,
+    tooltipTotalTokensLine
+  ].filter(Boolean).join('\n');
 
   const displayLabel = hasThoughtSignature
     ? (apiName ? `signatured · ${apiName}` : 'signatured')
@@ -207,7 +238,7 @@ export function buildApiFooterContext(nodeLike, matchedConfig = null) {
     display_with_total_tokens_k: displayWithTotalTokensK,
     display_with_usage_k: displayWithUsageK,
     apiname: apiName || '',
-    api_uuid: toTrimmedText(nodeLike?.apiUuid),
+    api_uuid: apiUuid,
     display_name: displayName || '',
     model: modelName || '',
     signature: hasThoughtSignature ? 'signatured' : '',
@@ -225,10 +256,17 @@ export function buildApiFooterContext(nodeLike, matchedConfig = null) {
     completion_tokens_k: completionTokensK,
     usage_line: usageLine,
     usage_line_k: usageLineK,
+    tooltip_api_line: tooltipApiLine,
+    tooltip_signature_line: tooltipSignatureLine,
+    tooltip_usage_lines: tooltipUsageLines,
+    tooltip_prompt_tokens_line: tooltipPromptTokensLine,
+    tooltip_completion_tokens_line: tooltipCompletionTokensLine,
+    tooltip_total_tokens_line: tooltipTotalTokensLine,
     timestamp: timestampMs != null ? String(timestampMs) : '',
     time: timeLabel,
     date: dateLabel,
-    datetime: dateTimeLabel
+    datetime: dateTimeLabel,
+    datetime_full: fullDateTimeLabel
   };
 }
 
@@ -251,21 +289,11 @@ export function renderApiFooterTemplate(template, context = {}) {
 /**
  * 生成 footer tooltip（标题）文本。
  */
-export function buildApiFooterTitle(nodeLike, matchedConfig = null) {
-  const displayName = toTrimmedText(matchedConfig?.displayName) || toTrimmedText(nodeLike?.apiDisplayName);
-  const modelName = toTrimmedText(matchedConfig?.modelName) || toTrimmedText(nodeLike?.apiModelId);
-  const hasThoughtSignature = !!nodeLike?.thoughtSignature;
-  const usage = normalizeApiUsageMeta(nodeLike?.apiUsage);
-  const titleLines = [
-    `API uuid: ${toTrimmedText(nodeLike?.apiUuid) || '-'} | displayName: ${displayName || '-'} | model: ${modelName || '-'}`
-  ];
-  if (hasThoughtSignature) {
-    titleLines.push('thought_signature: stored');
-  }
-  if (usage?.promptTokens != null) titleLines.push(`prompt_tokens: ${usage.promptTokens}`);
-  if (usage?.completionTokens != null) titleLines.push(`completion_tokens: ${usage.completionTokens}`);
-  if (usage?.totalTokens != null) titleLines.push(`total_tokens: ${usage.totalTokens}`);
-  return titleLines.join('\n');
+export function buildApiFooterTitle(context, template) {
+  const sourceTemplate = (typeof template === 'string' && template.trim())
+    ? template
+    : DEFAULT_AI_FOOTER_TOOLTIP_TEMPLATE;
+  return renderApiFooterTemplate(sourceTemplate, context);
 }
 
 /**
@@ -276,7 +304,7 @@ export function buildApiFooterRenderData(nodeLike, options = {}) {
   const matchedConfig = resolveMatchedConfig(nodeLike, allConfigs);
   const context = buildApiFooterContext(nodeLike, matchedConfig);
   const text = renderApiFooterTemplate(options.template, context);
-  const title = buildApiFooterTitle(nodeLike, matchedConfig);
+  const title = buildApiFooterTitle(context, options.tooltipTemplate);
   return {
     text,
     title,

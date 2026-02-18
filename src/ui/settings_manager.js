@@ -5,7 +5,11 @@
 
 import { createThemeManager } from './theme_manager.js';
 import { queueStorageSet, queueStoragePrime } from '../utils/storage_write_queue_bridge.js';
-import { DEFAULT_AI_FOOTER_TEMPLATE, AI_FOOTER_TEMPLATE_VARIABLES } from '../utils/api_footer_template.js';
+import {
+  DEFAULT_AI_FOOTER_TEMPLATE,
+  DEFAULT_AI_FOOTER_TOOLTIP_TEMPLATE,
+  AI_FOOTER_TEMPLATE_VARIABLES
+} from '../utils/api_footer_template.js';
 
 /**
  * 创建设置管理器
@@ -135,6 +139,8 @@ export function createSettingsManager(appContext) {
     showModelNameInPlaceholder: true,
     // AI 消息末尾的 API 元数据模板（支持 {{var}} 占位）
     aiFooterTemplate: DEFAULT_AI_FOOTER_TEMPLATE,
+    // AI 消息末尾 tooltip 模板（支持 {{var}} 占位）
+    aiFooterTooltipTemplate: DEFAULT_AI_FOOTER_TOOLTIP_TEMPLATE,
     // 主题透明度拆分：背景层与元素层独立控制
     backgroundOpacity: 0.8,
     elementOpacity: 0.8,
@@ -685,6 +691,21 @@ export function createSettingsManager(appContext) {
       copyableVariables: AI_FOOTER_TEMPLATE_VARIABLES,
       hideClearButton: true,
       defaultValue: DEFAULT_SETTINGS.aiFooterTemplate,
+      readFromUI: (el) => (typeof el?.value === 'string' ? el.value : ''),
+      writeToUI: (el, value) => {
+        if (el) el.value = (typeof value === 'string') ? value : '';
+      }
+    },
+    {
+      key: 'aiFooterTooltipTemplate',
+      type: 'textarea',
+      label: 'AI 尾注 Tooltip 模板',
+      group: 'display',
+      rows: 5,
+      // 变量面板复用“AI 消息尾注模板”那一份，避免在相邻项重复渲染同样的标签列表。
+      placeholder: '示例：{{tooltip_api_line}}\n{{tooltip_signature_line}}\n{{tooltip_usage_lines}}\n（变量列表见上方“AI 消息尾注模板”）',
+      hideClearButton: true,
+      defaultValue: DEFAULT_SETTINGS.aiFooterTooltipTemplate,
       readFromUI: (el) => (typeof el?.value === 'string' ? el.value : ''),
       writeToUI: (el, value) => {
         if (el) el.value = (typeof value === 'string') ? value : '';

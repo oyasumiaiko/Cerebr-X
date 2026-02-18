@@ -3149,9 +3149,13 @@ export function createChatHistoryUI(appContext) {
     const footerTemplate = (typeof options.template === 'string')
       ? options.template
       : settingsManager?.getSetting?.('aiFooterTemplate');
+    const footerTooltipTemplate = (typeof options.tooltipTemplate === 'string')
+      ? options.tooltipTemplate
+      : settingsManager?.getSetting?.('aiFooterTooltipTemplate');
     const renderData = buildApiFooterRenderData(msg, {
       allConfigs,
-      template: footerTemplate
+      template: footerTemplate,
+      tooltipTemplate: footerTooltipTemplate
     });
     footer.textContent = renderData.text;
     footer.title = renderData.title;
@@ -3165,6 +3169,7 @@ export function createChatHistoryUI(appContext) {
     const nodeById = new Map(historyMessages.map(node => [node?.id, node]));
     const allConfigs = services.apiManager.getAllConfigs?.() || [];
     const footerTemplate = settingsManager?.getSetting?.('aiFooterTemplate');
+    const footerTooltipTemplate = settingsManager?.getSetting?.('aiFooterTooltipTemplate');
     const containers = [chatContainer, threadContainer].filter(Boolean);
 
     containers.forEach((container) => {
@@ -3176,17 +3181,20 @@ export function createChatHistoryUI(appContext) {
         renderApiFooterForMessageElement(messageElem, node, {
           role: 'ai',
           allConfigs,
-          template: footerTemplate
+          template: footerTemplate,
+          tooltipTemplate: footerTooltipTemplate
         });
       });
     });
   }
 
-  settingsManager?.subscribe?.('aiFooterTemplate', () => {
+  const refreshFooterOnSettingChanged = () => {
     try {
       refreshVisibleAiMessageFooters();
     } catch (_) {}
-  });
+  };
+  settingsManager?.subscribe?.('aiFooterTemplate', refreshFooterOnSettingChanged);
+  settingsManager?.subscribe?.('aiFooterTooltipTemplate', refreshFooterOnSettingChanged);
 
   /**
    * 加载选中的对话记录到当前聊天窗口
@@ -3232,6 +3240,7 @@ export function createChatHistoryUI(appContext) {
       return set;
     };
     const footerTemplate = settingsManager?.getSetting?.('aiFooterTemplate');
+    const footerTooltipTemplate = settingsManager?.getSetting?.('aiFooterTooltipTemplate');
     const apiConfigsSnapshot = services.apiManager.getAllConfigs?.() || [];
 
     // 遍历对话中的每条消息并显示
@@ -3298,7 +3307,8 @@ export function createChatHistoryUI(appContext) {
         renderApiFooterForMessageElement(messageElem, msg, {
           role,
           allConfigs: apiConfigsSnapshot,
-          template: footerTemplate
+          template: footerTemplate,
+          tooltipTemplate: footerTooltipTemplate
         });
       } catch (_) {}
 

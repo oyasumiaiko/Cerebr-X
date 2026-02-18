@@ -751,9 +751,11 @@ export function createSelectionThreadManager(appContext) {
 
     const allConfigs = apiManager?.getAllConfigs?.() || [];
     const footerTemplate = settingsManager?.getSetting?.('aiFooterTemplate');
+    const footerTooltipTemplate = settingsManager?.getSetting?.('aiFooterTooltipTemplate');
     const renderData = buildApiFooterRenderData(node, {
       allConfigs,
-      template: footerTemplate
+      template: footerTemplate,
+      tooltipTemplate: footerTooltipTemplate
     });
     footer.textContent = renderData.text;
     footer.title = renderData.title;
