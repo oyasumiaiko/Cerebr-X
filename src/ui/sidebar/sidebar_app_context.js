@@ -64,7 +64,6 @@ export function createSidebarAppContext(isStandalone) {
     screenshotButton: document.getElementById('screenshot-button'),
     sidebarPositionSwitch: document.getElementById('sidebar-position-switch'),
     forkConversationButton: document.getElementById('fork-conversation'),
-    flattenThreadToMainButton: document.getElementById('flatten-thread-to-main'),
     copyAsImageButton: document.getElementById('copy-as-image'),
     emptyStateHistory: document.getElementById('empty-state-history'),
     emptyStateSummary: document.getElementById('empty-state-summary'),

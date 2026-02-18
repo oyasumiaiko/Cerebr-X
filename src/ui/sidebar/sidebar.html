@@ -88,13 +88,17 @@
             <i class="far fa-stop"></i>
             停止更新
         </div>
-        <div class="context-menu-item" id="fork-conversation">
-            <i class="far fa-code-fork"></i>
-            创建分支
-        </div>
-        <div class="context-menu-item" id="flatten-thread-to-main" style="display: none;">
-            <i class="far fa-sitemap"></i>
-            展平到新聊天
+        <div class="context-menu-item context-menu-item--has-submenu" id="fork-conversation">
+            <div class="context-menu-item__label">
+                <i class="far fa-code-fork"></i>
+                <span>创建分支</span>
+            </div>
+            <i class="far fa-chevron-right context-menu-item__arrow"></i>
+            <div class="context-menu-submenu">
+                <div class="context-menu-submenu-list">
+                    <div class="context-menu-submenu-item" data-fork-action="thread-flatten-main">展平到新聊天</div>
+                </div>
+            </div>
         </div>
         <div class="context-menu-item context-menu-item--has-submenu" id="regenerate-message" style="display: none;">
             <div class="context-menu-item__label context-menu-item__label--stack">
