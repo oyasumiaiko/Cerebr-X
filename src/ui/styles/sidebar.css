@@ -4337,6 +4337,8 @@ input:checked + .slider::before {
     opacity: 0.55;
     color: var(--cerebr-text-color);
     text-align: right;
+    white-space: pre-line;
+    line-height: 1.35;
     user-select: text;
 }
 .dark-theme .api-footer { opacity: 0.6; }

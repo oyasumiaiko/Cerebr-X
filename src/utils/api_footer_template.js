@@ -133,10 +133,13 @@ function applyConditionalSections(template, context) {
 }
 
 function normalizeFooterText(value) {
-  return String(value ?? '')
-    .replace(/\r?\n+/g, ' ')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  // 保留模板中的换行：允许用户在 footer 模板中手动拆成两行显示。
+  const lines = String(value ?? '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map(line => line.replace(/[ \t]{2,}/g, ' ').trim())
+    .filter(line => line.length > 0);
+  return lines.join('\n');
 }
 
 function resolveMatchedConfig(nodeLike, allConfigs) {
