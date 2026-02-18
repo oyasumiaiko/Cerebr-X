@@ -25,6 +25,41 @@ function normalizeTokenValue(value) {
   return Math.round(parsed);
 }
 
+function formatTokenWithThousands(value) {
+  const normalized = normalizeTokenValue(value);
+  if (normalized == null) return '';
+  return normalized.toLocaleString();
+}
+
+function formatTokenCompact(value) {
+  const normalized = normalizeTokenValue(value);
+  if (normalized == null) return '';
+  if (normalized < 1000) return String(normalized);
+  const units = [
+    { base: 1e9, suffix: 'b' },
+    { base: 1e6, suffix: 'm' },
+    { base: 1e3, suffix: 'k' }
+  ];
+  const unit = units.find(item => normalized >= item.base) || units[units.length - 1];
+  const scaled = normalized / unit.base;
+  const digits = scaled >= 100 ? 0 : (scaled >= 10 ? 1 : 2);
+  const text = scaled
+    .toFixed(digits)
+    .replace(/(\.\d*?)0+$/g, '$1')
+    .replace(/\.$/g, '');
+  return `${text}${unit.suffix}`;
+}
+
+function buildUsageLine(usage, formatter) {
+  if (!usage || typeof usage !== 'object') return '';
+  const format = (typeof formatter === 'function') ? formatter : (value => String(value ?? ''));
+  const parts = [];
+  if (usage.promptTokens != null) parts.push(`in ${format(usage.promptTokens)}`);
+  if (usage.completionTokens != null) parts.push(`out ${format(usage.completionTokens)}`);
+  if (usage.totalTokens != null) parts.push(`total ${format(usage.totalTokens)}`);
+  return parts.join(' · ');
+}
+
 function hasTemplateValue(value) {
   if (value == null) return false;
   if (typeof value === 'boolean') return value;
@@ -92,13 +127,29 @@ export function buildApiFooterContext(nodeLike, matchedConfig = null) {
   const usage = normalizeApiUsageMeta(nodeLike?.apiUsage);
   const timestampMs = normalizeTimestampMs(nodeLike?.timestamp);
   const date = (timestampMs != null) ? new Date(timestampMs) : null;
+  const promptTokens = usage?.promptTokens ?? '';
+  const completionTokens = usage?.completionTokens ?? '';
+  const totalTokens = usage?.totalTokens ?? '';
+  const promptTokensK = formatTokenCompact(usage?.promptTokens);
+  const completionTokensK = formatTokenCompact(usage?.completionTokens);
+  const totalTokensK = formatTokenCompact(usage?.totalTokens);
+  const usageLine = buildUsageLine(usage, value => formatTokenWithThousands(value));
+  const usageLineK = buildUsageLine(usage, value => formatTokenCompact(value));
 
   const displayLabel = hasThoughtSignature
     ? (apiName ? `signatured · ${apiName}` : 'signatured')
     : apiName;
+  const displayWithTotalTokensK = displayLabel
+    ? (totalTokensK ? `${displayLabel} · ${totalTokensK} tok` : displayLabel)
+    : (totalTokensK ? `${totalTokensK} tok` : '');
+  const displayWithUsageK = displayLabel
+    ? (usageLineK ? `${displayLabel} · ${usageLineK}` : displayLabel)
+    : usageLineK;
 
   return {
     display_label: displayLabel || '',
+    display_with_total_tokens_k: displayWithTotalTokensK,
+    display_with_usage_k: displayWithUsageK,
     apiname: apiName || '',
     api_uuid: toTrimmedText(nodeLike?.apiUuid),
     display_name: displayName || '',
@@ -106,11 +157,18 @@ export function buildApiFooterContext(nodeLike, matchedConfig = null) {
     signature: hasThoughtSignature ? 'signatured' : '',
     signature_prefix: hasThoughtSignature ? 'signatured · ' : '',
     signature_source: toTrimmedText(nodeLike?.thoughtSignatureSource),
-    input_tokens: usage?.promptTokens ?? '',
-    output_tokens: usage?.completionTokens ?? '',
-    total_tokens: usage?.totalTokens ?? '',
-    prompt_tokens: usage?.promptTokens ?? '',
-    completion_tokens: usage?.completionTokens ?? '',
+    input_tokens: promptTokens,
+    output_tokens: completionTokens,
+    total_tokens: totalTokens,
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    input_tokens_k: promptTokensK,
+    output_tokens_k: completionTokensK,
+    total_tokens_k: totalTokensK,
+    prompt_tokens_k: promptTokensK,
+    completion_tokens_k: completionTokensK,
+    usage_line: usageLine,
+    usage_line_k: usageLineK,
     timestamp: timestampMs != null ? String(timestampMs) : '',
     time: date ? date.toLocaleTimeString() : '',
     date: date ? date.toLocaleDateString() : '',

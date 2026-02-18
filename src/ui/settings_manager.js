@@ -653,7 +653,7 @@ export function createSettingsManager(appContext) {
       label: 'AI 消息尾注模板',
       group: 'display',
       rows: 5,
-      placeholder: '示例：{{display_label}}\n可用变量：{{apiname}} {{time}} {{date}} {{datetime}} {{input_tokens}} {{output_tokens}} {{total_tokens}} {{api_uuid}} {{display_name}} {{model}} {{signature}} {{signature_prefix}} {{signature_source}}',
+      placeholder: '示例：{{display_with_total_tokens_k}}\n常用：{{display_label}} {{display_with_total_tokens_k}} {{display_with_usage_k}} {{total_tokens_k}} {{usage_line_k}}\n可用变量：{{apiname}} {{time}} {{date}} {{datetime}} {{input_tokens}} {{output_tokens}} {{total_tokens}} {{input_tokens_k}} {{output_tokens_k}} {{total_tokens_k}} {{usage_line}} {{usage_line_k}} {{api_uuid}} {{display_name}} {{model}} {{signature}} {{signature_prefix}} {{signature_source}}',
       defaultValue: DEFAULT_SETTINGS.aiFooterTemplate,
       readFromUI: (el) => (typeof el?.value === 'string' ? el.value : ''),
       writeToUI: (el, value) => {
