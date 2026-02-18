@@ -7,6 +7,32 @@
 
 export const DEFAULT_AI_FOOTER_TEMPLATE = '{{display_label}}';
 
+// AI footer 可配置模板变量（去重后的“主变量”清单，供设置界面展示/复制）。
+export const AI_FOOTER_TEMPLATE_VARIABLES = Object.freeze([
+  { key: 'display_label', description: '默认显示文案（含 signatured 前缀）' },
+  { key: 'display_with_total_tokens_k', description: '默认文案 + 总 tokens（k/m/b）' },
+  { key: 'display_with_usage_k', description: '默认文案 + in/out/total（k/m/b）' },
+  { key: 'apiname', description: 'API 显示名（displayName 优先，回退 model）' },
+  { key: 'display_name', description: '配置中的 displayName（或历史快照）' },
+  { key: 'model', description: '模型名（modelName / apiModelId）' },
+  { key: 'api_uuid', description: 'API 配置 id' },
+  { key: 'signature', description: '有推理签名时为 signatured，否则为空' },
+  { key: 'signature_prefix', description: '有签名时为 signatured · ' },
+  { key: 'signature_source', description: '签名来源（gemini/openai）' },
+  { key: 'input_tokens', description: '输入 tokens（原始数值）' },
+  { key: 'output_tokens', description: '输出 tokens（原始数值）' },
+  { key: 'total_tokens', description: '总 tokens（原始数值）' },
+  { key: 'input_tokens_k', description: '输入 tokens（k/m/b）' },
+  { key: 'output_tokens_k', description: '输出 tokens（k/m/b）' },
+  { key: 'total_tokens_k', description: '总 tokens（k/m/b）' },
+  { key: 'usage_line', description: 'in/out/total 汇总（千分位）' },
+  { key: 'usage_line_k', description: 'in/out/total 汇总（k/m/b）' },
+  { key: 'timestamp', description: '消息时间戳（毫秒）' },
+  { key: 'time', description: '本地时间（toLocaleTimeString）' },
+  { key: 'date', description: '本地日期（toLocaleDateString）' },
+  { key: 'datetime', description: '本地日期时间（toLocaleString）' }
+]);
+
 function toTrimmedText(value) {
   if (value == null) return '';
   return String(value).trim();

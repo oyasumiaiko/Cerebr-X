@@ -5,7 +5,7 @@
 
 import { createThemeManager } from './theme_manager.js';
 import { queueStorageSet, queueStoragePrime } from '../utils/storage_write_queue_bridge.js';
-import { DEFAULT_AI_FOOTER_TEMPLATE } from '../utils/api_footer_template.js';
+import { DEFAULT_AI_FOOTER_TEMPLATE, AI_FOOTER_TEMPLATE_VARIABLES } from '../utils/api_footer_template.js';
 
 /**
  * 创建设置管理器
@@ -255,6 +255,32 @@ export function createSettingsManager(appContext) {
       select.appendChild(extra);
     }
     select.value = currentValue || DEFAULT_SETTINGS.conversationTitleApi;
+  }
+
+  async function copyTextToClipboard(text) {
+    const safeText = String(text ?? '');
+    if (!safeText) return false;
+    if (navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(safeText);
+        return true;
+      } catch (_) {}
+    }
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = safeText;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = !!document.execCommand?.('copy');
+      document.body.removeChild(textarea);
+      return copied;
+    } catch (_) {
+      return false;
+    }
   }
 
   // 动态设置注册表：新增设置仅需在此处登记即可自动渲染与持久化
@@ -653,7 +679,10 @@ export function createSettingsManager(appContext) {
       label: 'AI 消息尾注模板',
       group: 'display',
       rows: 5,
-      placeholder: '示例：{{display_with_total_tokens_k}}\n常用：{{display_label}} {{display_with_total_tokens_k}} {{display_with_usage_k}} {{total_tokens_k}} {{usage_line_k}}\n可用变量：{{apiname}} {{time}} {{date}} {{datetime}} {{input_tokens}} {{output_tokens}} {{total_tokens}} {{input_tokens_k}} {{output_tokens_k}} {{total_tokens_k}} {{usage_line}} {{usage_line_k}} {{api_uuid}} {{display_name}} {{model}} {{signature}} {{signature_prefix}} {{signature_source}}',
+      placeholder: '示例：{{display_with_total_tokens_k}} 或 {{apiname}} · {{total_tokens_k}} tok',
+      copyableVariablesTitle: '可用变量（点击复制）',
+      copyableVariablesHint: '已去除同义别名；点击即复制 {{变量名}}。',
+      copyableVariables: AI_FOOTER_TEMPLATE_VARIABLES,
       defaultValue: DEFAULT_SETTINGS.aiFooterTemplate,
       readFromUI: (el) => (typeof el?.value === 'string' ? el.value : ''),
       writeToUI: (el, value) => {
@@ -1597,6 +1626,69 @@ export function createSettingsManager(appContext) {
             });
             actionBar.appendChild(clearBtn);
             item.appendChild(actionBar);
+          }
+
+          // 文本模板类设置：在输入框下方展示可点击复制的变量列表，降低手写占位符的出错率。
+          if (Array.isArray(def.copyableVariables) && def.copyableVariables.length > 0) {
+            const tooltip = document.createElement('div');
+            tooltip.className = 'settings-template-variable-tooltip';
+
+            const tooltipTitle = document.createElement('div');
+            tooltipTitle.className = 'settings-template-variable-tooltip-title';
+            tooltipTitle.textContent = def.copyableVariablesTitle || '可用变量（点击复制）';
+            tooltip.appendChild(tooltipTitle);
+
+            const variableList = document.createElement('div');
+            variableList.className = 'settings-template-variable-list';
+
+            def.copyableVariables.forEach((entry) => {
+              const variableKey = (typeof entry === 'string' ? entry : entry?.key || '').trim();
+              if (!variableKey) return;
+              const description = (typeof entry === 'object' && entry?.description)
+                ? String(entry.description).trim()
+                : '';
+              const variableToken = `{{${variableKey}}}`;
+              const variableButton = document.createElement('button');
+              variableButton.type = 'button';
+              variableButton.className = 'settings-template-variable-chip';
+              variableButton.textContent = variableToken;
+              if (description) {
+                variableButton.title = `${variableKey}：${description}`;
+              }
+              variableButton.addEventListener('click', async (evt) => {
+                evt.preventDefault();
+                evt.stopPropagation();
+                const copied = await copyTextToClipboard(variableToken);
+                if (copied) {
+                  showNotification?.({
+                    message: `已复制 ${variableToken}`,
+                    type: 'success',
+                    duration: 1200
+                  });
+                } else {
+                  showNotification?.({
+                    message: '复制失败，请重试',
+                    type: 'error',
+                    duration: 1800
+                  });
+                }
+              });
+              variableList.appendChild(variableButton);
+            });
+
+            if (variableList.childElementCount > 0) {
+              tooltip.appendChild(variableList);
+              const tooltipHintText = (typeof def.copyableVariablesHint === 'string')
+                ? def.copyableVariablesHint.trim()
+                : '';
+              if (tooltipHintText) {
+                const tooltipHint = document.createElement('div');
+                tooltipHint.className = 'settings-template-variable-tooltip-hint';
+                tooltipHint.textContent = tooltipHintText;
+                tooltip.appendChild(tooltipHint);
+              }
+              item.appendChild(tooltip);
+            }
           }
 
           targetBucket.appendChild(item);
