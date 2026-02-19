@@ -5889,7 +5889,7 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     background: transparent; 
 
     box-shadow: 0 0 4vh color-mix(in srgb, var(--cerebr-icon-color) 100%, transparent); 
-    animation: breathing 4s ease-in-out infinite;
+    animation: none;
     opacity: 0;
     transition: opacity 0.5s ease;
 }
@@ -5900,6 +5900,7 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 }
 
 #input-container.auto-scroll-glow::after {
+    animation: breathing 4s ease-in-out infinite;
     opacity: 1;
     transition: opacity 0.5s ease;
 }

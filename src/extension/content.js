@@ -546,7 +546,8 @@ class CerebrSidebar {
           border-radius: calc(12px * var(--scale-ratio, 1));
           position: relative;
           background: rgba(255, 255, 255, 0);
-          backdrop-filter: blur(120px) saturate(250%);
+          backdrop-filter: none;
+          -webkit-backdrop-filter: none;
           contain: layout style;
           pointer-events: auto;
         }

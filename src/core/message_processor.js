@@ -313,7 +313,8 @@ export function createMessageProcessor(appContext) {
           installed: false,
           scrollHandler: null,
           resizeObserver: null,
-          mutationObserver: null
+          mutationObserver: null,
+          blurCullActive: false
         };
         containerStateMap.set(container, state);
       }
@@ -442,6 +443,18 @@ export function createMessageProcessor(appContext) {
       nodes.forEach((node) => restoreMessage(node));
     }
 
+    function isMessageBlurEnabled() {
+      try {
+        const root = document?.documentElement;
+        if (!root) return false;
+        const raw = window.getComputedStyle(root).getPropertyValue('--cerebr-message-blur-radius');
+        const radius = Number.parseFloat(raw);
+        return Number.isFinite(radius) && radius > 0.1;
+      } catch (_) {
+        return false;
+      }
+    }
+
     function applyOffscreenBlurCull(messages, viewportTop, viewportBottom, viewportHeight, tailStart) {
       if (!Array.isArray(messages) || !messages.length) return;
       const blurKeepBuffer = Math.max(MIN_BLUR_CULL_BUFFER_PX, viewportHeight * BLUR_CULL_BUFFER_MULTIPLIER);
@@ -468,6 +481,7 @@ export function createMessageProcessor(appContext) {
 
     function updateContainer(container) {
       if (!container) return;
+      const state = getContainerState(container);
       const messageNodes = Array.from(container.querySelectorAll('.message'));
       const messages = messageNodes.filter((node) => (node?.offsetHeight || 0) > 0);
       const total = messages.length;
@@ -478,9 +492,16 @@ export function createMessageProcessor(appContext) {
       const viewportTop = container.scrollTop || 0;
       const viewportBottom = viewportTop + viewportHeight;
       const tailStart = Math.max(total - PIN_TAIL_COUNT, 0);
+      const messageBlurEnabled = isMessageBlurEnabled();
 
       // 轻量优化：无论是否进入“DOM 虚拟化”，都先剔除离屏消息的 backdrop blur。
-      applyOffscreenBlurCull(messages, viewportTop, viewportBottom, viewportHeight, tailStart);
+      if (messageBlurEnabled) {
+        applyOffscreenBlurCull(messages, viewportTop, viewportBottom, viewportHeight, tailStart);
+        state.blurCullActive = true;
+      } else if (state.blurCullActive) {
+        messages.forEach((node) => node.classList.remove('message-offscreen-blur-disabled'));
+        state.blurCullActive = false;
+      }
 
       if (total < MIN_MESSAGES_FOR_VIRTUALIZE) {
         restoreAll(container);
