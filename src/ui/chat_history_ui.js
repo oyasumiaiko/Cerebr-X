@@ -4028,6 +4028,22 @@ export function createChatHistoryUI(appContext) {
       }
     });
     menu.appendChild(renameOption); // 添加重命名选项
+
+    // 自动生成标题选项（紧随“重命名对话”之后，便于连续进行标题相关操作）
+    const autoTitleOption = document.createElement('div');
+    autoTitleOption.textContent = '自动生成标题';
+    autoTitleOption.classList.add('chat-history-context-menu-option');
+    autoTitleOption.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      closeMenu();
+      try {
+        await autoGenerateConversationTitleForConversation(conversationId);
+      } catch (error) {
+        console.error('自动生成标题失败:', error);
+        showNotification?.({ message: '自动生成标题失败，请重试', type: 'error', duration: 2200 });
+      }
+    });
+    menu.appendChild(autoTitleOption);
     appendMenuSeparator();
 
     // 固定 API / 取消固定
@@ -4063,22 +4079,6 @@ export function createChatHistoryUI(appContext) {
       await setConversationApiLock(conversationId, currentConfig);
     });
     menu.appendChild(apiLockOption);
-
-    // 自动生成标题选项
-    const autoTitleOption = document.createElement('div');
-    autoTitleOption.textContent = '自动生成标题';
-    autoTitleOption.classList.add('chat-history-context-menu-option');
-    autoTitleOption.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      closeMenu();
-      try {
-        await autoGenerateConversationTitleForConversation(conversationId);
-      } catch (error) {
-        console.error('自动生成标题失败:', error);
-        showNotification?.({ message: '自动生成标题失败，请重试', type: 'error', duration: 2200 });
-      }
-    });
-    menu.appendChild(autoTitleOption);
 
     // 打开对话页面（会话关联 URL）选项
     const openUrlOption = document.createElement('div');

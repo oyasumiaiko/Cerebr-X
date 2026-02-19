@@ -1817,6 +1817,16 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
     font-weight: 500;
 }
 
+.menu-item--template-variables {
+    padding-top: 0;
+    padding-bottom: 0;
+    cursor: default;
+}
+
+.menu-item--template-variables:hover {
+    background-color: transparent;
+}
+
 .background-image-setting {
     cursor: default;
     gap: 12px;
@@ -1968,6 +1978,10 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
     display: flex;
     flex-direction: column;
     gap: 6px;
+}
+
+.settings-template-variable-tooltip--detached {
+    margin-top: 0;
 }
 
 .settings-template-variable-tooltip-title {

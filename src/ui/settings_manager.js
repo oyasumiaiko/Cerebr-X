@@ -685,10 +685,7 @@ export function createSettingsManager(appContext) {
       label: 'AI 消息尾注模板',
       group: 'display',
       rows: 5,
-      placeholder: '示例：{{display_with_total_tokens_k}} 或 {{apiname}} · {{total_tokens_k}} tok',
-      copyableVariablesTitle: '可用变量（点击复制）',
-      copyableVariablesHint: '已去除同义别名；按分组换行展示，点击即复制 {{变量名}}。',
-      copyableVariables: AI_FOOTER_TEMPLATE_VARIABLES,
+      placeholder: '示例：{{display_with_total_tokens_k}} 或 {{apiname}} · {{total_tokens_k}} tok（变量列表见下方）',
       hideClearButton: true,
       defaultValue: DEFAULT_SETTINGS.aiFooterTemplate,
       readFromUI: (el) => (typeof el?.value === 'string' ? el.value : ''),
@@ -702,8 +699,11 @@ export function createSettingsManager(appContext) {
       label: 'AI 尾注 Tooltip 模板',
       group: 'display',
       rows: 5,
-      // 变量面板复用“AI 消息尾注模板”那一份，避免在相邻项重复渲染同样的标签列表。
-      placeholder: '示例：{{tooltip_api_line}}\n{{tooltip_signature_line}}\n{{tooltip_usage_lines}}\n（变量列表见上方“AI 消息尾注模板”）',
+      placeholder: '示例：{{tooltip_api_line}}\n{{tooltip_signature_line}}\n{{tooltip_usage_lines}}',
+      copyableVariablesTitle: '可用变量（点击复制）',
+      copyableVariablesHint: '已去除同义别名；按分组换行展示，点击即复制 {{变量名}}。',
+      copyableVariables: AI_FOOTER_TEMPLATE_VARIABLES,
+      copyableVariablesPlacement: 'after-item',
       hideClearButton: true,
       defaultValue: DEFAULT_SETTINGS.aiFooterTooltipTemplate,
       readFromUI: (el) => (typeof el?.value === 'string' ? el.value : ''),
@@ -1617,6 +1617,7 @@ export function createSettingsManager(appContext) {
 
         } else {
           item.classList.add('menu-item--stack');
+          let deferredTemplateTooltip = null;
           const input = (def.type === 'textarea')
             ? document.createElement('textarea')
             : document.createElement('input');
@@ -1744,11 +1745,22 @@ export function createSettingsManager(appContext) {
                 tooltipHint.textContent = tooltipHintText;
                 tooltip.appendChild(tooltipHint);
               }
-              item.appendChild(tooltip);
+              if (def.copyableVariablesPlacement === 'after-item') {
+                tooltip.classList.add('settings-template-variable-tooltip--detached');
+                deferredTemplateTooltip = tooltip;
+              } else {
+                item.appendChild(tooltip);
+              }
             }
           }
 
           targetBucket.appendChild(item);
+          if (deferredTemplateTooltip) {
+            const tooltipPanel = document.createElement('div');
+            tooltipPanel.className = 'menu-item menu-item--stack menu-item--template-variables';
+            tooltipPanel.appendChild(deferredTemplateTooltip);
+            targetBucket.appendChild(tooltipPanel);
+          }
           dynamicElements.set(def.key, input);
         }
       } else if (def.type === 'select') {
