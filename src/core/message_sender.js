@@ -610,12 +610,8 @@ export function createMessageSender(appContext) {
     const configForTitle = { ...apiConfig, useStreaming: false };
     const requestBody = await apiManager.buildRequest({
       messages,
-      config: configForTitle,
-      overrides: { stream: false }
+      config: configForTitle
     });
-    if (requestBody && typeof requestBody === 'object' && 'stream' in requestBody) {
-      requestBody.stream = false;
-    }
 
     const response = await apiManager.sendRequest({
       requestBody,
