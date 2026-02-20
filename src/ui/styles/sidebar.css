@@ -4507,6 +4507,34 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     display: none;
 }
 
+.error-retry-actions {
+    margin-top: 8px;
+    display: flex;
+    justify-content: flex-start;
+}
+
+.error-retry-btn {
+    border: 1px solid color-mix(in srgb, var(--cerebr-status-error) 55%, var(--cerebr-control-border));
+    background: transparent;
+    color: var(--cerebr-status-error);
+    border-radius: 999px;
+    font-size: 12px;
+    line-height: 1;
+    padding: 6px 10px;
+    min-height: 26px;
+    cursor: pointer;
+    box-shadow: none;
+}
+
+.error-retry-btn:hover {
+    background: color-mix(in srgb, var(--cerebr-status-error) 12%, transparent);
+}
+
+.error-retry-btn:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
 /* 收起按钮样式 */
 #collapse-button {
     position: fixed;

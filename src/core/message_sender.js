@@ -2253,6 +2253,41 @@ export function createMessageSender(appContext) {
     }
   }
 
+  function attachManualRetryAction(messageElement, retryFn) {
+    if (!messageElement || typeof retryFn !== 'function') return;
+    if (messageElement.querySelector('.error-retry-actions')) return;
+
+    const actions = document.createElement('div');
+    actions.className = 'error-retry-actions';
+
+    const retryBtn = document.createElement('button');
+    retryBtn.type = 'button';
+    retryBtn.className = 'error-retry-btn';
+    retryBtn.textContent = '重试';
+    retryBtn.title = '重新发送本次请求';
+    retryBtn.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (retryBtn.disabled) return;
+      retryBtn.disabled = true;
+      const originalText = retryBtn.textContent;
+      retryBtn.textContent = '重试中...';
+      try {
+        await retryFn();
+      } catch (error) {
+        console.error('手动重试执行失败:', error);
+      } finally {
+        if (retryBtn.isConnected) {
+          retryBtn.disabled = false;
+          retryBtn.textContent = originalText;
+        }
+      }
+    });
+
+    actions.appendChild(retryBtn);
+    messageElement.appendChild(actions);
+  }
+
   /**
    * 验证API配置是否有效
    * @private
@@ -3197,24 +3232,21 @@ export function createMessageSender(appContext) {
           : '发送失败: ';
       const errorMessageText = `${prefix}${detail}`;
 
-      // “原地替换”重新生成：不要在对话末尾追加错误消息，避免污染历史；
-      // 这里用轻量通知提示错误即可（目标 AI 消息保留当前内容：可能是旧内容，也可能是已生成的部分新内容）。
-      if (canUpdateExistingAiMessage && normalizedTargetAiMessageId) {
-        if (typeof showNotification === 'function') {
-          showNotification({ message: errorMessageText, type: 'error' });
-        }
-        if (autoRetryEnabled && typeof showNotification === 'function') {
-          // 错误：重试达到上限
-          showNotification({ message: '自动重试失败，已达到最大尝试次数', type: 'error' });
-        }
-        await persistAttemptConversationSnapshot(attempt, { force: true });
-        return { ok: false, error, apiConfig: (effectiveApiConfig || resolvedApiConfig || preferredApiConfig || lockConfig || apiManager.getSelectedConfig()), retryHint, retry };
-      }
-
       let messageElement = null;
       if (loadingMessage && loadingMessage.parentNode) {
         messageElement = loadingMessage;
         messageElement.textContent = errorMessageText;
+      } else if (canUpdateExistingAiMessage && normalizedTargetAiMessageId) {
+        const safeTargetId = escapeMessageIdForSelector(normalizedTargetAiMessageId);
+        const selector = safeTargetId ? `.message[data-message-id="${safeTargetId}"]` : '';
+        const targetMessageElement = selector
+          ? (chatContainer.querySelector(selector)
+            || (activeThreadContext?.container ? activeThreadContext.container.querySelector(selector) : null))
+          : null;
+        if (targetMessageElement) {
+          messageElement = targetMessageElement;
+          messageElement.textContent = errorMessageText;
+        }
       } else {
         const errorUiActive = isThreadUiActive(activeThreadContext);
         const errorOptions = activeThreadContext
@@ -3233,6 +3265,7 @@ export function createMessageSender(appContext) {
         if (errorScrollContainer) {
           scrollToBottom(errorScrollContainer);
         }
+        attachManualRetryAction(messageElement, retry);
       }
 
       if (autoRetryEnabled && typeof showNotification === 'function') {
@@ -3975,13 +4008,9 @@ export function createMessageSender(appContext) {
 	        return;
 	      }
 
+      let jsonData = null;
       try {
-        const jsonData = JSON.parse(fullEventData);
-        if (isGeminiApi) {
-          await handleGeminiEvent(jsonData);
-        } else {
-          handleOpenAIEvent(jsonData);
-        }
+        jsonData = JSON.parse(fullEventData);
       } catch (e) {
         console.error('解析SSE事件JSON出错:', e, 'Event data:', `'${fullEventData}'`);
         // 将解析错误转为可读文本后抛出，确保聊天框也能看到与控制台一致的关键报错。
@@ -3991,6 +4020,12 @@ export function createMessageSender(appContext) {
           ? `流式事件解析失败：${parseErrorText}；事件数据片段：${eventPreview}`
           : `流式事件解析失败：${parseErrorText}`;
         throw new Error(readableError);
+      }
+
+      if (isGeminiApi) {
+        await handleGeminiEvent(jsonData);
+      } else {
+        handleOpenAIEvent(jsonData);
       }
     }
 
@@ -4003,7 +4038,9 @@ export function createMessageSender(appContext) {
         const errorMessage = buildStreamApiErrorMessage(data.error, 'Unknown Gemini error');
         console.error('Gemini API error:', data.error);
         // 不要移除 loadingMessage，让上层的 catch 块来处理错误显示
-        throw new Error(errorMessage);
+        const streamApiError = new Error(errorMessage);
+        streamApiError.name = 'StreamApiError';
+        throw streamApiError;
       }
 
       // 处理 Gemini 里那类「HTTP 200 但因安全策略被拦截」的特殊情况
@@ -4198,14 +4235,18 @@ export function createMessageSender(appContext) {
           console.error('OpenAI API error:', data.error);
           // 不要移除 loadingMessage，让上层的 catch 块来处理错误显示
           // 抛出错误，让外层`sendMessage`的try...catch块捕获并处理
-          throw new Error(msg);
+          const streamApiError = new Error(msg);
+          streamApiError.name = 'StreamApiError';
+          throw streamApiError;
       }
       // 检查 choices 数组中的错误信息
       if (data.choices?.[0]?.error) {
           const msg = buildStreamApiErrorMessage(data.choices[0].error, 'Unknown OpenAI model error');
           console.error('OpenAI Model error:', data.choices[0].error);
           // 不要移除 loadingMessage，让上层的 catch 块来处理错误显示
-          throw new Error(msg);
+          const streamApiError = new Error(msg);
+          streamApiError.name = 'StreamApiError';
+          throw streamApiError;
       }
 
 	      const delta = data.choices?.[0]?.delta || {};
