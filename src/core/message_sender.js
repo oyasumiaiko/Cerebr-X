@@ -1357,13 +1357,41 @@ export function createMessageSender(appContext) {
 
       const stage = evt.stage;
       switch (stage) {
+        case 'api_key_file_loaded': {
+          const count = Number(evt.keyCount) || 0;
+          updateLoadingStatus(
+            loadingMessage,
+            count > 0 ? `已读取本地 Key 文件 (${count} 个 key)...` : '已读取本地 Key 文件...',
+            { stage, apiBase: evt.apiBase || '', modelName: evt.modelName || '' }
+          );
+          break;
+        }
+        case 'api_key_file_load_failed': {
+          const willFallback = !!evt.willFallback;
+          const fallbackCount = Number(evt.fallbackKeyCount) || 0;
+          const note = (typeof evt.reason === 'string' && evt.reason.trim())
+            ? `本地文件读取失败：${evt.reason.trim().slice(0, 220)}`
+            : '本地文件读取失败。';
+          updateLoadingStatus(
+            loadingMessage,
+            willFallback
+              ? `本地 Key 文件读取失败，回退到输入框 Key (${fallbackCount} 个)...`
+              : '本地 Key 文件读取失败，且没有可回退的 Key。',
+            { stage, apiBase: evt.apiBase || '', modelName: evt.modelName || '', note }
+          );
+          break;
+        }
         case 'api_key_selected': {
           const keyCount = Number(evt.keyCount) || 1;
           const keyIndex = Number(evt.keyIndex);
           const hasIndex = Number.isFinite(keyIndex) && keyIndex >= 0;
+          const keySource = (typeof evt.keySource === 'string') ? evt.keySource : 'inline';
+          const sourceText = keySource === 'file'
+            ? '（来源：本地文件）'
+            : (keySource === 'inline_fallback' ? '（来源：输入框回退）' : '');
           const text = keyCount > 1 && hasIndex
-            ? `正在选择可用的 API Key (${keyIndex + 1}/${keyCount})...`
-            : '正在校验 API Key...';
+            ? `正在选择可用的 API Key (${keyIndex + 1}/${keyCount})${sourceText}...`
+            : `正在校验 API Key${sourceText}...`;
           updateLoadingStatus(loadingMessage, text, {
             stage,
             apiBase: evt.apiBase || '',

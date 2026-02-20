@@ -2589,6 +2589,13 @@ input:checked + .slider::before {
     opacity: 0.8;
 }
 
+.api-key-file-path-hint {
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    opacity: 0.68;
+}
+
 .custom-params-group textarea.custom-params {
     min-height: 140px;
     resize: none;

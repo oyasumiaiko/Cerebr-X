@@ -108,25 +108,30 @@ export function createApiManager(appContext) {
   }
 
   function compactConfigsForSync(configs) {
-    return configs.map(c => ({
-      id: c.id,
-      apiKey: c.apiKey, // 保留Key用于跨设备直接可用；如担心配额，可改为只保留当前设备
-      baseUrl: c.baseUrl,
-      modelName: c.modelName,
-      displayName: c.displayName,
-      temperature: c.temperature,
-      useStreaming: (c.useStreaming !== false),
-      isFavorite: !!c.isFavorite,
-      // 旧字段：单一条数上限（按“消息条目”计数）。保留以便向后兼容与降级回滚。
-      maxChatHistory: c.maxChatHistory ?? 500,
-      // 新字段：分别限制历史 user / assistant 消息条数（便于长对话压缩 AI 输出）
-      maxChatHistoryUser: c.maxChatHistoryUser ?? null,
-      maxChatHistoryAssistant: c.maxChatHistoryAssistant ?? null,
-      customParams: minifyJsonIfPossible(c.customParams || ''),
-      customSystemPrompt: (c.customSystemPrompt || '').trim(),
-      userMessagePreprocessorTemplate: (typeof c.userMessagePreprocessorTemplate === 'string') ? c.userMessagePreprocessorTemplate : '',
-      userMessagePreprocessorIncludeInHistory: !!c.userMessagePreprocessorIncludeInHistory
-    }));
+    return configs.map((c) => {
+      const apiKeyFilePath = (typeof c.apiKeyFilePath === 'string') ? c.apiKeyFilePath.trim() : '';
+      return {
+        id: c.id,
+        // 当配置了“本地 key 文件路径”时，不把内联 key 同步到 sync，避免长 key 列表撞配额。
+        apiKey: apiKeyFilePath ? '' : c.apiKey,
+        apiKeyFilePath,
+        baseUrl: c.baseUrl,
+        modelName: c.modelName,
+        displayName: c.displayName,
+        temperature: c.temperature,
+        useStreaming: (c.useStreaming !== false),
+        isFavorite: !!c.isFavorite,
+        // 旧字段：单一条数上限（按“消息条目”计数）。保留以便向后兼容与降级回滚。
+        maxChatHistory: c.maxChatHistory ?? 500,
+        // 新字段：分别限制历史 user / assistant 消息条数（便于长对话压缩 AI 输出）
+        maxChatHistoryUser: c.maxChatHistoryUser ?? null,
+        maxChatHistoryAssistant: c.maxChatHistoryAssistant ?? null,
+        customParams: minifyJsonIfPossible(c.customParams || ''),
+        customSystemPrompt: (c.customSystemPrompt || '').trim(),
+        userMessagePreprocessorTemplate: (typeof c.userMessagePreprocessorTemplate === 'string') ? c.userMessagePreprocessorTemplate : '',
+        userMessagePreprocessorIncludeInHistory: !!c.userMessagePreprocessorIncludeInHistory
+      };
+    });
   }
 
   async function saveConfigsToLocalBackup(configs, selectedIndex, updatedAt) {
@@ -267,6 +272,117 @@ export function createApiManager(appContext) {
     if (!raw) return [];
     if (!raw.includes(',')) return [raw];
     return raw.split(',').map(k => k.trim()).filter(Boolean);
+  }
+
+  function normalizeApiKeyFilePath(apiKeyFilePath) {
+    return (typeof apiKeyFilePath === 'string') ? apiKeyFilePath.trim() : '';
+  }
+
+  // 将用户输入的本地文件路径规范为可 fetch 的 file:// URL。
+  // 支持：file://、Windows 盘符路径、UNC 路径、Unix 绝对路径。
+  function toLocalFileUrl(rawPath) {
+    const normalizedPath = normalizeApiKeyFilePath(rawPath);
+    if (!normalizedPath) return '';
+    if (/^file:\/\//i.test(normalizedPath)) {
+      return normalizedPath;
+    }
+    if (/^[a-zA-Z]:[\\/]/.test(normalizedPath)) {
+      return encodeURI(`file:///${normalizedPath.replace(/\\/g, '/')}`);
+    }
+    if (normalizedPath.startsWith('\\\\')) {
+      const uncPath = normalizedPath.replace(/\\/g, '/');
+      return encodeURI(`file:${uncPath}`);
+    }
+    if (normalizedPath.startsWith('/')) {
+      return encodeURI(`file://${normalizedPath}`);
+    }
+    return '';
+  }
+
+  function parseApiKeysFromFileText(rawText) {
+    if (typeof rawText !== 'string') return [];
+    const lines = rawText.replace(/\uFEFF/g, '').split(/\r?\n/);
+    const keys = [];
+    for (const rawLine of lines) {
+      const line = String(rawLine || '').trim();
+      if (!line) continue;
+      if (line.startsWith('#') || line.startsWith('//')) continue;
+      if (!line.includes(',')) {
+        keys.push(line);
+        continue;
+      }
+      line.split(',').forEach((part) => {
+        const value = part.trim();
+        if (value) keys.push(value);
+      });
+    }
+    return Array.from(new Set(keys));
+  }
+
+  async function loadApiKeysFromLocalFile(apiKeyFilePath) {
+    const filePath = normalizeApiKeyFilePath(apiKeyFilePath);
+    if (!filePath) return { keys: [], error: 'empty_path', detail: '' };
+    const fileUrl = toLocalFileUrl(filePath);
+    if (!fileUrl) return { keys: [], error: 'invalid_path', detail: '仅支持绝对路径或 file:// 路径' };
+    try {
+      const response = await fetch(fileUrl, { method: 'GET', cache: 'no-store' });
+      if (!response.ok) {
+        return { keys: [], error: 'http_error', detail: `HTTP ${response.status}` };
+      }
+      const text = await response.text();
+      const keys = parseApiKeysFromFileText(text);
+      if (keys.length === 0) {
+        return { keys: [], error: 'empty_file', detail: '文件中未找到有效 key（支持每行一个，或逗号分隔）' };
+      }
+      return { keys, error: '', detail: '' };
+    } catch (e) {
+      return {
+        keys: [],
+        error: 'read_failed',
+        detail: (e && typeof e.message === 'string') ? e.message : String(e || '未知读取错误')
+      };
+    }
+  }
+
+  async function resolveRuntimeApiKeys(config, emitStatus) {
+    const inlineKeys = normalizeApiKeys(config?.apiKey);
+    const filePath = normalizeApiKeyFilePath(config?.apiKeyFilePath);
+    if (!filePath) {
+      return { keys: inlineKeys, source: 'inline', detail: '' };
+    }
+
+    const loaded = await loadApiKeysFromLocalFile(filePath);
+    if (loaded.keys.length > 0) {
+      emitStatus({
+        stage: 'api_key_file_loaded',
+        keyCount: loaded.keys.length,
+        apiBase: config?.baseUrl || '',
+        modelName: config?.modelName || ''
+      });
+      return { keys: loaded.keys, source: 'file', detail: '' };
+    }
+
+    const hasFallback = inlineKeys.length > 0;
+    emitStatus({
+      stage: 'api_key_file_load_failed',
+      willFallback: hasFallback,
+      fallbackKeyCount: inlineKeys.length,
+      reason: loaded?.detail || loaded?.error || 'unknown',
+      apiBase: config?.baseUrl || '',
+      modelName: config?.modelName || ''
+    });
+    if (hasFallback) {
+      return {
+        keys: inlineKeys,
+        source: 'inline_fallback',
+        detail: loaded?.detail || loaded?.error || ''
+      };
+    }
+    return {
+      keys: [],
+      source: 'file',
+      detail: loaded?.detail || loaded?.error || '本地 key 文件读取失败'
+    };
   }
 
   // 仅用于识别“请求体/参数错误”的 400。命中后不拉黑 key，避免误伤可用 key。
@@ -479,6 +595,16 @@ export function createApiManager(appContext) {
         // 兼容旧格式：如果 apiKey 是带逗号的字符串，则转换为数组；并确保有 id
         apiConfigs.forEach(config => {
           if (!config.id) { config.id = generateUUID(); needResave = true; }
+          if (typeof config.apiKeyFilePath !== 'string') {
+            config.apiKeyFilePath = '';
+            needResave = true;
+          } else {
+            const trimmedPath = config.apiKeyFilePath.trim();
+            if (trimmedPath !== config.apiKeyFilePath) {
+              config.apiKeyFilePath = trimmedPath;
+              needResave = true;
+            }
+          }
           if (typeof config.apiKey === 'string' && config.apiKey.includes(',')) {
             // 兼容多 Key：逗号分隔
             config.apiKey = config.apiKey.split(',').map(k => k.trim()).filter(Boolean);
@@ -540,6 +666,7 @@ export function createApiManager(appContext) {
         apiConfigs = [{
           id: generateUUID(),
           apiKey: '', // 初始为空字符串
+          apiKeyFilePath: '',
           baseUrl: 'https://api.openai.com/v1/chat/completions',
           modelName: 'gpt-4o',
           displayName: '',
@@ -569,6 +696,7 @@ export function createApiManager(appContext) {
       apiConfigs = [{
         id: generateUUID(),
         apiKey: '',
+        apiKeyFilePath: '',
         baseUrl: 'https://api.openai.com/v1/chat/completions',
         modelName: 'gpt-4o',
         displayName: '',
@@ -796,6 +924,7 @@ export function createApiManager(appContext) {
    * 创建并渲染单个 API 配置卡片
    * @param {Object} config - API 配置对象
    * @param {string | string[]} [config.apiKey] - API 密钥 (可以是单个字符串或字符串数组)
+   * @param {string} [config.apiKeyFilePath] - 本地 Key 文件路径（可选，每行一个 key）
    * @param {string} [config.baseUrl] - API 基础 URL
    * @param {string} [config.modelName] - 模型名称
    * @param {number} [config.temperature] - temperature 值（可为 0）
@@ -823,6 +952,7 @@ export function createApiManager(appContext) {
     titleElement.textContent = config.displayName || config.modelName || config.baseUrl || '新配置';
 
     const apiKeyInput = template.querySelector('.api-key');
+    const apiKeyFilePathInput = template.querySelector('.api-key-file-path');
     const baseUrlInput = template.querySelector('.base-url');
     const displayNameInput = template.querySelector('.display-name');
     const modelNameInput = template.querySelector('.model-name');
@@ -1033,6 +1163,9 @@ export function createApiManager(appContext) {
     } else {
       apiKeyInput.value = config.apiKey ?? '';
     }
+    if (apiKeyFilePathInput) {
+      apiKeyFilePathInput.value = config.apiKeyFilePath ?? '';
+    }
     // ------------------------
 
     baseUrlInput.value = config.baseUrl ?? 'https://api.openai.com/v1/chat/completions';
@@ -1189,6 +1322,14 @@ export function createApiManager(appContext) {
 
         saveAPIConfigs();
     });
+
+    // API Key 本地文件路径变化处理（每次请求会按该路径实时读取；失败时回退到输入框 key）。
+    if (apiKeyFilePathInput) {
+      apiKeyFilePathInput.addEventListener('change', () => {
+        apiConfigs[index].apiKeyFilePath = (apiKeyFilePathInput.value || '').trim();
+        saveAPIConfigs();
+      });
+    }
 
     // 自定义参数处理
     customParamsInput.addEventListener('change', () => {
@@ -1954,12 +2095,18 @@ export function createApiManager(appContext) {
     const tried = new Set();
     let lastErrorResponse = null;
 
-    // 计算首次尝试索引（数组）或校验单 key
-    const keysArray = normalizeApiKeys(config.apiKey);
+    // 计算候选 key：
+    // - 默认使用输入框中的 apiKey；
+    // - 若配置了 apiKeyFilePath，则优先从本地文件实时读取（读取失败时回退到输入框 key）。
+    const resolvedKeys = await resolveRuntimeApiKeys(config, emitStatus);
+    const keysArray = Array.isArray(resolvedKeys?.keys) ? resolvedKeys.keys : [];
     const isArrayKeys = keysArray.length > 1;
     if (keysArray.length === 0) {
-      console.error('API Key 缺失或无效:', config);
-      throw new Error(`API Key for ${config.displayName || config.modelName} is missing or invalid.`);
+      console.error('API Key 缺失或无效:', { modelName: config?.modelName, baseUrl: config?.baseUrl, source: resolvedKeys?.source });
+      const detailText = (typeof resolvedKeys?.detail === 'string' && resolvedKeys.detail.trim())
+        ? ` (${resolvedKeys.detail.trim()})`
+        : '';
+      throw new Error(`API Key for ${config.displayName || config.modelName} is missing or invalid${detailText}.`);
     }
 
     // 查找当前使用索引（若未设置，默认为 0）
@@ -1998,6 +2145,7 @@ export function createApiManager(appContext) {
         keyCount: isArrayKeys ? keysArray.length : 1,
         triedCount: tried.size,
         isKeyRotation: isArrayKeys,
+        keySource: resolvedKeys?.source || 'inline',
         apiBase: config?.baseUrl || '',
         modelName: config?.modelName || ''
       });
@@ -2235,6 +2383,7 @@ export function createApiManager(appContext) {
    * @param {Object} partialConfig - 部分 API 配置信息
    * @param {string} partialConfig.baseUrl - API 基础 URL
    * @param {string} partialConfig.modelName - 模型名称
+   * @param {string} [partialConfig.apiKeyFilePath] - 本地 Key 文件路径（可选）
    * @param {number} [partialConfig.temperature] - 温度值
    * @param {string} [partialConfig.customParams] - 自定义参数字符串
    * @param {string} [partialConfig.userMessagePreprocessorTemplate] - 用户消息预处理模板（支持 {{#system}}/{{#assistant}}/{{#user}} 角色块）
@@ -2268,6 +2417,7 @@ export function createApiManager(appContext) {
     // 获取当前选中配置的 apiKey 作为备选
     const currentSelectedConfig = apiConfigs[selectedConfigIndex];
     const fallbackApiKey = currentSelectedConfig ? currentSelectedConfig.apiKey : '';
+    const fallbackApiKeyFilePath = currentSelectedConfig ? currentSelectedConfig.apiKeyFilePath : '';
 
     // 创建新的配置对象
     const newConfig = {
@@ -2275,6 +2425,7 @@ export function createApiManager(appContext) {
       // 优先使用 URL 匹配到的配置的 apiKey，其次是当前选中的，最后是空字符串
       // 注意：这里 apiKey 可能是数组或字符串
       apiKey: urlMatchedConfig?.apiKey || fallbackApiKey || '',
+      apiKeyFilePath: urlMatchedConfig?.apiKeyFilePath || fallbackApiKeyFilePath || '',
       modelName: partialConfig.modelName,
       displayName: partialConfig.displayName || '',
       temperature: partialConfig.temperature ?? 1.0,
@@ -2352,6 +2503,7 @@ export function createApiManager(appContext) {
     const newConfig = {
       id: generateUUID(),
       apiKey: '',
+      apiKeyFilePath: '',
       baseUrl: 'https://api.openai.com/v1/chat/completions',
       modelName: 'new-model',
       displayName: '新配置',
@@ -2371,6 +2523,7 @@ export function createApiManager(appContext) {
     if (typeof newConfig.apiKey === 'string' && newConfig.apiKey.includes(',')) {
       newConfig.apiKey = newConfig.apiKey.split(',').map(k => k.trim()).filter(Boolean);
     }
+    newConfig.apiKeyFilePath = normalizeApiKeyFilePath(newConfig.apiKeyFilePath);
     // 初始化轮询状态
     const newConfigId = getConfigIdentifier(newConfig);
     if (Array.isArray(newConfig.apiKey) && newConfig.apiKey.length > 0) {

@@ -294,6 +294,11 @@
                                 </div>
                             </div>
                             <div class="form-group">
+                                <label>本地 Key 文件路径（可选，每行一个 Key）</label>
+                                <input type="text" class="api-key-file-path" placeholder="例如 C:\\keys\\gemini_keys.txt">
+                                <div class="api-key-file-path-hint">填写后将优先按请求实时读取本地文件；读取失败时自动回退到上方 API Key 输入框。</div>
+                            </div>
+                            <div class="form-group">
                                 <label>API 端点 URL</label>
                                 <input type="text" class="base-url" placeholder="输入 Base URL">
                             </div>
