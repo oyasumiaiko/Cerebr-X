@@ -671,7 +671,7 @@ export function createMessageSender(appContext) {
     const resolvedApi = (typeof apiManager.resolveApiParam === 'function')
       ? apiManager.resolveApiParam(apiPref)
       : apiManager.getSelectedConfig();
-    if (!resolvedApi?.baseUrl || !resolvedApi?.apiKey) return;
+    if (!resolvedApi?.baseUrl || !hasUsableApiCredential(resolvedApi)) return;
 
     const chain = (typeof chatHistoryManager?.getCurrentConversationChain === 'function')
       ? chatHistoryManager.getCurrentConversationChain()
@@ -743,7 +743,7 @@ export function createMessageSender(appContext) {
     const resolvedApi = (typeof apiManager.resolveApiParam === 'function')
       ? apiManager.resolveApiParam(apiPref)
       : apiManager.getSelectedConfig();
-    if (!resolvedApi?.baseUrl || !resolvedApi?.apiKey) {
+    if (!resolvedApi?.baseUrl || !hasUsableApiCredential(resolvedApi)) {
       return { ok: false, reason: 'missing_api' };
     }
 
@@ -2266,9 +2266,19 @@ export function createMessageSender(appContext) {
     return false;
   }
 
+  // API 凭证既支持“输入框内联 key”，也支持“本地 key 文件路径”。
+  function hasValidApiKeyFilePath(apiKeyFilePath) {
+    return (typeof apiKeyFilePath === 'string') && apiKeyFilePath.trim().length > 0;
+  }
+
+  function hasUsableApiCredential(config) {
+    if (!config || typeof config !== 'object') return false;
+    return hasValidApiKey(config.apiKey) || hasValidApiKeyFilePath(config.apiKeyFilePath);
+  }
+
   function validateApiConfig(config) {
     const target = config || apiManager.getSelectedConfig();
-    if (!target?.baseUrl || !hasValidApiKey(target.apiKey)) {
+    if (!target?.baseUrl || !hasUsableApiCredential(target)) {
       messageProcessor.appendMessage('请在设置中完善 API 配置', 'ai', true);
       return false;
     }

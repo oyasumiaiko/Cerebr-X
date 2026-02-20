@@ -190,12 +190,22 @@ export function createChatHistoryUI(appContext) {
     return false;
   }
 
+  // 对话锁定 API 解析时，允许“本地 key 文件路径”作为合法凭证来源。
+  function hasValidApiKeyFilePath(apiKeyFilePath) {
+    return (typeof apiKeyFilePath === 'string') && apiKeyFilePath.trim().length > 0;
+  }
+
+  function hasUsableApiCredential(config) {
+    if (!config || typeof config !== 'object') return false;
+    return hasValidApiKey(config.apiKey) || hasValidApiKeyFilePath(config.apiKeyFilePath);
+  }
+
   function resolveApiConfigFromLock(lock) {
     if (!lock || !services.apiManager?.resolveApiParam) return null;
     // 若锁定信息包含 id，则必须按 id 命中配置，避免误用其它同名/同基址配置
     if (lock.id) {
       const resolvedById = services.apiManager.resolveApiParam({ id: lock.id });
-      if (resolvedById?.baseUrl && hasValidApiKey(resolvedById.apiKey)) {
+      if (resolvedById?.baseUrl && hasUsableApiCredential(resolvedById)) {
         return resolvedById;
       }
       return null;
@@ -214,7 +224,7 @@ export function createChatHistoryUI(appContext) {
         modelName: lock.modelName
       });
     }
-    if (!resolved?.baseUrl || !hasValidApiKey(resolved.apiKey)) return null;
+    if (!resolved?.baseUrl || !hasUsableApiCredential(resolved)) return null;
     return resolved;
   }
 
