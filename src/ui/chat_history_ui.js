@@ -12594,23 +12594,222 @@ export function createChatHistoryUI(appContext) {
   }
 
   /**
-   * 从剪贴板导入一条新的聊天记录
-   * 剪贴板内容格式要求为纯字符串数组 JSON，例如：["第一条用户消息","第一条AI回复"]
-   * 假定消息从用户开始，用户/AI 交替排列
+   * 移除 JSON 中末尾的多余逗号（仅处理字符串外的结构符号）。
+   * 说明：用户从脚本中复制 request.json 时，常见尾逗号会导致 JSON.parse 失败。
+   * @param {string} source
+   * @returns {string}
+   */
+  function stripTrailingCommasForJson(source) {
+    if (typeof source !== 'string' || !source) return '';
+    let result = '';
+    let inString = false;
+    let escaping = false;
+
+    for (let i = 0; i < source.length; i++) {
+      const ch = source[i];
+      if (inString) {
+        result += ch;
+        if (escaping) {
+          escaping = false;
+          continue;
+        }
+        if (ch === '\\') {
+          escaping = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        result += ch;
+        continue;
+      }
+
+      if (ch === ',') {
+        let j = i + 1;
+        while (j < source.length && /\s/.test(source[j])) j++;
+        if (source[j] === '}' || source[j] === ']') {
+          continue;
+        }
+      }
+
+      result += ch;
+    }
+
+    return result;
+  }
+
+  /**
+   * 从 shell heredoc 文本中提取 JSON（例如 cat << EOF ... EOF）。
+   * @param {string} text
+   * @returns {string|null}
+   */
+  function extractJsonFromHereDoc(text) {
+    if (typeof text !== 'string' || !text.trim()) return null;
+    const normalized = text.replace(/\r\n/g, '\n');
+    const lines = normalized.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const markerMatch = line.match(/<<-?\s*(['"]?)([^\s'"]+)\1/);
+      if (!markerMatch) continue;
+
+      const marker = markerMatch[2];
+      if (!marker) continue;
+
+      let endIndex = -1;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j].trim() === marker) {
+          endIndex = j;
+          break;
+        }
+      }
+      if (endIndex === -1) continue;
+
+      const candidate = lines.slice(i + 1, endIndex).join('\n').trim();
+      if (candidate) return candidate;
+    }
+
+    return null;
+  }
+
+  /**
+   * 解析导入文本：支持直接 JSON 与 shell 脚本内嵌 JSON 两种模式。
+   * @param {string} rawText
+   * @returns {{ ok: true, data: any } | { ok: false, error: Error|null }}
+   */
+  function parseImportedConversationRawText(rawText) {
+    const candidates = [];
+    if (typeof rawText === 'string' && rawText.trim()) {
+      candidates.push(rawText.trim());
+      const hereDocBody = extractJsonFromHereDoc(rawText);
+      if (hereDocBody && hereDocBody !== rawText.trim()) {
+        candidates.push(hereDocBody);
+      }
+    }
+
+    let lastError = null;
+    for (const candidate of candidates) {
+      try {
+        return { ok: true, data: JSON.parse(candidate) };
+      } catch (error) {
+        lastError = error;
+      }
+
+      const sanitized = stripTrailingCommasForJson(candidate);
+      if (!sanitized || sanitized === candidate) continue;
+      try {
+        return { ok: true, data: JSON.parse(sanitized) };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    return { ok: false, error: lastError };
+  }
+
+  /**
+   * 提取 Gemini contents[].parts[].text 文本数组。
+   * @param {Array<any>} parts
+   * @returns {string[]}
+   */
+  function extractTextParts(parts) {
+    if (!Array.isArray(parts) || parts.length === 0) return [];
+    const texts = [];
+    for (const part of parts) {
+      if (!part || typeof part !== 'object') continue;
+      if (typeof part.text === 'string') {
+        texts.push(part.text);
+      } else if (part.text !== undefined && part.text !== null) {
+        texts.push(String(part.text));
+      }
+    }
+    return texts;
+  }
+
+  /**
+   * 将解析后的对象转换为统一消息结构。
+   * @param {any} parsed
+   * @returns {Array<{sender: 'user'|'ai', content: string, thoughtsRaw: string|null}>}
+   */
+  function buildImportEntries(parsed) {
+    // 兼容旧格式：["用户消息","AI消息"]，默认从用户开始交替。
+    if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(item => typeof item === 'string')) {
+      const result = [];
+      let isUserTurn = true;
+      for (const item of parsed) {
+        const content = String(item);
+        if (!content.trim()) {
+          isUserTurn = !isUserTurn;
+          continue;
+        }
+        result.push({
+          sender: isUserTurn ? 'user' : 'ai',
+          content,
+          thoughtsRaw: null
+        });
+        isUserTurn = !isUserTurn;
+      }
+      return result;
+    }
+
+    // 新格式：Gemini 请求体对象，优先读取 contents 字段。
+    const contents = Array.isArray(parsed?.contents)
+      ? parsed.contents
+      : (Array.isArray(parsed) ? parsed : null);
+    if (!Array.isArray(contents) || contents.length === 0) return [];
+
+    const result = [];
+    for (const message of contents) {
+      if (!message || typeof message !== 'object') continue;
+      const role = typeof message.role === 'string' ? message.role.trim().toLowerCase() : '';
+      const partTexts = extractTextParts(message.parts);
+      if (!partTexts.length) continue;
+
+      if (role === 'user') {
+        const content = partTexts.join('\n\n');
+        if (!content.trim()) continue;
+        result.push({ sender: 'user', content, thoughtsRaw: null });
+        continue;
+      }
+
+      if (role === 'model' || role === 'assistant') {
+        const thoughtsRaw = partTexts.length >= 2 ? partTexts[0] : null;
+        const content = (partTexts.length >= 2 ? partTexts.slice(1) : partTexts).join('\n\n');
+        if (!content.trim() && !thoughtsRaw?.trim()) continue;
+        result.push({
+          sender: 'ai',
+          content,
+          thoughtsRaw: thoughtsRaw?.trim() ? thoughtsRaw : null
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * 从剪贴板导入一条新的聊天记录。
+   * 支持：
+   * 1) 旧格式字符串数组 JSON：["第一条用户消息","第一条AI回复"]
+   * 2) Gemini 请求体 JSON（含 contents/parts）
+   * 3) 含 cat << EOF ... EOF 的 shell 脚本文本（自动提取 request.json）
    */
   async function importConversationFromClipboard() {
     const showNotificationSafe = typeof showNotification === 'function' ? showNotification : null;
 
-    // 由于 Permissions Policy 限制，直接调用 Clipboard API 可能被阻止，这里改为让用户手动粘贴 JSON
-    const hint = '请粘贴聊天 JSON 字符串数组，例如 ["第一条用户消息","第一条AI回复"]';
+    // 由于 Permissions Policy 限制，直接调用 Clipboard API 可能被阻止，这里改为让用户手动粘贴文本
+    const hint = '支持粘贴字符串数组 JSON 或 Gemini request.json（可直接粘贴含 cat << EOF 的脚本）';
     let rawText = await openUnifiedInputDialog({
       title: '从剪贴板导入',
       message: hint,
       defaultValue: '',
-      placeholder: '[\"第一条用户消息\",\"第一条AI回复\"]',
+      placeholder: '[\"第一条用户消息\",\"第一条AI回复\"] 或 {\"contents\":[...]}',
       confirmText: '导入',
       multiline: true,
-      rows: 8
+      rows: 12
     });
 
     if (rawText === null) {
@@ -12628,24 +12827,23 @@ export function createChatHistoryUI(appContext) {
       return;
     }
 
-    let parsed;
-    try {
-      parsed = JSON.parse(rawText);
-    } catch (error) {
-      console.error('解析导入 JSON 失败:', error);
+    const parsedResult = parseImportedConversationRawText(rawText);
+    if (!parsedResult.ok) {
+      console.error('解析导入内容失败:', parsedResult.error);
       showNotificationSafe?.({
-        message: '内容不是有效的 JSON，请确认格式如 ["用户消息","AI回复"]',
+        message: '内容解析失败，请确认为有效 JSON 或包含 request.json 的脚本片段',
         type: 'error',
-        duration: 2800
+        duration: 3200
       });
       return;
     }
 
-    if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every(item => typeof item === 'string')) {
+    const importEntries = buildImportEntries(parsedResult.data);
+    if (!importEntries.length) {
       showNotificationSafe?.({
-        message: '导入 JSON 必须是字符串数组，例如 ["第一条用户消息","第一条AI回复"]',
+        message: '未识别到可导入消息。请提供字符串数组或包含 contents 的 Gemini 请求体',
         type: 'warning',
-        duration: 3200
+        duration: 3600
       });
       return;
     }
@@ -12654,13 +12852,8 @@ export function createChatHistoryUI(appContext) {
       // 先清空当前会话（内部会自动保存已有内容）
       await clearChatHistory();
 
-      // 按“用户-助手-用户-助手”顺序构建新会话
-      let isUserTurn = true;
-      for (const text of parsed) {
-        const content = typeof text === 'string' ? text : String(text);
-        const sender = isUserTurn ? 'user' : 'ai';
-        appendMessage(content, sender, false, null, null, null, null);
-        isUserTurn = !isUserTurn;
+      for (const entry of importEntries) {
+        appendMessage(entry.content, entry.sender, false, null, null, entry.thoughtsRaw, null);
       }
 
       // 保存为新的持久化会话，使用当前页面信息作为元数据
@@ -12682,7 +12875,7 @@ export function createChatHistoryUI(appContext) {
     } catch (error) {
       console.error('导入聊天记录失败:', error);
       showNotificationSafe?.({
-        message: '导入聊天记录失败，请检查剪贴板内容或稍后重试',
+        message: '导入聊天记录失败，请检查内容或稍后重试',
         type: 'error',
         duration: 3200
       });
