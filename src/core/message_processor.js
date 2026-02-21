@@ -1042,8 +1042,11 @@ export function createMessageProcessor(appContext) {
     try {
       messageDiv.classList.remove('error-message');
       messageDiv.classList.remove('loading-message');
+      messageDiv.classList.remove('regenerating');
       const retryActions = messageDiv.querySelectorAll('.error-retry-actions');
       retryActions.forEach((actionEl) => actionEl.remove());
+      const rootTextNodes = Array.from(messageDiv.childNodes || []).filter(node => node && node.nodeType === 3);
+      rootTextNodes.forEach((node) => node.remove());
     } catch (_) {}
 
     messageDiv.setAttribute('data-original-text', safeAnswerContent);

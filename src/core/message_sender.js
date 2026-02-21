@@ -1316,7 +1316,27 @@ export function createMessageSender(appContext) {
    */
   function updateLoadingStatus(loadingMessage, text, meta = null) {
     if (!loadingMessage || !loadingMessage.parentNode) return;
-    loadingMessage.textContent = text;
+    const safeText = (typeof text === 'string') ? text : String(text ?? '');
+    try {
+      const rootTextNodes = Array.from(loadingMessage.childNodes || []).filter(node => node && node.nodeType === 3);
+      rootTextNodes.forEach((node) => node.remove());
+    } catch (_) {}
+    let textContentDiv = loadingMessage.querySelector('.text-content');
+    if (!textContentDiv) {
+      textContentDiv = document.createElement('div');
+      textContentDiv.classList.add('text-content');
+      const thoughtsDiv = loadingMessage.querySelector('.thoughts-content');
+      const apiFooter = loadingMessage.querySelector('.api-footer');
+      if (thoughtsDiv && thoughtsDiv.nextSibling) {
+        loadingMessage.insertBefore(textContentDiv, thoughtsDiv.nextSibling);
+      } else if (apiFooter && apiFooter.parentNode === loadingMessage) {
+        loadingMessage.insertBefore(textContentDiv, apiFooter);
+      } else {
+        loadingMessage.appendChild(textContentDiv);
+      }
+    }
+    textContentDiv.textContent = safeText;
+    loadingMessage.setAttribute('data-original-text', safeText);
 
     // 使用 title 提供“更细节但不打扰”的信息密度：鼠标悬停可查看。
     // 注意：不要在这里拼接/透出任何 API Key 或包含 key 的 URL。
@@ -2262,6 +2282,68 @@ export function createMessageSender(appContext) {
     if (messageElement.querySelector('.error-retry-actions')) return;
 
     /**
+     * 规范化消息 DOM，确保状态文本写入 `.text-content`，避免直接覆写根节点导致结构残留。
+     * @param {HTMLElement|null} element
+     * @returns {HTMLElement|null}
+     */
+    const ensureMessageTextContainer = (element) => {
+      if (!element) return null;
+      try {
+        const rootTextNodes = Array.from(element.childNodes || []).filter(node => node && node.nodeType === 3);
+        rootTextNodes.forEach((node) => node.remove());
+      } catch (_) {}
+      let textContentDiv = element.querySelector('.text-content');
+      if (textContentDiv) return textContentDiv;
+      textContentDiv = document.createElement('div');
+      textContentDiv.classList.add('text-content');
+      const thoughtsDiv = element.querySelector('.thoughts-content');
+      const apiFooter = element.querySelector('.api-footer');
+      if (thoughtsDiv && thoughtsDiv.nextSibling) {
+        element.insertBefore(textContentDiv, thoughtsDiv.nextSibling);
+      } else if (apiFooter && apiFooter.parentNode === element) {
+        element.insertBefore(textContentDiv, apiFooter);
+      } else {
+        element.appendChild(textContentDiv);
+      }
+      return textContentDiv;
+    };
+
+    /**
+     * 设置消息状态文本，并按需清理错误态残留元素。
+     * @param {HTMLElement|null} element
+     * @param {string} text
+     * @param {{clearRetryActions?: boolean, clearThoughts?: boolean, clearTitle?: boolean}} [options]
+     */
+    const setMessageStatusText = (element, text, options = {}) => {
+      if (!element) return;
+      const normalizedOptions = (options && typeof options === 'object') ? options : {};
+      const safeText = (typeof text === 'string') ? text : String(text ?? '');
+
+      if (normalizedOptions.clearRetryActions) {
+        try {
+          element.querySelectorAll('.error-retry-actions').forEach((actionEl) => actionEl.remove());
+        } catch (_) {}
+      }
+      if (normalizedOptions.clearThoughts) {
+        try {
+          element.querySelectorAll('.thoughts-content').forEach((thoughtsEl) => thoughtsEl.remove());
+        } catch (_) {}
+      }
+
+      const textContentDiv = ensureMessageTextContainer(element);
+      if (textContentDiv) {
+        textContentDiv.textContent = safeText;
+      } else {
+        element.textContent = safeText;
+      }
+      element.setAttribute('data-original-text', safeText);
+
+      if (normalizedOptions.clearTitle) {
+        try { element.removeAttribute('title'); } catch (_) {}
+      }
+    };
+
+    /**
      * 清理错误态样式与重试按钮，避免重试后遗留红字/旧操作区。
      * @param {HTMLElement|null} element
      */
@@ -2270,6 +2352,7 @@ export function createMessageSender(appContext) {
       try {
         element.classList.remove('error-message');
         element.classList.remove('loading-message');
+        element.classList.remove('regenerating');
       } catch (_) {}
       try {
         element.querySelectorAll('.error-retry-actions').forEach((actionEl) => actionEl.remove());
@@ -2290,25 +2373,35 @@ export function createMessageSender(appContext) {
       if (retryBtn.disabled) return;
       const boundMessageId = (messageElement.getAttribute('data-message-id') || '').trim();
       const isEphemeralErrorMessage = !boundMessageId;
+      let retryResult = null;
       resetErrorUiState(messageElement);
-      if (isEphemeralErrorMessage) {
-        messageElement.textContent = '正在重试...';
-        messageElement.classList.add('loading-message');
-        messageElement.classList.add('updating');
-      } else {
-        messageElement.classList.add('updating');
-      }
+      setMessageStatusText(messageElement, '正在重试...', {
+        clearRetryActions: true,
+        clearThoughts: true,
+        clearTitle: true
+      });
+      messageElement.classList.add('loading-message');
+      messageElement.classList.add('updating');
       retryBtn.disabled = true;
       const originalText = retryBtn.textContent;
       retryBtn.textContent = '重试中...';
       try {
-        await retryFn();
+        retryResult = await retryFn();
       } catch (error) {
         console.error('手动重试执行失败:', error);
       } finally {
         // 无 message-id 的错误占位不会被后续请求复用，重试结束后移除，避免残留状态干扰阅读。
         if (isEphemeralErrorMessage && messageElement.isConnected) {
           messageElement.remove();
+        }
+        // 某些前置校验失败会导致 retryFn 提前返回，此时需要兜底清理“重试中”视觉状态，避免假死残留。
+        if (!isEphemeralErrorMessage && messageElement.isConnected) {
+          const succeeded = !!(retryResult && retryResult.ok === true);
+          if (!succeeded) {
+            messageElement.classList.remove('loading-message');
+            messageElement.classList.remove('updating');
+            messageElement.classList.remove('regenerating');
+          }
         }
         if (retryBtn.isConnected) {
           retryBtn.disabled = false;
@@ -3274,7 +3367,6 @@ export function createMessageSender(appContext) {
       let messageElement = null;
       if (loadingMessage && loadingMessage.parentNode) {
         messageElement = loadingMessage;
-        messageElement.textContent = errorMessageText;
       } else if (canUpdateExistingAiMessage && normalizedTargetAiMessageId) {
         const safeTargetId = escapeMessageIdForSelector(normalizedTargetAiMessageId);
         const selector = safeTargetId ? `.message[data-message-id="${safeTargetId}"]` : '';
@@ -3284,7 +3376,6 @@ export function createMessageSender(appContext) {
           : null;
         if (targetMessageElement) {
           messageElement = targetMessageElement;
-          messageElement.textContent = errorMessageText;
         }
       } else {
         const errorUiActive = isThreadUiActive(activeThreadContext);
@@ -3295,9 +3386,33 @@ export function createMessageSender(appContext) {
       }
 
       if (messageElement) {
+        try {
+          const rootTextNodes = Array.from(messageElement.childNodes || []).filter(node => node && node.nodeType === 3);
+          rootTextNodes.forEach((node) => node.remove());
+        } catch (_) {}
+        try {
+          messageElement.querySelectorAll('.error-retry-actions').forEach((actionEl) => actionEl.remove());
+        } catch (_) {}
+        try {
+          messageElement.querySelectorAll('.thoughts-content').forEach((thoughtsEl) => thoughtsEl.remove());
+        } catch (_) {}
+        let textContentDiv = messageElement.querySelector('.text-content');
+        if (!textContentDiv) {
+          textContentDiv = document.createElement('div');
+          textContentDiv.classList.add('text-content');
+          const apiFooter = messageElement.querySelector('.api-footer');
+          if (apiFooter && apiFooter.parentNode === messageElement) {
+            messageElement.insertBefore(textContentDiv, apiFooter);
+          } else {
+            messageElement.appendChild(textContentDiv);
+          }
+        }
+        textContentDiv.textContent = errorMessageText;
+        messageElement.setAttribute('data-original-text', errorMessageText);
         messageElement.classList.add('error-message');
         messageElement.classList.remove('loading-message');
         messageElement.classList.remove('updating');
+        messageElement.classList.remove('regenerating');
         const errorScrollContainer = activeThreadContext
           ? resolveThreadUiContainer(activeThreadContext)
           : chatContainer;
