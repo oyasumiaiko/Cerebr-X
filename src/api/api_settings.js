@@ -1954,6 +1954,32 @@ export function createApiManager(appContext) {
       }
     }
 
+    // 收集 Gemini systemInstruction 的 parts：
+    // - 兼容多条 system 消息（例如“API 消息模板”注入的 {{#system}} 块）；
+    // - 保持出现顺序，避免只取首条导致后续系统指令丢失。
+    const collectGeminiSystemInstructionParts = (messageList) => {
+      const parts = [];
+      const source = Array.isArray(messageList) ? messageList : [];
+      for (const msg of source) {
+        if (!msg || msg.role !== 'system') continue;
+        const content = msg.content;
+        if (typeof content === 'string') {
+          if (content.trim()) {
+            parts.push({ text: content });
+          }
+          continue;
+        }
+        if (Array.isArray(content)) {
+          for (const item of content) {
+            if (!item || item.type !== 'text') continue;
+            if (typeof item.text !== 'string' || !item.text.trim()) continue;
+            parts.push({ text: item.text });
+          }
+        }
+      }
+      return parts;
+    };
+
     if (config.baseUrl === 'genai') {
       // Gemini API 请求格式（包含 Gemini 3 思维链签名 Thought Signature 的回传）
       const contents = (await Promise.all(normalizedMessages.map(async (msg) => {
@@ -2023,13 +2049,13 @@ export function createApiManager(appContext) {
         ...overrides
       };
 
-      // 处理 system 消息（优先使用规范化后的消息）
-      const systemMessage = normalizedMessages.find(msg => msg.role === 'system');
-      if (systemMessage && systemMessage.content) {
+      // 处理 system 消息：合并所有 system 内容到 systemInstruction（保序）。
+      const systemInstructionParts = collectGeminiSystemInstructionParts(normalizedMessages);
+      if (systemInstructionParts.length > 0) {
         requestBody.systemInstruction = {
           // 根据Gemini API文档，systemInstruction是Content类型，其role是可选的 ('user'或'model')
           // 对于系统指令，通常不指定role或留空
-          parts: [{ text: systemMessage.content }]
+          parts: systemInstructionParts
         };
       }
       // 如果存在自定义参数，解析并合并到 generationConfig
