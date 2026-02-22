@@ -3949,6 +3949,39 @@ export function createChatHistoryUI(appContext) {
     };
     menu.__closeMenu = closeMenu;
 
+    // 右键菜单行为对齐 Windows：在选项上“释放鼠标按键”时触发。
+    // 左键由 click 覆盖；右键在 mouseup(button=2) 时补发 click。
+    const HISTORY_MENU_ACTION_SELECTOR = '.chat-history-context-menu-option';
+    const dispatchHistoryMenuClickOnRightRelease = (event) => {
+      if (!event || event.button !== 2) return;
+      const option = event.target instanceof Element
+        ? event.target.closest(HISTORY_MENU_ACTION_SELECTOR)
+        : null;
+      if (!option) return;
+      event.preventDefault();
+      event.stopPropagation();
+      option.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        ctrlKey: !!event.ctrlKey,
+        shiftKey: !!event.shiftKey,
+        altKey: !!event.altKey,
+        metaKey: !!event.metaKey
+      }));
+    };
+    const preventNativeContextMenuOnHistoryOption = (event) => {
+      const option = event.target instanceof Element
+        ? event.target.closest(HISTORY_MENU_ACTION_SELECTOR)
+        : null;
+      if (!option) return;
+      event.preventDefault();
+    };
+    menu.addEventListener('mouseup', dispatchHistoryMenuClickOnRightRelease);
+    menu.addEventListener('contextmenu', preventNativeContextMenuOnHistoryOption);
+    menuCleanupCallbacks.push(() => menu.removeEventListener('mouseup', dispatchHistoryMenuClickOnRightRelease));
+    menuCleanupCallbacks.push(() => menu.removeEventListener('contextmenu', preventNativeContextMenuOnHistoryOption));
+
     const appendMenuSeparator = () => {
       const separator = document.createElement('div');
       separator.className = 'chat-history-context-menu-separator';

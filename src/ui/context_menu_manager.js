@@ -1641,6 +1641,54 @@ export function createContextMenuManager(appContext) {
    * 设置事件监听器
    */
   function setupEventListeners() {
+    // 右键菜单行为对齐 Windows：在菜单项上“释放鼠标按键”时触发。
+    // 说明：
+    // - 左键本身由 click（mouseup 后触发）覆盖；
+    // - 右键默认不会触发 click，这里在 mouseup(button=2) 时补发一次 click；
+    // - 这样可以保证“按下不触发、释放才触发”。
+    const ACTIONABLE_SELECTOR = '.context-menu-item, .context-menu-submenu-item';
+    const dispatchClickOnRightRelease = (event) => {
+      if (!event || event.button !== 2) return;
+      const target = event.target instanceof Element
+        ? event.target.closest(ACTIONABLE_SELECTOR)
+        : null;
+      if (!target) return;
+      if (
+        target.classList.contains('is-disabled')
+        || target.classList.contains('disabled')
+        || target.dataset?.disabled === 'true'
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      target.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        ctrlKey: !!event.ctrlKey,
+        shiftKey: !!event.shiftKey,
+        altKey: !!event.altKey,
+        metaKey: !!event.metaKey
+      }));
+    };
+    const preventNativeContextMenuOnActionable = (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest(ACTIONABLE_SELECTOR)
+        : null;
+      if (!target) return;
+      event.preventDefault();
+    };
+
+    [contextMenu, regenerateSubmenu, insertMessageSubmenu, forkConversationSubmenu].forEach((menuLikeEl) => {
+      if (!menuLikeEl) return;
+      menuLikeEl.addEventListener('mouseup', dispatchClickOnRightRelease);
+      menuLikeEl.addEventListener('contextmenu', preventNativeContextMenuOnActionable);
+    });
+
     const attachContextMenuListeners = (container) => {
       if (!container) return;
       // 监听消息（用户或 AI）右键点击
