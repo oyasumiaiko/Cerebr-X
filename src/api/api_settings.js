@@ -65,6 +65,8 @@ export function createApiManager(appContext) {
   let apiKeyBlacklist = {};
   // 拖动排序用的临时状态，避免在拖动过程中频繁写入。
   let draggingCardIndex = null;
+  // 连接源配置区展开状态：默认折叠，减少设置页初始高度占用。
+  let isConnectionSourcesPanelExpanded = false;
   const DELETE_CONFIRM_TIMEOUT_MS = 2600;
 
   const {
@@ -160,6 +162,17 @@ export function createApiManager(appContext) {
   function getConnectionSourceById(connectionSourceId) {
     if (!connectionSourceId) return null;
     return connectionSources.find(source => source.id === connectionSourceId) || null;
+  }
+
+  function hasConfiguredConnectionSource(config) {
+    const sourceId = (typeof config?.connectionSourceId === 'string') ? config.connectionSourceId.trim() : '';
+    if (!sourceId) return false;
+    return !!getConnectionSourceById(sourceId);
+  }
+
+  function getApiConfigDisplayTitle(config) {
+    const effective = resolveEffectiveConfig(config) || config || {};
+    return config?.displayName || config?.modelName || effective?.baseUrl || '新配置';
   }
 
   function getConfigConnectionType(config) {
@@ -944,6 +957,15 @@ export function createApiManager(appContext) {
     };
   }
 
+  // 仅当旧版连接字段里存在“有效值”时，才迁移/创建连接源；避免空字段误生成默认连接源。
+  function hasMeaningfulLegacyConnectionFields(config = {}) {
+    const legacyConnectionType = normalizeConnectionType(config.connectionType);
+    const legacyBaseUrl = (typeof config.baseUrl === 'string') ? config.baseUrl.trim() : '';
+    const hasInlineApiKeys = normalizeApiKeys(config.apiKey).length > 0;
+    const hasApiKeyFilePath = !!normalizeApiKeyFilePath(config.apiKeyFilePath);
+    return !!(legacyConnectionType || legacyBaseUrl || hasInlineApiKeys || hasApiKeyFilePath);
+  }
+
   function migrateConnectionSourcesAndConfigs(rawConfigs, rawSources) {
     const sourceList = [];
     const sourceById = new Map();
@@ -980,7 +1002,7 @@ export function createApiManager(appContext) {
       if (configuredSourceId) {
         source = sourceById.get(configuredSourceId) || null;
       }
-      if (!source) {
+      if (!source && hasMeaningfulLegacyConnectionFields(config)) {
         source = pushSource({
           connectionType: config.connectionType,
           baseUrl: config.baseUrl,
@@ -997,10 +1019,6 @@ export function createApiManager(appContext) {
       return config;
     });
 
-    if (sourceList.length === 0) {
-      sourceList.push(createDefaultConnectionSource());
-    }
-
     assignStableConnectionSourceNames(sourceList);
     return {
       apiConfigs: configs,
@@ -1010,13 +1028,12 @@ export function createApiManager(appContext) {
 
   function normalizeApiConfigsAfterMigration(configs, availableSources) {
     const sourceIdSet = new Set((Array.isArray(availableSources) ? availableSources : []).map(source => source.id));
-    const fallbackSourceId = (Array.isArray(availableSources) && availableSources.length > 0) ? availableSources[0].id : '';
     return (Array.isArray(configs) ? configs : []).map((rawConfig) => {
       const config = { ...rawConfig };
       if (!config.id) config.id = generateUUID();
 
       const candidateSourceId = (typeof config.connectionSourceId === 'string') ? config.connectionSourceId.trim() : '';
-      config.connectionSourceId = sourceIdSet.has(candidateSourceId) ? candidateSourceId : fallbackSourceId;
+      config.connectionSourceId = sourceIdSet.has(candidateSourceId) ? candidateSourceId : '';
 
       if (typeof config.modelName !== 'string') {
         config.modelName = '';
@@ -1056,9 +1073,6 @@ export function createApiManager(appContext) {
       byId.add(normalized.id);
       deduped.push(normalized);
     });
-    if (deduped.length === 0) {
-      deduped.push(createDefaultConnectionSource());
-    }
     assignStableConnectionSourceNames(deduped);
     return deduped;
   }
@@ -1126,9 +1140,6 @@ export function createApiManager(appContext) {
         selectedConfigIndex = Math.max(0, Math.min(selectedConfigIndex, apiConfigs.length - 1));
 
         let needResave = false;
-        if (!Array.isArray(result.connectionSources) || result.connectionSources.length === 0) {
-          needResave = true;
-        }
 
         apiConfigs.forEach(config => {
           if (!config.id) {
@@ -1136,8 +1147,17 @@ export function createApiManager(appContext) {
             needResave = true;
           }
 
-          if (!config.connectionSourceId || !connectionSources.some(source => source.id === config.connectionSourceId)) {
-            config.connectionSourceId = connectionSources[0]?.id || '';
+          const normalizedSourceId = (typeof config.connectionSourceId === 'string')
+            ? config.connectionSourceId.trim()
+            : '';
+          const isValidSource = !!(normalizedSourceId && connectionSources.some(source => source.id === normalizedSourceId));
+          if (!isValidSource) {
+            if (config.connectionSourceId !== '') {
+              config.connectionSourceId = '';
+              needResave = true;
+            }
+          } else if (normalizedSourceId !== config.connectionSourceId) {
+            config.connectionSourceId = normalizedSourceId;
             needResave = true;
           }
 
@@ -1617,30 +1637,55 @@ export function createApiManager(appContext) {
     }
 
     if (deleteButton) {
+      let deleteConfirmTimer = null;
+      const resetDeleteConfirm = () => {
+        deleteButton.dataset.confirming = 'false';
+        deleteButton.classList.remove('is-confirming');
+        template.classList.remove('delete-confirming');
+        deleteButton.title = '删除';
+        if (deleteConfirmTimer) {
+          clearTimeout(deleteConfirmTimer);
+          deleteConfirmTimer = null;
+        }
+      };
+
       deleteButton.addEventListener('click', (e) => {
         e.stopPropagation();
-        const currentRefCount = getConnectionSourceRefCount(source.id);
-        if (currentRefCount > 0) {
-          utils?.showNotification?.({
-            type: 'warning',
-            message: `连接源仍被 ${currentRefCount} 个 API 引用，无法删除`,
-            duration: 2400
-          });
+        if (deleteButton.dataset.confirming === 'true') {
+          resetDeleteConfirm();
+        } else {
+          // 删除连接源改为“原地二次确认”，降低误触成本。
+          deleteButton.dataset.confirming = 'true';
+          deleteButton.classList.add('is-confirming');
+          template.classList.add('delete-confirming');
+          deleteButton.title = '再次点击确认删除';
+          deleteConfirmTimer = setTimeout(() => {
+            resetDeleteConfirm();
+          }, DELETE_CONFIRM_TIMEOUT_MS);
           return;
         }
-        if (connectionSources.length <= 1) {
-          utils?.showNotification?.({
-            type: 'warning',
-            message: '至少保留一个连接源',
-            duration: 2400
-          });
-          return;
-        }
+
+        let affectedConfigs = 0;
+        // 允许删除被引用连接源：将引用它的 API 标记为“未配置连接源”。
+        apiConfigs.forEach((configItem) => {
+          if (!configItem || configItem.connectionSourceId !== source.id) return;
+          configItem.connectionSourceId = '';
+          affectedConfigs += 1;
+        });
         connectionSources = connectionSources.filter(item => item.id !== source.id);
+        delete apiKeyUsageIndex[source.id];
         clearApiKeyFileCacheEntry({ connectionSourceId: source.id });
         saveAPIConfigs();
         renderConnectionSources();
         renderAPICards();
+        renderFavoriteApis();
+        if (affectedConfigs > 0) {
+          utils?.showNotification?.({
+            type: 'warning',
+            message: `已删除连接源，${affectedConfigs} 个 API 变为“未配置连接源”`,
+            duration: 2800
+          });
+        }
       });
     }
 
@@ -1699,11 +1744,16 @@ export function createApiManager(appContext) {
       template.classList.add('selected');
     }
 
-    const effectiveConfig = resolveEffectiveConfig(config) || config;
-
     // 设置标题
     const titleElement = template.querySelector('.api-card-title');
-    titleElement.textContent = config.displayName || config.modelName || effectiveConfig.baseUrl || '新配置';
+    const updateCardTitle = () => {
+      const currentConfig = apiConfigs[index] || config || {};
+      const baseTitle = getApiConfigDisplayTitle(currentConfig);
+      const missingSource = !hasConfiguredConnectionSource(currentConfig);
+      titleElement.textContent = missingSource ? `⚠ ${baseTitle}` : baseTitle;
+      titleElement.title = missingSource ? `未配置连接源：${baseTitle}` : baseTitle;
+      template.classList.toggle('missing-connection-source', missingSource);
+    };
 
     const connectionSourceSelect = template.querySelector('.connection-source-id');
     const connectionSourceHint = template.querySelector('.connection-source-hint');
@@ -1722,32 +1772,46 @@ export function createApiManager(appContext) {
     const userMessageTemplateCopyBtn = template.querySelector('.template-inject-copy-btn');
     const refreshConnectionSourceOptions = () => {
       if (!connectionSourceSelect) return;
-      const currentSourceId = apiConfigs[index].connectionSourceId || connectionSources[0]?.id || '';
+      const currentSourceId = (typeof apiConfigs[index]?.connectionSourceId === 'string')
+        ? apiConfigs[index].connectionSourceId.trim()
+        : '';
       connectionSourceSelect.innerHTML = '';
+      // 始终保留“未配置连接源”选项，支持显式置空绑定关系。
+      const emptyOption = document.createElement('option');
+      emptyOption.value = '';
+      emptyOption.textContent = '未配置连接源';
+      connectionSourceSelect.appendChild(emptyOption);
       connectionSources.forEach((source, sourceIndex) => {
         const option = document.createElement('option');
         option.value = source.id;
         option.textContent = buildConnectionSourceDisplayName(source, sourceIndex);
         connectionSourceSelect.appendChild(option);
       });
-      if (currentSourceId) {
-        connectionSourceSelect.value = currentSourceId;
-      } else if (connectionSources.length > 0) {
-        connectionSourceSelect.value = connectionSources[0].id;
+      const normalizedSourceId = getConnectionSourceById(currentSourceId)?.id || '';
+      connectionSourceSelect.value = normalizedSourceId;
+      if (apiConfigs[index] && apiConfigs[index].connectionSourceId !== normalizedSourceId) {
+        apiConfigs[index].connectionSourceId = normalizedSourceId;
       }
     };
     const refreshConnectionSourceHint = () => {
       if (!connectionSourceHint) return;
-      const selectedSourceId = connectionSourceSelect?.value || apiConfigs[index].connectionSourceId;
-      const selectedSource = connectionSources.find(source => source.id === selectedSourceId) || null;
+      const selectedSourceId = (typeof connectionSourceSelect?.value === 'string')
+        ? connectionSourceSelect.value.trim()
+        : '';
+      const selectedSource = getConnectionSourceById(selectedSourceId);
       if (!selectedSource) {
-        connectionSourceHint.textContent = '请先新增一个连接源并选择。';
+        // 未配置连接源时给出明确风险提示，并给卡片加警示态，便于快速定位。
+        connectionSourceHint.textContent = '⚠ 未配置连接源：该 API 暂无端点与鉴权信息。';
+        connectionSourceHint.classList.add('warning');
+        updateCardTitle();
         return;
       }
+      connectionSourceHint.classList.remove('warning');
       const sourceType = normalizeConnectionType(selectedSource.connectionType) || inferConnectionTypeByBaseUrl(selectedSource.baseUrl);
       const sourceBaseUrl = normalizeConfigBaseUrlByConnection(sourceType, selectedSource.baseUrl);
       const sourceLabel = sourceType === CONNECTION_TYPE_GEMINI ? 'Gemini' : 'OpenAI 兼容';
       connectionSourceHint.textContent = `${sourceLabel} · ${sourceBaseUrl || '未设置端点'} · 统一复用鉴权`;
+      updateCardTitle();
     };
     const customParamsErrorElemId = `custom-params-error-${index}`;
     let lastFormattedCustomParams = '';
@@ -1954,8 +2018,8 @@ export function createApiManager(appContext) {
     });
 
     refreshConnectionSourceOptions();
-    if (connectionSourceSelect?.value) {
-      apiConfigs[index].connectionSourceId = connectionSourceSelect.value;
+    if (connectionSourceSelect) {
+      apiConfigs[index].connectionSourceId = getConnectionSourceById(connectionSourceSelect.value)?.id || '';
     }
     refreshConnectionSourceHint();
 
@@ -2076,7 +2140,7 @@ export function createApiManager(appContext) {
     // --- 输入变化时保存 ---
     const saveCardBasicFields = () => {
       const previousConfig = { ...apiConfigs[index] };
-      const selectedSourceId = connectionSourceSelect?.value || apiConfigs[index].connectionSourceId || connectionSources[0]?.id || '';
+      const selectedSourceId = getConnectionSourceById(connectionSourceSelect?.value)?.id || '';
       apiConfigs[index] = {
         ...apiConfigs[index],
         connectionSourceId: selectedSourceId,
@@ -2086,10 +2150,9 @@ export function createApiManager(appContext) {
       refreshConnectionSourceHint();
       clearApiKeyFileCacheEntry(previousConfig);
       clearApiKeyFileCacheEntry(apiConfigs[index]);
-      // 更新标题
-      const effectiveNextConfig = resolveEffectiveConfig(apiConfigs[index]) || apiConfigs[index];
-      titleElement.textContent = apiConfigs[index].displayName || apiConfigs[index].modelName || effectiveNextConfig.baseUrl || '新配置';
+      updateCardTitle();
       saveAPIConfigs();
+      renderFavoriteApis();
     };
     if (connectionSourceSelect) {
       connectionSourceSelect.addEventListener('change', saveCardBasicFields);
@@ -2278,9 +2341,11 @@ export function createApiManager(appContext) {
 
       const apiName = document.createElement('span');
       apiName.className = 'api-name';
-      const effectiveConfig = resolveEffectiveConfig(config) || config;
-      apiName.textContent = config.displayName || config.modelName || effectiveConfig.baseUrl;
-      apiName.title = apiName.textContent;
+      const baseTitle = getApiConfigDisplayTitle(config);
+      const missingSource = !hasConfiguredConnectionSource(config);
+      apiName.textContent = missingSource ? `⚠ ${baseTitle}` : baseTitle;
+      apiName.title = missingSource ? `未配置连接源：${baseTitle}` : baseTitle;
+      item.classList.toggle('missing-connection-source', missingSource);
 
       item.appendChild(apiName);
 
@@ -3180,6 +3245,45 @@ export function createApiManager(appContext) {
     const addButton = currentAppContext.dom.apiSettingsAddButton;
     const addConnectionSourceButton = currentAppContext.dom.connectionSourceAddButton
       || document.getElementById('connection-source-add');
+    const connectionSourcesPanel = panel?.querySelector('.connection-sources-panel')
+      || document.querySelector('#api-settings .connection-sources-panel')
+      || document.querySelector('.connection-sources-panel');
+    const connectionSourcesHeader = connectionSourcesPanel?.querySelector('.connection-sources-header') || null;
+    const connectionSourcesTitle = connectionSourcesPanel?.querySelector('.connection-sources-title') || null;
+    if (connectionSourcesTitle && !connectionSourcesTitle.dataset.baseTitle) {
+      connectionSourcesTitle.dataset.baseTitle = (connectionSourcesTitle.textContent || '').trim() || '连接源';
+    }
+    const applyConnectionSourcesPanelState = () => {
+      if (!connectionSourcesPanel || !connectionSourcesHeader) return;
+      const baseTitle = (connectionSourcesTitle?.dataset?.baseTitle || '连接源').trim() || '连接源';
+      connectionSourcesPanel.classList.toggle('collapsed', !isConnectionSourcesPanelExpanded);
+      connectionSourcesHeader.setAttribute('aria-expanded', isConnectionSourcesPanelExpanded ? 'true' : 'false');
+      connectionSourcesHeader.title = isConnectionSourcesPanelExpanded ? '点击折叠连接源配置区' : '点击展开连接源配置区';
+      if (connectionSourcesTitle) {
+        connectionSourcesTitle.textContent = isConnectionSourcesPanelExpanded ? baseTitle : `${baseTitle}（已折叠）`;
+      }
+    };
+    if (connectionSourcesHeader) {
+      connectionSourcesHeader.classList.add('is-collapsible');
+      connectionSourcesHeader.setAttribute('tabindex', '0');
+      connectionSourcesHeader.setAttribute('role', 'button');
+      connectionSourcesHeader.addEventListener('click', (event) => {
+        const target = event.target;
+        if (addConnectionSourceButton && target instanceof Element && (target === addConnectionSourceButton || addConnectionSourceButton.contains(target))) {
+          return;
+        }
+        isConnectionSourcesPanelExpanded = !isConnectionSourcesPanelExpanded;
+        applyConnectionSourcesPanelState();
+      });
+      connectionSourcesHeader.addEventListener('keydown', (event) => {
+        if (event.target !== connectionSourcesHeader) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        isConnectionSourcesPanelExpanded = !isConnectionSourcesPanelExpanded;
+        applyConnectionSourcesPanelState();
+      });
+      applyConnectionSourcesPanelState();
+    }
 
     // 显示/隐藏 API 设置（已并入“聊天记录”面板的标签页）
     toggleButton.addEventListener('click', async (e) => {
@@ -3348,7 +3452,7 @@ export function createApiManager(appContext) {
 
     const selectedRawConfig = apiConfigs[selectedConfigIndex] || apiConfigs[0] || null;
     const selectedEffectiveConfig = resolveEffectiveConfig(selectedRawConfig) || null;
-    let selectedSourceId = selectedRawConfig?.connectionSourceId || connectionSources[0]?.id || '';
+    let selectedSourceId = selectedRawConfig?.connectionSourceId || '';
 
     if (partialConfig.connectionSourceId && getConnectionSourceById(partialConfig.connectionSourceId)) {
       selectedSourceId = partialConfig.connectionSourceId;
@@ -3461,14 +3565,8 @@ export function createApiManager(appContext) {
 
   // 新增配置入口：集中处理默认值与持久化，避免各处复制逻辑。
   function addConfig(config = {}) {
-    if (!Array.isArray(connectionSources) || connectionSources.length <= 0) {
-      connectionSources = [createDefaultConnectionSource()];
-      renderConnectionSources();
-    }
-
     let connectionSourceId = (typeof config?.connectionSourceId === 'string') ? config.connectionSourceId.trim() : '';
-    const hasLegacyConnectionFields = ['connectionType', 'baseUrl', 'apiKey', 'apiKeyFilePath']
-      .some((field) => Object.prototype.hasOwnProperty.call(config || {}, field));
+    const hasLegacyConnectionFields = hasMeaningfulLegacyConnectionFields(config);
 
     if (!connectionSourceId && hasLegacyConnectionFields) {
       const signatureSource = normalizeConnectionSource({
@@ -3494,8 +3592,18 @@ export function createApiManager(appContext) {
       }
     }
 
-    if (!connectionSourceId || !getConnectionSourceById(connectionSourceId)) {
-      connectionSourceId = connectionSources[0]?.id || '';
+    // 新建配置默认沿用“当前选中 API”的连接源；若当前也是未配置，则保持空值。
+    if (!connectionSourceId) {
+      const preferredSourceId = (typeof apiConfigs[selectedConfigIndex]?.connectionSourceId === 'string')
+        ? apiConfigs[selectedConfigIndex].connectionSourceId.trim()
+        : '';
+      if (preferredSourceId && getConnectionSourceById(preferredSourceId)) {
+        connectionSourceId = preferredSourceId;
+      }
+    }
+
+    if (connectionSourceId && !getConnectionSourceById(connectionSourceId)) {
+      connectionSourceId = '';
     }
 
     const mergedConfig = createDefaultApiConfig(connectionSourceId, {
