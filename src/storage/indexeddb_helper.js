@@ -137,6 +137,7 @@ function compactConversationApiLock(rawLock) {
     return '';
   };
   const id = typeof rawLock.id === 'string' ? rawLock.id.trim() : '';
+  const connectionSourceId = typeof rawLock.connectionSourceId === 'string' ? rawLock.connectionSourceId.trim() : '';
   const displayName = typeof rawLock.displayName === 'string' ? rawLock.displayName.trim() : '';
   const modelName = typeof rawLock.modelName === 'string' ? rawLock.modelName.trim() : '';
   const baseUrl = typeof rawLock.baseUrl === 'string' ? rawLock.baseUrl.trim() : '';
@@ -145,8 +146,8 @@ function compactConversationApiLock(rawLock) {
   if (!connectionType && (normalizedBaseUrl === 'genai' || normalizedBaseUrl.includes('generativelanguage.googleapis.com'))) {
     connectionType = 'gemini';
   }
-  if (!id && !displayName && !modelName && !baseUrl) return null;
-  return { id, displayName, modelName, baseUrl, connectionType };
+  if (!id && !connectionSourceId && !displayName && !modelName && !baseUrl) return null;
+  return { id, connectionSourceId, displayName, modelName, baseUrl, connectionType };
 }
 
 function compactConversationToMetadata(conv) {

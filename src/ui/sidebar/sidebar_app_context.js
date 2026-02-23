@@ -78,6 +78,8 @@ export function createSidebarAppContext(isStandalone) {
     apiSettingsToggle,
     apiSettingsText: apiSettingsToggle?.querySelector('span') || null,
     apiSettingsBackButton: document.querySelector('#api-settings .back-button'),
+    connectionSourcesList: document.getElementById('connection-sources-list'),
+    connectionSourceAddButton: document.getElementById('connection-source-add'),
     apiCardsContainer: document.querySelector('#api-settings .api-cards'),
     apiSettingsAddButton: document.getElementById('api-add-config'),
     slashCommandHints: document.getElementById('slash-command-hints'),

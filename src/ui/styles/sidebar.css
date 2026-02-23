@@ -2235,6 +2235,154 @@ input:checked + .slider::before {
     font-weight: 500;
 }
 
+.connection-sources-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--cerebr-message-ai-bg) 85%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 78%, transparent);
+}
+
+.connection-sources-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.connection-sources-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.connection-source-add-button {
+    min-height: 30px;
+    padding: 6px 10px;
+    border: 1px dashed color-mix(in srgb, var(--cerebr-border-color) 70%, transparent);
+    background: color-mix(in srgb, var(--cerebr-ui-hover-bg) 75%, transparent);
+    color: var(--cerebr-text-color);
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+.connection-source-add-button:hover {
+    background: color-mix(in srgb, var(--cerebr-ui-hover-bg) 95%, transparent);
+}
+
+.connection-sources-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.connection-source-item {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 65%, transparent);
+    background: color-mix(in srgb, var(--cerebr-bg-color) 88%, transparent);
+}
+
+.connection-source-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.connection-source-item-title {
+    font-size: 13px;
+    font-weight: 600;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.connection-source-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.connection-source-ref-count {
+    font-size: 11px;
+    opacity: 0.72;
+}
+
+.connection-source-delete-btn {
+    min-height: 26px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-red) 45%, transparent);
+    background: color-mix(in srgb, var(--cerebr-red) 12%, transparent);
+    color: var(--cerebr-text-color);
+    font-size: 12px;
+}
+
+.connection-source-delete-btn:hover {
+    background: color-mix(in srgb, var(--cerebr-red) 20%, transparent);
+}
+
+.connection-source-item-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.connection-source-item-grid .connection-source-field:nth-child(3),
+.connection-source-item-grid .connection-source-field:nth-child(5) {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 520px) {
+    .connection-source-item-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .connection-source-item-grid .connection-source-field:nth-child(3),
+    .connection-source-item-grid .connection-source-field:nth-child(5) {
+        grid-column: auto;
+    }
+}
+
+.connection-source-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.connection-source-field label {
+    font-size: 12px;
+    opacity: 0.82;
+}
+
+.connection-source-field input,
+.connection-source-field select {
+    width: 100%;
+    background: var(--cerebr-input-bg);
+    border: none;
+    padding: 8px;
+    border-radius: 4px;
+    color: var(--cerebr-text-color);
+    font-size: 13px;
+    box-sizing: border-box;
+}
+
+.connection-source-base-url-hint,
+.connection-source-hint {
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    opacity: 0.68;
+}
+
 .api-cards {
     display: flex;
     flex-direction: column;

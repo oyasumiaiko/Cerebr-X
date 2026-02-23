@@ -10,7 +10,7 @@
 /**
  * 规范化会话级 API 锁定对象。
  * @param {any} rawLock
- * @returns {{id:string,displayName:string,modelName:string,baseUrl:string,connectionType:string}|null}
+ * @returns {{id:string,connectionSourceId:string,displayName:string,modelName:string,baseUrl:string,connectionType:string}|null}
  */
 export function normalizeConversationApiLock(rawLock) {
   if (!rawLock || typeof rawLock !== 'object') return null;
@@ -21,6 +21,7 @@ export function normalizeConversationApiLock(rawLock) {
     return '';
   };
   const id = typeof rawLock.id === 'string' ? rawLock.id.trim() : '';
+  const connectionSourceId = typeof rawLock.connectionSourceId === 'string' ? rawLock.connectionSourceId.trim() : '';
   const displayName = typeof rawLock.displayName === 'string' ? rawLock.displayName.trim() : '';
   const modelName = typeof rawLock.modelName === 'string' ? rawLock.modelName.trim() : '';
   const baseUrl = typeof rawLock.baseUrl === 'string' ? rawLock.baseUrl.trim() : '';
@@ -29,8 +30,8 @@ export function normalizeConversationApiLock(rawLock) {
   if (!connectionType && (normalizedBaseUrl === 'genai' || normalizedBaseUrl.includes('generativelanguage.googleapis.com'))) {
     connectionType = 'gemini';
   }
-  if (!id && !displayName && !modelName && !baseUrl) return null;
-  return { id, displayName, modelName, baseUrl, connectionType };
+  if (!id && !connectionSourceId && !displayName && !modelName && !baseUrl) return null;
+  return { id, connectionSourceId, displayName, modelName, baseUrl, connectionType };
 }
 
 /**

@@ -45,10 +45,12 @@ const CONNECTION_TYPE_GEMINI = 'gemini';
 const GEMINI_LEGACY_BASE_URL = 'genai';
 const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1/chat/completions';
 const GEMINI_DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com';
+const CONNECTION_SOURCE_DEFAULT_NAME_PREFIX = '连接源';
 
 export function createApiManager(appContext) {
   // 私有状态
   let apiConfigs = [];
+  let connectionSources = [];
   let selectedConfigIndex = 0;
   // 约定：当滑块设置为“无限制”时，使用一个极大值来表示（避免 Infinity 在 JSON 中丢失）
   const MAX_CHAT_HISTORY_UNLIMITED = 2147483647;
@@ -116,17 +118,11 @@ export function createApiManager(appContext) {
     return (typeof baseUrl === 'string') && baseUrl.trim().toLowerCase() === GEMINI_LEGACY_BASE_URL;
   }
 
-  function getConfigConnectionType(config) {
-    const byField = normalizeConnectionType(config?.connectionType);
-    if (byField) return byField;
-    const normalizedBaseUrl = (typeof config?.baseUrl === 'string') ? config.baseUrl.trim().toLowerCase() : '';
+  function inferConnectionTypeByBaseUrl(baseUrl) {
+    const normalizedBaseUrl = (typeof baseUrl === 'string') ? baseUrl.trim().toLowerCase() : '';
     if (normalizedBaseUrl === GEMINI_LEGACY_BASE_URL) return CONNECTION_TYPE_GEMINI;
     if (normalizedBaseUrl.includes('generativelanguage.googleapis.com')) return CONNECTION_TYPE_GEMINI;
     return CONNECTION_TYPE_OPENAI;
-  }
-
-  function isGeminiConnectionConfig(config) {
-    return getConfigConnectionType(config) === CONNECTION_TYPE_GEMINI;
   }
 
   function normalizeConfigBaseUrlByConnection(connectionType, baseUrl) {
@@ -139,6 +135,90 @@ export function createApiManager(appContext) {
       return trimmed;
     }
     return trimmed;
+  }
+
+  function normalizeConnectionSourceName(name) {
+    const trimmed = (typeof name === 'string') ? name.trim() : '';
+    return trimmed || '';
+  }
+
+  function buildConnectionSourceDisplayName(source, index = 0) {
+    const rawName = normalizeConnectionSourceName(source?.name);
+    if (rawName) return rawName;
+    const sourceConnectionType = normalizeConnectionType(source?.connectionType) || inferConnectionTypeByBaseUrl(source?.baseUrl);
+    const normalizedBaseUrl = normalizeConfigBaseUrlByConnection(sourceConnectionType, source?.baseUrl);
+    try {
+      const parsed = new URL(normalizedBaseUrl);
+      const provider = sourceConnectionType === CONNECTION_TYPE_GEMINI ? 'Gemini' : 'OpenAI';
+      return `${provider} @ ${parsed.host}`;
+    } catch (_) {
+      const fallbackName = normalizedBaseUrl || `#${index + 1}`;
+      return `${CONNECTION_SOURCE_DEFAULT_NAME_PREFIX} ${fallbackName}`;
+    }
+  }
+
+  function getConnectionSourceById(connectionSourceId) {
+    if (!connectionSourceId) return null;
+    return connectionSources.find(source => source.id === connectionSourceId) || null;
+  }
+
+  function getConfigConnectionType(config) {
+    const byField = normalizeConnectionType(config?.connectionType);
+    if (byField) return byField;
+
+    if (config?.connectionSourceId) {
+      const source = getConnectionSourceById(config.connectionSourceId);
+      if (source) {
+        const sourceByField = normalizeConnectionType(source.connectionType);
+        if (sourceByField) return sourceByField;
+        return inferConnectionTypeByBaseUrl(source.baseUrl);
+      }
+    }
+    return inferConnectionTypeByBaseUrl(config?.baseUrl);
+  }
+
+  function resolveConnectionSourceFromConfig(config) {
+    if (!config || typeof config !== 'object') return null;
+    if (config.connectionSourceId) {
+      const linked = getConnectionSourceById(config.connectionSourceId);
+      if (linked) return linked;
+    }
+    return null;
+  }
+
+  function resolveEffectiveConfig(config, options = {}) {
+    if (!config || typeof config !== 'object') return null;
+    const source = resolveConnectionSourceFromConfig(config);
+    const sourceConnectionType = normalizeConnectionType(source?.connectionType);
+    const sourceBaseUrl = (typeof source?.baseUrl === 'string') ? source.baseUrl.trim() : '';
+    const sourceApiKey = source?.apiKey;
+    const sourceApiKeyFilePath = normalizeApiKeyFilePath(source?.apiKeyFilePath);
+
+    const rawConnectionType = sourceConnectionType || normalizeConnectionType(config?.connectionType) || inferConnectionTypeByBaseUrl(sourceBaseUrl || config?.baseUrl);
+    const rawBaseUrl = sourceBaseUrl || ((typeof config?.baseUrl === 'string') ? config.baseUrl.trim() : '');
+    const normalizedBaseUrl = normalizeConfigBaseUrlByConnection(rawConnectionType, rawBaseUrl);
+
+    const effective = {
+      ...config,
+      connectionSourceId: source?.id || config?.connectionSourceId || '',
+      connectionSourceName: source ? buildConnectionSourceDisplayName(source, 0) : '',
+      connectionType: rawConnectionType,
+      baseUrl: normalizedBaseUrl,
+      apiKey: (typeof sourceApiKey !== 'undefined') ? sourceApiKey : config?.apiKey,
+      apiKeyFilePath: source ? sourceApiKeyFilePath : normalizeApiKeyFilePath(config?.apiKeyFilePath)
+    };
+
+    if (options.includeSource !== true) {
+      return effective;
+    }
+    return {
+      ...effective,
+      __connectionSource: source || null
+    };
+  }
+
+  function isGeminiConnectionConfig(config) {
+    return getConfigConnectionType(config) === CONNECTION_TYPE_GEMINI;
   }
 
   function normalizeGeminiModelName(modelName) {
@@ -229,14 +309,9 @@ export function createApiManager(appContext) {
 
   function compactConfigsForSync(configs) {
     return configs.map((c) => {
-      const apiKeyFilePath = (typeof c.apiKeyFilePath === 'string') ? c.apiKeyFilePath.trim() : '';
       return {
         id: c.id,
-        // 当配置了“本地 key 文件路径”时，不把内联 key 同步到 sync，避免长 key 列表撞配额。
-        apiKey: apiKeyFilePath ? '' : c.apiKey,
-        apiKeyFilePath,
-        connectionType: getConfigConnectionType(c),
-        baseUrl: c.baseUrl,
+        connectionSourceId: (typeof c.connectionSourceId === 'string') ? c.connectionSourceId.trim() : '',
         modelName: c.modelName,
         displayName: c.displayName,
         temperature: c.temperature,
@@ -255,15 +330,38 @@ export function createApiManager(appContext) {
     });
   }
 
-  async function saveConfigsToLocalBackup(configs, selectedIndex, updatedAt) {
+  function compactConnectionSourcesForSync(sources) {
+    return (Array.isArray(sources) ? sources : []).map((source) => {
+      const normalizedType = normalizeConnectionType(source?.connectionType) || inferConnectionTypeByBaseUrl(source?.baseUrl);
+      const normalizedBaseUrl = normalizeConfigBaseUrlByConnection(normalizedType, source?.baseUrl);
+      const apiKeyFilePath = normalizeApiKeyFilePath(source?.apiKeyFilePath);
+      const normalizedApiKey = (() => {
+        const keys = normalizeApiKeys(source?.apiKey);
+        if (keys.length <= 1) return keys[0] || '';
+        return keys;
+      })();
+      return {
+        id: source?.id || '',
+        name: normalizeConnectionSourceName(source?.name),
+        connectionType: normalizedType,
+        baseUrl: normalizedBaseUrl,
+        // 当配置了本地 key 文件路径时，不把内联 key 同步到 sync，避免长 key 列表撞配额。
+        apiKey: apiKeyFilePath ? '' : normalizedApiKey,
+        apiKeyFilePath
+      };
+    });
+  }
+
+  async function saveConfigsToLocalBackup(configs, sources, selectedIndex, updatedAt) {
     try {
       const index = Number.isFinite(selectedIndex) ? selectedIndex : 0;
       await chrome.storage.local.set({
         [API_CONFIGS_LOCAL_BACKUP_KEY]: {
-          v: 1,
+          v: 2,
           updatedAt: Number(updatedAt) || Date.now(),
           selectedConfigIndex: index,
-          items: (Array.isArray(configs) ? configs : []).map(c => ({ ...c }))
+          items: (Array.isArray(configs) ? configs : []).map(c => ({ ...c })),
+          connectionSources: (Array.isArray(sources) ? sources : []).map(source => ({ ...source }))
         }
       });
       return true;
@@ -277,9 +375,14 @@ export function createApiManager(appContext) {
     try {
       const wrap = await chrome.storage.local.get([API_CONFIGS_LOCAL_BACKUP_KEY]);
       const backup = wrap?.[API_CONFIGS_LOCAL_BACKUP_KEY];
-      if (!backup || backup.v !== 1 || !Array.isArray(backup.items) || backup.items.length <= 0) return null;
+      if (!backup || !Array.isArray(backup.items) || backup.items.length <= 0) return null;
+      const backupVersion = Number(backup.v || 1);
+      const normalizedSources = Array.isArray(backup.connectionSources)
+        ? backup.connectionSources
+        : [];
       return {
         apiConfigs: backup.items,
+        connectionSources: backupVersion >= 2 ? normalizedSources : [],
         selectedConfigIndex: Number(backup.selectedConfigIndex) || 0,
         updatedAt: Number(backup.updatedAt) || 0
       };
@@ -291,7 +394,8 @@ export function createApiManager(appContext) {
 
   function emitApiConfigsUpdated() {
     // 暴露 apiConfigs 到 window 对象 (向后兼容)
-    window.apiConfigs = apiConfigs;
+    window.apiConfigs = apiConfigs.map(config => resolveEffectiveConfig(config) || config);
+    window.connectionSources = connectionSources.map(source => ({ ...source }));
     // 触发配置更新事件：用于同步菜单文本等 UI（跨标签页由 storage.onChanged 驱动后再触发）
     (apiSettingsPanel || document).dispatchEvent(new Event('apiConfigsUpdated', { bubbles: true, composed: true }));
   }
@@ -685,7 +789,7 @@ export function createApiManager(appContext) {
     return hasBadRequestHint;
   }
 
-  async function saveConfigsToSyncChunked(configs, options = {}) {
+  async function saveConfigsToSyncChunked(configs, sources, options = {}) {
     // 重要：不要“先删后写”
     // - chrome.storage.sync 有写入频率限制；高频操作（例如温度滑块拖动）可能触发配额导致 set 失败；
     // - 若先 remove 再 set，一旦 set 失败就会造成配置被清空（你这次遇到的“只剩一个 gpt-4o”就是典型表现）；
@@ -696,7 +800,8 @@ export function createApiManager(appContext) {
       : selectedConfigIndex;
     try {
       const slim = compactConfigsForSync(configs);
-      const serialized = JSON.stringify({ v: 1, items: slim });
+      const slimSources = compactConnectionSourcesForSync(sources);
+      const serialized = JSON.stringify({ v: 2, items: slim, connectionSources: slimSources });
       const maxBytesPerChunkData = MAX_SYNC_ITEM_BYTES - 1000;
       const chunks = splitStringToByteChunks(serialized, maxBytesPerChunkData);
       if (!chunks || chunks.length <= 0) {
@@ -722,22 +827,27 @@ export function createApiManager(appContext) {
       const meta = metaWrap[SYNC_CHUNK_META_KEY];
       const count = Number(meta?.count || 0);
       if (!meta || !Number.isFinite(count) || count <= 0) {
-        return { state: 'empty', items: null, meta: null, error: null };
+        return { state: 'empty', items: null, connectionSources: null, meta: null, error: null };
       }
 
       const serialized = await getChunksFromSync(SYNC_CHUNK_KEY_PREFIX, count);
       if (!serialized) {
-        return { state: 'corrupt', items: null, meta, error: new Error('sync serialized 为空') };
+        return { state: 'corrupt', items: null, connectionSources: null, meta, error: new Error('sync serialized 为空') };
       }
 
       const parsed = JSON.parse(serialized);
-      if (!parsed || parsed.v !== 1 || !Array.isArray(parsed.items)) {
-        return { state: 'corrupt', items: null, meta, error: new Error('sync payload 格式不合法') };
+      if (!parsed || !Array.isArray(parsed.items)) {
+        return { state: 'corrupt', items: null, connectionSources: null, meta, error: new Error('sync payload 格式不合法') };
       }
-      return { state: 'ok', items: parsed.items, meta, error: null };
+      if (Number(parsed.v) >= 2) {
+        const loadedSources = Array.isArray(parsed.connectionSources) ? parsed.connectionSources : [];
+        return { state: 'ok', items: parsed.items, connectionSources: loadedSources, meta, error: null };
+      }
+      // 兼容 v1：仅包含 apiConfigs，连接字段稍后在 loadAPIConfigs 中迁移为连接源。
+      return { state: 'ok', items: parsed.items, connectionSources: [], meta, error: null };
     } catch (e) {
       console.warn('从 sync 读取API配置失败：', e);
-      return { state: 'error', items: null, meta: null, error: e };
+      return { state: 'error', items: null, connectionSources: null, meta: null, error: e };
     }
   }
 
@@ -752,6 +862,207 @@ export function createApiManager(appContext) {
     return `${s4()}${s4()}-${s4()}-${s4()}-${s4()}-${s4()}${s4()}${s4()}`;
   }
 
+  function normalizeApiKeyValue(rawApiKey) {
+    const normalizedKeys = normalizeApiKeys(rawApiKey);
+    if (normalizedKeys.length <= 1) return normalizedKeys[0] || '';
+    return normalizedKeys;
+  }
+
+  function normalizeConnectionSource(source = {}, options = {}) {
+    const normalizedType = normalizeConnectionType(source?.connectionType)
+      || inferConnectionTypeByBaseUrl(source?.baseUrl);
+    let normalizedBaseUrl = normalizeConfigBaseUrlByConnection(normalizedType, source?.baseUrl);
+    if (!normalizedBaseUrl && normalizedType === CONNECTION_TYPE_OPENAI) {
+      normalizedBaseUrl = OPENAI_DEFAULT_BASE_URL;
+    }
+    const normalizedName = normalizeConnectionSourceName(source?.name);
+    return {
+      id: source?.id || (options.keepIdIfMissing ? '' : generateUUID()),
+      name: normalizedName,
+      connectionType: normalizedType,
+      baseUrl: normalizedBaseUrl,
+      apiKey: normalizeApiKeyValue(source?.apiKey),
+      apiKeyFilePath: normalizeApiKeyFilePath(source?.apiKeyFilePath)
+    };
+  }
+
+  function buildConnectionSourceDedupeKey(source) {
+    const normalized = normalizeConnectionSource(source, { keepIdIfMissing: true });
+    const normalizedKeys = normalizeApiKeys(normalized.apiKey);
+    return JSON.stringify([
+      normalized.connectionType,
+      normalized.baseUrl,
+      normalized.apiKeyFilePath,
+      normalizedKeys
+    ]);
+  }
+
+  function assignStableConnectionSourceNames(sources) {
+    const seen = new Map();
+    sources.forEach((source, index) => {
+      const baseName = normalizeConnectionSourceName(source?.name) || buildConnectionSourceDisplayName(source, index);
+      const key = baseName.toLowerCase();
+      const existing = seen.get(key) || 0;
+      seen.set(key, existing + 1);
+      if (existing === 0) {
+        source.name = baseName;
+        return;
+      }
+      source.name = `${baseName} (${existing + 1})`;
+    });
+  }
+
+  function createDefaultConnectionSource(overrides = {}) {
+    return normalizeConnectionSource({
+      id: generateUUID(),
+      name: `${CONNECTION_SOURCE_DEFAULT_NAME_PREFIX} 1`,
+      connectionType: CONNECTION_TYPE_OPENAI,
+      baseUrl: OPENAI_DEFAULT_BASE_URL,
+      apiKey: '',
+      apiKeyFilePath: '',
+      ...overrides
+    });
+  }
+
+  function createDefaultApiConfig(connectionSourceId = '', overrides = {}) {
+    return {
+      id: generateUUID(),
+      connectionSourceId,
+      modelName: 'gpt-4o',
+      displayName: '',
+      temperature: 1,
+      useStreaming: true,
+      isFavorite: false,
+      customParams: '',
+      customSystemPrompt: '',
+      userMessagePreprocessorTemplate: '',
+      userMessagePreprocessorIncludeInHistory: false,
+      maxChatHistory: 500,
+      maxChatHistoryUser: 500,
+      maxChatHistoryAssistant: 500,
+      ...overrides
+    };
+  }
+
+  function migrateConnectionSourcesAndConfigs(rawConfigs, rawSources) {
+    const sourceList = [];
+    const sourceById = new Map();
+    const sourceBySignature = new Map();
+
+    const pushSource = (rawSource, options = {}) => {
+      const dedupeBySignature = options.dedupeBySignature !== false;
+      const normalizedSource = normalizeConnectionSource(rawSource);
+      if (!normalizedSource.id || sourceById.has(normalizedSource.id)) {
+        normalizedSource.id = generateUUID();
+      }
+      const signature = buildConnectionSourceDedupeKey(normalizedSource);
+      if (dedupeBySignature && sourceBySignature.has(signature)) {
+        return sourceBySignature.get(signature);
+      }
+      sourceList.push(normalizedSource);
+      sourceById.set(normalizedSource.id, normalizedSource);
+      if (!sourceBySignature.has(signature)) {
+        sourceBySignature.set(signature, normalizedSource);
+      }
+      return normalizedSource;
+    };
+
+    (Array.isArray(rawSources) ? rawSources : []).forEach((source) => {
+      pushSource(source, { dedupeBySignature: false });
+    });
+
+    const configs = (Array.isArray(rawConfigs) ? rawConfigs : []).map((rawConfig) => {
+      const config = { ...rawConfig };
+      if (!config.id) config.id = generateUUID();
+
+      let source = null;
+      const configuredSourceId = (typeof config.connectionSourceId === 'string') ? config.connectionSourceId.trim() : '';
+      if (configuredSourceId) {
+        source = sourceById.get(configuredSourceId) || null;
+      }
+      if (!source) {
+        source = pushSource({
+          connectionType: config.connectionType,
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          apiKeyFilePath: config.apiKeyFilePath
+        }, { dedupeBySignature: true });
+      }
+
+      config.connectionSourceId = source?.id || '';
+      delete config.connectionType;
+      delete config.baseUrl;
+      delete config.apiKey;
+      delete config.apiKeyFilePath;
+      return config;
+    });
+
+    if (sourceList.length === 0) {
+      sourceList.push(createDefaultConnectionSource());
+    }
+
+    assignStableConnectionSourceNames(sourceList);
+    return {
+      apiConfigs: configs,
+      connectionSources: sourceList
+    };
+  }
+
+  function normalizeApiConfigsAfterMigration(configs, availableSources) {
+    const sourceIdSet = new Set((Array.isArray(availableSources) ? availableSources : []).map(source => source.id));
+    const fallbackSourceId = (Array.isArray(availableSources) && availableSources.length > 0) ? availableSources[0].id : '';
+    return (Array.isArray(configs) ? configs : []).map((rawConfig) => {
+      const config = { ...rawConfig };
+      if (!config.id) config.id = generateUUID();
+
+      const candidateSourceId = (typeof config.connectionSourceId === 'string') ? config.connectionSourceId.trim() : '';
+      config.connectionSourceId = sourceIdSet.has(candidateSourceId) ? candidateSourceId : fallbackSourceId;
+
+      if (typeof config.modelName !== 'string') {
+        config.modelName = '';
+      } else {
+        config.modelName = config.modelName.trim();
+      }
+      if (typeof config.displayName !== 'string') {
+        config.displayName = '';
+      } else {
+        config.displayName = config.displayName.trim();
+      }
+      config.temperature = Number.isFinite(Number(config.temperature)) ? Number(config.temperature) : 1;
+      config.useStreaming = (config.useStreaming !== false);
+      config.isFavorite = !!config.isFavorite;
+      config.customParams = (typeof config.customParams === 'string') ? config.customParams : '';
+      config.customSystemPrompt = (typeof config.customSystemPrompt === 'string') ? config.customSystemPrompt.trim() : '';
+      config.userMessagePreprocessorTemplate = (typeof config.userMessagePreprocessorTemplate === 'string')
+        ? config.userMessagePreprocessorTemplate
+        : '';
+      config.userMessagePreprocessorIncludeInHistory = !!config.userMessagePreprocessorIncludeInHistory;
+      delete config.connectionType;
+      delete config.baseUrl;
+      delete config.apiKey;
+      delete config.apiKeyFilePath;
+      return config;
+    });
+  }
+
+  function normalizeConnectionSourcesAfterMigration(sources) {
+    const deduped = [];
+    const byId = new Set();
+    (Array.isArray(sources) ? sources : []).forEach((rawSource) => {
+      const normalized = normalizeConnectionSource(rawSource);
+      if (!normalized.id || byId.has(normalized.id)) {
+        normalized.id = generateUUID();
+      }
+      byId.add(normalized.id);
+      deduped.push(normalized);
+    });
+    if (deduped.length === 0) {
+      deduped.push(createDefaultConnectionSource());
+    }
+    assignStableConnectionSourceNames(deduped);
+    return deduped;
+  }
+
   /**
    * 加载 API 配置
    * @returns {Promise<void>}
@@ -761,10 +1072,11 @@ export function createApiManager(appContext) {
       // 提前加载黑名单，确保首次请求前可用
       await loadApiKeyBlacklist();
       // 读取顺序统一：sync 分片 → 旧 sync 字段（一次性迁移）
-      let result = { apiConfigs: null, selectedConfigIndex: 0 };
+      let result = { apiConfigs: null, connectionSources: null, selectedConfigIndex: 0 };
       const chunked = await loadConfigsFromSyncChunked();
       if (chunked?.state === 'ok' && Array.isArray(chunked.items) && chunked.items.length > 0) {
         result.apiConfigs = chunked.items;
+        result.connectionSources = Array.isArray(chunked.connectionSources) ? chunked.connectionSources : [];
         const syncSel = await chrome.storage.sync.get(['selectedConfigIndex']);
         result.selectedConfigIndex = syncSel.selectedConfigIndex || 0;
         lastMetaUpdatedAt = Number(chunked?.meta?.updatedAt || Date.now());
@@ -773,12 +1085,14 @@ export function createApiManager(appContext) {
         const backup = await loadConfigsFromLocalBackup();
         if (backup?.apiConfigs && backup.apiConfigs.length > 0) {
           result.apiConfigs = backup.apiConfigs;
+          result.connectionSources = backup.connectionSources || [];
           result.selectedConfigIndex = backup.selectedConfigIndex || 0;
         } else {
           // 再尝试兼容最老的存储形态（可能是旧版本尚未迁移的情况）
           const syncResult = await chrome.storage.sync.get(['apiConfigs', 'selectedConfigIndex']);
           if (syncResult.apiConfigs && syncResult.apiConfigs.length > 0) {
             result.apiConfigs = syncResult.apiConfigs;
+            result.connectionSources = [];
             result.selectedConfigIndex = syncResult.selectedConfigIndex || 0;
           }
         }
@@ -794,48 +1108,39 @@ export function createApiManager(appContext) {
         const syncResult = await chrome.storage.sync.get(['apiConfigs', 'selectedConfigIndex']);
         if (syncResult.apiConfigs && syncResult.apiConfigs.length > 0) {
           result.apiConfigs = syncResult.apiConfigs;
+          result.connectionSources = [];
           result.selectedConfigIndex = syncResult.selectedConfigIndex || 0;
-          // 迁移到分片并清理旧键
-          try {
-              const migrated = await saveConfigsToSyncChunked(result.apiConfigs, { selectedConfigIndex: result.selectedConfigIndex || 0 });
-              if (migrated?.ok) {
-                await chrome.storage.sync.remove(['apiConfigs']);
-              }
-            } catch (e) {
-              console.warn('迁移最老 apiConfigs 到分片失败：', e);
-            }
         }
       }
 
       if (result.apiConfigs && result.apiConfigs.length > 0) {
-        apiConfigs = result.apiConfigs.map(config => ({ ...config }));
+        const migration = migrateConnectionSourcesAndConfigs(result.apiConfigs, result.connectionSources);
+        connectionSources = normalizeConnectionSourcesAfterMigration(migration.connectionSources);
+        apiConfigs = normalizeApiConfigsAfterMigration(migration.apiConfigs, connectionSources);
+
+        // 清理历史运行时状态，避免连接源迁移后沿用旧索引/缓存键。
+        Object.keys(apiKeyUsageIndex).forEach((key) => delete apiKeyUsageIndex[key]);
+        apiKeyFileRuntimeCache.clear();
+
         selectedConfigIndex = result.selectedConfigIndex || 0;
         selectedConfigIndex = Math.max(0, Math.min(selectedConfigIndex, apiConfigs.length - 1));
 
         let needResave = false;
-        // 兼容旧格式：如果 apiKey 是带逗号的字符串，则转换为数组；并确保有 id
+        if (!Array.isArray(result.connectionSources) || result.connectionSources.length === 0) {
+          needResave = true;
+        }
+
         apiConfigs.forEach(config => {
-          if (!config.id) { config.id = generateUUID(); needResave = true; }
-          if (typeof config.baseUrl !== 'string') {
-            config.baseUrl = '';
-            needResave = true;
-          } else {
-            const trimmedBaseUrl = config.baseUrl.trim();
-            if (trimmedBaseUrl !== config.baseUrl) {
-              config.baseUrl = trimmedBaseUrl;
-              needResave = true;
-            }
-          }
-          const normalizedConnectionType = getConfigConnectionType(config);
-          if (config.connectionType !== normalizedConnectionType) {
-            config.connectionType = normalizedConnectionType;
+          if (!config.id) {
+            config.id = generateUUID();
             needResave = true;
           }
-          const normalizedBaseUrlByConnection = normalizeConfigBaseUrlByConnection(config.connectionType, config.baseUrl);
-          if (normalizedBaseUrlByConnection !== config.baseUrl) {
-            config.baseUrl = normalizedBaseUrlByConnection;
+
+          if (!config.connectionSourceId || !connectionSources.some(source => source.id === config.connectionSourceId)) {
+            config.connectionSourceId = connectionSources[0]?.id || '';
             needResave = true;
           }
+
           if (typeof config.modelName !== 'string') {
             config.modelName = '';
             needResave = true;
@@ -846,20 +1151,17 @@ export function createApiManager(appContext) {
               needResave = true;
             }
           }
-          if (typeof config.apiKeyFilePath !== 'string') {
-            config.apiKeyFilePath = '';
+          if (typeof config.displayName !== 'string') {
+            config.displayName = '';
             needResave = true;
           } else {
-            const trimmedPath = config.apiKeyFilePath.trim();
-            if (trimmedPath !== config.apiKeyFilePath) {
-              config.apiKeyFilePath = trimmedPath;
+            const trimmedDisplayName = config.displayName.trim();
+            if (trimmedDisplayName !== config.displayName) {
+              config.displayName = trimmedDisplayName;
               needResave = true;
             }
           }
-          if (typeof config.apiKey === 'string' && config.apiKey.includes(',')) {
-            // 兼容多 Key：逗号分隔
-            config.apiKey = config.apiKey.split(',').map(k => k.trim()).filter(Boolean);
-          }
+
           // 默认开启流式传输（向后兼容）
           if (typeof config.useStreaming === 'undefined') {
             config.useStreaming = true;
@@ -898,78 +1200,66 @@ export function createApiManager(appContext) {
               needResave = true;
             }
           }
-          // 初始化 apiKeyUsageIndex
-          if (Array.isArray(config.apiKey) && config.apiKey.length > 0) {
-             const configId = getConfigIdentifier(config); // 使用唯一标识符
-             // 使用索引表示“当前使用”的 key；成功不轮换，直到遇到429再轮换
-             if (typeof apiKeyUsageIndex[configId] !== 'number') {
-               apiKeyUsageIndex[configId] = 0;
-             }
+        });
+
+        connectionSources.forEach((source, index) => {
+          const normalizedSource = normalizeConnectionSource(source, { keepIdIfMissing: true });
+          if (!normalizedSource.id) {
+            normalizedSource.id = generateUUID();
+            needResave = true;
+          }
+          const expectedName = normalizeConnectionSourceName(source?.name) || buildConnectionSourceDisplayName(source, index);
+          if (source.id !== normalizedSource.id
+            || source.connectionType !== normalizedSource.connectionType
+            || source.baseUrl !== normalizedSource.baseUrl
+            || source.apiKeyFilePath !== normalizedSource.apiKeyFilePath) {
+            Object.assign(source, normalizedSource);
+            needResave = true;
+          }
+          source.apiKey = normalizeApiKeyValue(source.apiKey);
+          if (!normalizeConnectionSourceName(source.name)) {
+            source.name = expectedName;
+            needResave = true;
+          }
+
+          const sourceId = source.id;
+          if (Array.isArray(source.apiKey) && source.apiKey.length > 0 && typeof apiKeyUsageIndex[sourceId] !== 'number') {
+            apiKeyUsageIndex[sourceId] = 0;
           }
         });
+
         if (needResave) { await saveAPIConfigs(); }
 
         // 将“可用配置快照”写入本地备份，避免 sync 发生异常时无从恢复
-        try { await saveConfigsToLocalBackup(apiConfigs, selectedConfigIndex, lastMetaUpdatedAt || Date.now()); } catch (_) {}
+        try { await saveConfigsToLocalBackup(apiConfigs, connectionSources, selectedConfigIndex, lastMetaUpdatedAt || Date.now()); } catch (_) {}
 
       } else {
         // 创建默认配置（仅在确认为“完全没有存储数据”的情况下才写回 sync）
-        apiConfigs = [{
-          id: generateUUID(),
-          apiKey: '', // 初始为空字符串
-          apiKeyFilePath: '',
-          connectionType: CONNECTION_TYPE_OPENAI,
-          baseUrl: OPENAI_DEFAULT_BASE_URL,
-          modelName: 'gpt-4o',
-          displayName: '',
-          temperature: 1,
-          useStreaming: true,
-          isFavorite: false, // 添加收藏状态字段
-          customParams: '',
-          customSystemPrompt: '',
-          userMessagePreprocessorTemplate: '',
-          userMessagePreprocessorIncludeInHistory: false,
-          maxChatHistory: 500,
-          maxChatHistoryUser: 500,
-          maxChatHistoryAssistant: 500
-        }];
+        const defaultSource = createDefaultConnectionSource();
+        connectionSources = [defaultSource];
+        apiConfigs = [createDefaultApiConfig(defaultSource.id)];
         selectedConfigIndex = 0;
         // 如果云端分片损坏导致读取不到数据，这里不应写回默认值（否则会覆盖掉真实数据）
         // 仅当 sync 分片为空且旧字段也为空时，才写入默认配置作为初始化。
         if (chunked?.state === 'empty') {
           await saveAPIConfigs();
         } else {
-          await saveConfigsToLocalBackup(apiConfigs, selectedConfigIndex, Date.now());
+          await saveConfigsToLocalBackup(apiConfigs, connectionSources, selectedConfigIndex, Date.now());
         }
       }
     } catch (error) {
       console.error('加载 API 配置失败:', error);
       // 如果加载失败，也创建默认配置
-      apiConfigs = [{
-        id: generateUUID(),
-        apiKey: '',
-        apiKeyFilePath: '',
-        connectionType: CONNECTION_TYPE_OPENAI,
-        baseUrl: OPENAI_DEFAULT_BASE_URL,
-        modelName: 'gpt-4o',
-        displayName: '',
-        temperature: 1,
-        useStreaming: true,
-        isFavorite: false,
-        customParams: '',
-        customSystemPrompt: '',
-        userMessagePreprocessorTemplate: '',
-        userMessagePreprocessorIncludeInHistory: false,
-        maxChatHistory: 500,
-        maxChatHistoryUser: 500,
-        maxChatHistoryAssistant: 500
-      }];
+      const defaultSource = createDefaultConnectionSource();
+      connectionSources = [defaultSource];
+      apiConfigs = [createDefaultApiConfig(defaultSource.id)];
       selectedConfigIndex = 0;
     }
 
     emitApiConfigsUpdated();
 
-    // 确保一定会渲染卡片和收藏列表
+    // 确保一定会渲染连接源、卡片和收藏列表
+    renderConnectionSources();
     renderAPICards();
     renderFavoriteApis();
   }
@@ -980,16 +1270,17 @@ export function createApiManager(appContext) {
    */
   async function saveAPIConfigs() {
     try {
-      // 移除临时的 nextApiKeyIndex 状态再保存
-      const configsToSave = apiConfigs.map(({ ...config }) => {
-        // delete config.nextApiKeyIndex; // 不在 config 对象中保存索引
-        return config;
-      });
+      // 保存前做一次轻量规范化，避免不同入口写入不一致数据结构。
+      connectionSources = normalizeConnectionSourcesAfterMigration(connectionSources);
+      apiConfigs = normalizeApiConfigsAfterMigration(apiConfigs, connectionSources);
+
+      const configsToSave = apiConfigs.map(config => ({ ...config }));
+      const sourcesToSave = connectionSources.map(source => ({ ...source }));
 
       const updatedAt = Date.now();
 
       // 先写本地兜底备份：即使后续 sync 写入失败，也能在本机恢复
-      await saveConfigsToLocalBackup(configsToSave, selectedConfigIndex, updatedAt);
+      await saveConfigsToLocalBackup(configsToSave, sourcesToSave, selectedConfigIndex, updatedAt);
 
       // 若检测到 sync 上有更新且当前标签页可能滞后：做一次“保守合并”以避免误覆盖
       // 合并策略：以 sync 为底，按 id 用本地配置覆盖；这样至少不会把其它标签页新加的配置“抹掉”。
@@ -999,7 +1290,9 @@ export function createApiManager(appContext) {
         const remoteUpdatedAt = Number(remote?.meta?.updatedAt || 0);
         if (remoteUpdatedAt && remoteUpdatedAt > lastMetaUpdatedAt) {
           const localById = new Map(configsToSave.map(c => [c.id, c]));
+          const localSourceById = new Map(sourcesToSave.map(source => [source.id, source]));
           const merged = [];
+          const mergedSources = [];
           remote.items.forEach((cfg) => {
             const local = localById.get(cfg.id);
             if (local) {
@@ -1011,9 +1304,25 @@ export function createApiManager(appContext) {
           });
           localById.forEach((cfg) => merged.push(cfg));
 
-          apiConfigs = merged;
+          (Array.isArray(remote.connectionSources) ? remote.connectionSources : []).forEach((source) => {
+            const localSource = localSourceById.get(source.id);
+            if (localSource) {
+              mergedSources.push(localSource);
+              localSourceById.delete(source.id);
+            } else {
+              mergedSources.push(source);
+            }
+          });
+          localSourceById.forEach((source) => mergedSources.push(source));
+
+          const remigrated = migrateConnectionSourcesAndConfigs(merged, mergedSources);
+          connectionSources = normalizeConnectionSourcesAfterMigration(remigrated.connectionSources);
+          apiConfigs = normalizeApiConfigsAfterMigration(remigrated.apiConfigs, connectionSources);
+
           configsToSave.length = 0;
-          merged.forEach(c => configsToSave.push(c));
+          apiConfigs.forEach(c => configsToSave.push({ ...c }));
+          sourcesToSave.length = 0;
+          connectionSources.forEach(source => sourcesToSave.push({ ...source }));
 
           if (selectedId) {
             const newIndex = apiConfigs.findIndex(c => c.id === selectedId);
@@ -1023,15 +1332,17 @@ export function createApiManager(appContext) {
           }
 
           // 合并发生意味着当前 UI 很可能不是最新：重渲染以保持一致
+          renderConnectionSources();
           renderAPICards();
           renderFavoriteApis();
         }
       }
 
       // 同步到 sync（分片以规避单项 8KB），并同步 selectedConfigIndex（同一次 set）
-      const syncSave = await saveConfigsToSyncChunked(configsToSave);
+      const syncSave = await saveConfigsToSyncChunked(configsToSave, sourcesToSave);
       if (syncSave?.ok) {
         lastMetaUpdatedAt = Math.max(lastMetaUpdatedAt, Number(syncSave.updatedAt) || 0);
+        try { await chrome.storage.sync.remove(['apiConfigs']); } catch (_) {}
       } else {
         const now = Date.now();
         if ((now - lastSyncSaveWarningAt) > SYNC_SAVE_WARNING_COOLDOWN_MS) {
@@ -1080,11 +1391,14 @@ export function createApiManager(appContext) {
         if (needReload) {
           const loaded = await loadConfigsFromSyncChunked();
           if (loaded?.state === 'ok' && loaded.items && Array.isArray(loaded.items)) {
-            apiConfigs = loaded.items;
+            const migrated = migrateConnectionSourcesAndConfigs(loaded.items, loaded.connectionSources);
+            connectionSources = normalizeConnectionSourcesAfterMigration(migrated.connectionSources);
+            apiConfigs = normalizeApiConfigsAfterMigration(migrated.apiConfigs, connectionSources);
             selectedConfigIndex = Math.max(0, Math.min(selectedConfigIndex, apiConfigs.length - 1));
             // 同步到本地备份，确保“最近一次可用配置”始终存在
-            try { await saveConfigsToLocalBackup(apiConfigs, selectedConfigIndex, Number(loaded?.meta?.updatedAt || Date.now())); } catch (_) {}
+            try { await saveConfigsToLocalBackup(apiConfigs, connectionSources, selectedConfigIndex, Number(loaded?.meta?.updatedAt || Date.now())); } catch (_) {}
 
+            renderConnectionSources();
             renderAPICards();
             renderFavoriteApis();
             emitApiConfigsUpdated();
@@ -1097,14 +1411,19 @@ export function createApiManager(appContext) {
   }
 
   /**
-   * 生成配置的唯一标识符
+   * 生成“连接凭证”的唯一标识符（以连接源为主，回退到连接字段签名）
    * @param {Object} config - API 配置对象
    * @returns {string} 唯一标识符
    */
   function getConfigIdentifier(config) {
-    // 使用 connectionType + baseUrl + modelName 组合作为唯一标识符，避免同名模型跨协议冲突。
-    const connectionType = getConfigConnectionType(config);
-    return `${connectionType}|${config.baseUrl}|${config.modelName}`;
+    const effective = resolveEffectiveConfig(config, { includeSource: true }) || config || {};
+    const source = effective?.__connectionSource;
+    if (source?.id) return source.id;
+    const connectionType = getConfigConnectionType(effective);
+    const normalizedBaseUrl = normalizeConfigBaseUrlByConnection(connectionType, effective?.baseUrl);
+    const normalizedFilePath = normalizeApiKeyFilePath(effective?.apiKeyFilePath);
+    const normalizedKeys = normalizeApiKeys(effective?.apiKey);
+    return JSON.stringify([connectionType, normalizedBaseUrl, normalizedFilePath, normalizedKeys]);
   }
 
   // 将卡片索引安全转为数字，非法值返回 null。
@@ -1147,6 +1466,176 @@ export function createApiManager(appContext) {
     return true;
   }
 
+  function getConnectionSourceRefCount(connectionSourceId) {
+    if (!connectionSourceId) return 0;
+    return apiConfigs.filter(config => config?.connectionSourceId === connectionSourceId).length;
+  }
+
+  function renderConnectionSources() {
+    const listContainer = document.getElementById('connection-sources-list');
+    const templateItem = listContainer?.querySelector('.connection-source-item.template');
+    if (!listContainer || !templateItem) return;
+
+    const templateClone = templateItem.cloneNode(true);
+    listContainer.innerHTML = '';
+    listContainer.appendChild(templateClone);
+
+    connectionSources.forEach((source, index) => {
+      const card = createConnectionSourceCard(source, index, templateClone);
+      listContainer.appendChild(card);
+    });
+  }
+
+  function createConnectionSourceCard(source, index, templateItem) {
+    const template = templateItem.cloneNode(true);
+    template.classList.remove('template');
+    template.style.display = '';
+    template.dataset.connectionSourceId = source.id;
+
+    const titleElement = template.querySelector('.connection-source-item-title');
+    const nameInput = template.querySelector('.connection-source-name');
+    const connectionTypeSelect = template.querySelector('.connection-source-type');
+    const baseUrlLabel = template.querySelector('.connection-source-base-url-label');
+    const baseUrlInput = template.querySelector('.connection-source-base-url');
+    const baseUrlHint = template.querySelector('.connection-source-base-url-hint');
+    const apiKeyInput = template.querySelector('.connection-source-api-key');
+    const apiKeyFilePathInput = template.querySelector('.connection-source-api-key-file-path');
+    const deleteButton = template.querySelector('.connection-source-delete-btn');
+    const refCountElement = template.querySelector('.connection-source-ref-count');
+
+    const applyConnectionTypeUiState = (rawConnectionType) => {
+      const normalizedType = normalizeConnectionType(rawConnectionType) || CONNECTION_TYPE_OPENAI;
+      if (connectionTypeSelect) connectionTypeSelect.value = normalizedType;
+      if (!baseUrlInput) return;
+      if (normalizedType === CONNECTION_TYPE_GEMINI) {
+        if (baseUrlLabel) baseUrlLabel.textContent = 'Gemini API 端点（可自定义）';
+        baseUrlInput.placeholder = '例如 https://generativelanguage.googleapis.com 或你的代理地址';
+        if (baseUrlHint) {
+          baseUrlHint.textContent = '支持官方地址与代理地址；支持 {model}/{action}/{method}/{key} 占位符。';
+        }
+      } else {
+        if (baseUrlLabel) baseUrlLabel.textContent = 'API 端点 URL';
+        baseUrlInput.placeholder = `例如 ${OPENAI_DEFAULT_BASE_URL}`;
+        if (baseUrlHint) {
+          baseUrlHint.textContent = 'OpenAI 兼容模式走 chat/completions；无 key 时会按免鉴权模式请求。';
+        }
+      }
+    };
+
+    const normalizedType = normalizeConnectionType(source?.connectionType) || inferConnectionTypeByBaseUrl(source?.baseUrl);
+    const normalizedBaseUrl = normalizeConfigBaseUrlByConnection(normalizedType, source?.baseUrl);
+    const normalizedName = normalizeConnectionSourceName(source?.name) || buildConnectionSourceDisplayName(source, index);
+    const refCount = getConnectionSourceRefCount(source?.id);
+
+    if (titleElement) titleElement.textContent = normalizedName;
+    if (nameInput) nameInput.value = normalizedName;
+    if (connectionTypeSelect) connectionTypeSelect.value = normalizedType;
+    if (baseUrlInput) baseUrlInput.value = normalizedBaseUrl;
+    if (refCountElement) {
+      refCountElement.textContent = `已被 ${refCount} 个 API 使用`;
+    }
+
+    if (apiKeyInput) {
+      if (Array.isArray(source?.apiKey)) {
+        apiKeyInput.value = source.apiKey.join(',');
+      } else {
+        apiKeyInput.value = source?.apiKey || '';
+      }
+    }
+    if (apiKeyFilePathInput) {
+      apiKeyFilePathInput.value = source?.apiKeyFilePath || '';
+    }
+    applyConnectionTypeUiState(normalizedType);
+
+    const persistSourceChanges = () => {
+      const sourceIndex = connectionSources.findIndex(item => item.id === source.id);
+      if (sourceIndex < 0) return;
+      const nextType = normalizeConnectionType(connectionTypeSelect?.value) || CONNECTION_TYPE_OPENAI;
+      let nextBaseUrl = normalizeConfigBaseUrlByConnection(nextType, baseUrlInput?.value || '');
+      if (!nextBaseUrl && nextType === CONNECTION_TYPE_OPENAI) {
+        nextBaseUrl = OPENAI_DEFAULT_BASE_URL;
+      }
+
+      let apiKeyValue = normalizeApiKeyValue(apiKeyInput?.value || '');
+      if (Array.isArray(apiKeyValue) && apiKeyValue.length <= 1) {
+        apiKeyValue = apiKeyValue[0] || '';
+      }
+
+      const nameCandidate = normalizeConnectionSourceName(nameInput?.value);
+      const fallbackName = buildConnectionSourceDisplayName({
+        ...connectionSources[sourceIndex],
+        connectionType: nextType,
+        baseUrl: nextBaseUrl
+      }, index);
+
+      connectionSources[sourceIndex] = {
+        ...connectionSources[sourceIndex],
+        name: nameCandidate || fallbackName,
+        connectionType: nextType,
+        baseUrl: nextBaseUrl,
+        apiKey: apiKeyValue,
+        apiKeyFilePath: normalizeApiKeyFilePath(apiKeyFilePathInput?.value)
+      };
+      clearApiKeyFileCacheEntry({ connectionSourceId: source.id });
+      saveAPIConfigs();
+      renderConnectionSources();
+      renderAPICards();
+      renderFavoriteApis();
+    };
+
+    if (nameInput) {
+      nameInput.addEventListener('change', persistSourceChanges);
+      nameInput.addEventListener('blur', persistSourceChanges);
+    }
+    if (connectionTypeSelect) {
+      connectionTypeSelect.addEventListener('change', () => {
+        applyConnectionTypeUiState(connectionTypeSelect.value);
+        persistSourceChanges();
+      });
+    }
+    if (baseUrlInput) {
+      baseUrlInput.addEventListener('change', persistSourceChanges);
+      baseUrlInput.addEventListener('blur', persistSourceChanges);
+    }
+    if (apiKeyInput) {
+      apiKeyInput.addEventListener('change', persistSourceChanges);
+    }
+    if (apiKeyFilePathInput) {
+      apiKeyFilePathInput.addEventListener('change', persistSourceChanges);
+      apiKeyFilePathInput.addEventListener('blur', persistSourceChanges);
+    }
+
+    if (deleteButton) {
+      deleteButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const currentRefCount = getConnectionSourceRefCount(source.id);
+        if (currentRefCount > 0) {
+          utils?.showNotification?.({
+            type: 'warning',
+            message: `连接源仍被 ${currentRefCount} 个 API 引用，无法删除`,
+            duration: 2400
+          });
+          return;
+        }
+        if (connectionSources.length <= 1) {
+          utils?.showNotification?.({
+            type: 'warning',
+            message: '至少保留一个连接源',
+            duration: 2400
+          });
+          return;
+        }
+        connectionSources = connectionSources.filter(item => item.id !== source.id);
+        clearApiKeyFileCacheEntry({ connectionSourceId: source.id });
+        saveAPIConfigs();
+        renderConnectionSources();
+        renderAPICards();
+      });
+    }
+
+    return template;
+  }
+
   /**
    * 渲染 API 卡片
    */
@@ -1177,10 +1666,7 @@ export function createApiManager(appContext) {
   /**
    * 创建并渲染单个 API 配置卡片
    * @param {Object} config - API 配置对象
-   * @param {string | string[]} [config.apiKey] - API 密钥 (可以是单个字符串或字符串数组)
-   * @param {string} [config.apiKeyFilePath] - 本地 Key 文件路径（可选，每行一个 key）
-   * @param {'openai'|'gemini'} [config.connectionType] - 连接方式（OpenAI 兼容 / Gemini）
-   * @param {string} [config.baseUrl] - API 基础 URL
+   * @param {string} [config.connectionSourceId] - 连接源 ID
    * @param {string} [config.modelName] - 模型名称
    * @param {number} [config.temperature] - temperature 值（可为 0）
    * @param {boolean} [config.isFavorite] - 是否收藏
@@ -1202,23 +1688,20 @@ export function createApiManager(appContext) {
       template.classList.add('selected');
     }
 
+    const effectiveConfig = resolveEffectiveConfig(config) || config;
+
     // 设置标题
     const titleElement = template.querySelector('.api-card-title');
-    titleElement.textContent = config.displayName || config.modelName || config.baseUrl || '新配置';
+    titleElement.textContent = config.displayName || config.modelName || effectiveConfig.baseUrl || '新配置';
 
-    const apiKeyInput = template.querySelector('.api-key');
-    const apiKeyFilePathInput = template.querySelector('.api-key-file-path');
-    const connectionTypeSelect = template.querySelector('.connection-type');
-    const baseUrlLabel = template.querySelector('.base-url-label');
-    const baseUrlHint = template.querySelector('.base-url-hint');
-    const baseUrlInput = template.querySelector('.base-url');
+    const connectionSourceSelect = template.querySelector('.connection-source-id');
+    const connectionSourceHint = template.querySelector('.connection-source-hint');
     const displayNameInput = template.querySelector('.display-name');
     const modelNameInput = template.querySelector('.model-name');
     const temperatureInput = template.querySelector('.temperature');
     const temperatureValue = template.querySelector('.temperature-value');
     const apiForm = template.querySelector('.api-form');
     const favoriteBtn = template.querySelector('.favorite-btn');
-    const togglePasswordBtn = template.querySelector('.toggle-password-btn');
     const selectBtn = template.querySelector('.select-btn');
     const customParamsInput = template.querySelector('.custom-params');
     const customSystemPromptInput = template.querySelector('.custom-system-prompt');
@@ -1226,25 +1709,34 @@ export function createApiManager(appContext) {
     const userMessageTemplateIncludeHistoryToggle = template.querySelector('.user-message-template-include-history');
     const userMessageTemplateHelpBtn = template.querySelector('.template-help-icon');
     const userMessageTemplateCopyBtn = template.querySelector('.template-inject-copy-btn');
-    const applyConnectionTypeUiState = (rawConnectionType) => {
-      const normalizedType = normalizeConnectionType(rawConnectionType) || CONNECTION_TYPE_OPENAI;
-      if (connectionTypeSelect) {
-        connectionTypeSelect.value = normalizedType;
+    const refreshConnectionSourceOptions = () => {
+      if (!connectionSourceSelect) return;
+      const currentSourceId = apiConfigs[index].connectionSourceId || connectionSources[0]?.id || '';
+      connectionSourceSelect.innerHTML = '';
+      connectionSources.forEach((source, sourceIndex) => {
+        const option = document.createElement('option');
+        option.value = source.id;
+        option.textContent = buildConnectionSourceDisplayName(source, sourceIndex);
+        connectionSourceSelect.appendChild(option);
+      });
+      if (currentSourceId) {
+        connectionSourceSelect.value = currentSourceId;
+      } else if (connectionSources.length > 0) {
+        connectionSourceSelect.value = connectionSources[0].id;
       }
-      if (!baseUrlInput) return;
-      if (normalizedType === CONNECTION_TYPE_GEMINI) {
-        if (baseUrlLabel) baseUrlLabel.textContent = 'Gemini API 端点（可自定义）';
-        baseUrlInput.placeholder = '例如 https://generativelanguage.googleapis.com 或你的代理地址';
-        if (baseUrlHint) {
-          baseUrlHint.textContent = '支持填写官方地址或 Gemini 代理地址；会自动补全 models/{model}:{method}。填写 key 时会附带 key 参数，留空则省略。';
-        }
-      } else {
-        if (baseUrlLabel) baseUrlLabel.textContent = 'API 端点 URL';
-        baseUrlInput.placeholder = `例如 ${OPENAI_DEFAULT_BASE_URL}`;
-        if (baseUrlHint) {
-          baseUrlHint.textContent = 'OpenAI 兼容模式会使用 chat/completions 请求体；填写 API Key 时走 Bearer 鉴权，留空则按免 key 模式请求。';
-        }
+    };
+    const refreshConnectionSourceHint = () => {
+      if (!connectionSourceHint) return;
+      const selectedSourceId = connectionSourceSelect?.value || apiConfigs[index].connectionSourceId;
+      const selectedSource = connectionSources.find(source => source.id === selectedSourceId) || null;
+      if (!selectedSource) {
+        connectionSourceHint.textContent = '请先新增一个连接源并选择。';
+        return;
       }
+      const sourceType = normalizeConnectionType(selectedSource.connectionType) || inferConnectionTypeByBaseUrl(selectedSource.baseUrl);
+      const sourceBaseUrl = normalizeConfigBaseUrlByConnection(sourceType, selectedSource.baseUrl);
+      const sourceLabel = sourceType === CONNECTION_TYPE_GEMINI ? 'Gemini' : 'OpenAI 兼容';
+      connectionSourceHint.textContent = `${sourceLabel} · ${sourceBaseUrl || '未设置端点'} · 统一复用鉴权`;
     };
     const customParamsErrorElemId = `custom-params-error-${index}`;
     let lastFormattedCustomParams = '';
@@ -1450,57 +1942,12 @@ export function createApiManager(appContext) {
       template.classList.toggle('expanded');
     });
 
-    // 添加密码切换按钮的点击事件监听器
-    togglePasswordBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const type = apiKeyInput.type === 'password' ? 'text' : 'password';
-      apiKeyInput.type = type;
-      togglePasswordBtn.classList.toggle('visible');
-    });
-
-    // 添加点击外部自动隐藏密码的功能
-    document.addEventListener('click', (e) => {
-      // 如果点击的不是API Key输入框和切换按钮
-      if (!apiKeyInput.contains(e.target) && !togglePasswordBtn.contains(e.target)) {
-        // 如果当前是显示状态，则切换回密码状态
-        if (apiKeyInput.type === 'text') {
-          apiKeyInput.type = 'password';
-          togglePasswordBtn.classList.remove('visible');
-        }
-      }
-    });
-
-    // 当输入框失去焦点时也隐藏密码
-    apiKeyInput.addEventListener('blur', () => {
-      if (apiKeyInput.type === 'text') {
-        apiKeyInput.type = 'password';
-        togglePasswordBtn.classList.remove('visible');
-      }
-    });
-
-    // --- API Key 显示逻辑 ---
-    if (Array.isArray(config.apiKey)) {
-      apiKeyInput.value = config.apiKey.join(',');
-    } else {
-      apiKeyInput.value = config.apiKey ?? '';
+    refreshConnectionSourceOptions();
+    if (connectionSourceSelect?.value) {
+      apiConfigs[index].connectionSourceId = connectionSourceSelect.value;
     }
-    if (apiKeyFilePathInput) {
-      apiKeyFilePathInput.value = config.apiKeyFilePath ?? '';
-    }
-    // ------------------------
+    refreshConnectionSourceHint();
 
-    const currentConnectionType = getConfigConnectionType(config);
-    if (apiConfigs[index].connectionType !== currentConnectionType) {
-      apiConfigs[index].connectionType = currentConnectionType;
-    }
-    applyConnectionTypeUiState(currentConnectionType);
-    if (currentConnectionType === CONNECTION_TYPE_GEMINI) {
-      baseUrlInput.value = normalizeConfigBaseUrlByConnection(CONNECTION_TYPE_GEMINI, config.baseUrl);
-    } else {
-      baseUrlInput.value = (typeof config.baseUrl === 'string' && config.baseUrl.trim())
-        ? config.baseUrl.trim()
-        : OPENAI_DEFAULT_BASE_URL;
-    }
     displayNameInput.value = config.displayName ?? '';
     modelNameInput.value = config.modelName ?? 'gpt-4o';
     temperatureInput.value = config.temperature ?? 1;
@@ -1618,82 +2065,27 @@ export function createApiManager(appContext) {
     // --- 输入变化时保存 ---
     const saveCardBasicFields = () => {
       const previousConfig = { ...apiConfigs[index] };
-      const previousConnectionType = getConfigConnectionType(previousConfig);
-      const nextConnectionType = connectionTypeSelect
-        ? (normalizeConnectionType(connectionTypeSelect.value) || CONNECTION_TYPE_OPENAI)
-        : getConfigConnectionType(apiConfigs[index]);
-      let rawBaseUrlInput = (baseUrlInput.value || '').trim();
-      if (previousConnectionType !== nextConnectionType) {
-        if (nextConnectionType === CONNECTION_TYPE_GEMINI) {
-          if (!rawBaseUrlInput || rawBaseUrlInput === OPENAI_DEFAULT_BASE_URL) {
-            rawBaseUrlInput = GEMINI_DEFAULT_BASE_URL;
-          }
-        } else if (!rawBaseUrlInput || rawBaseUrlInput === GEMINI_DEFAULT_BASE_URL || isLegacyGeminiBaseUrl(rawBaseUrlInput)) {
-          rawBaseUrlInput = OPENAI_DEFAULT_BASE_URL;
-        }
-      }
-      const nextBaseUrl = normalizeConfigBaseUrlByConnection(nextConnectionType, rawBaseUrlInput);
-      if (baseUrlInput.value !== nextBaseUrl) {
-        baseUrlInput.value = nextBaseUrl;
-      }
-      applyConnectionTypeUiState(nextConnectionType);
+      const selectedSourceId = connectionSourceSelect?.value || apiConfigs[index].connectionSourceId || connectionSources[0]?.id || '';
       apiConfigs[index] = {
         ...apiConfigs[index],
-        connectionType: nextConnectionType,
-        baseUrl: nextBaseUrl,
+        connectionSourceId: selectedSourceId,
         displayName: displayNameInput.value,
         modelName: (modelNameInput.value || '').trim(),
       };
-      // connectionType/baseUrl/modelName 变化会影响缓存键，主动清理避免沿用旧缓存。
+      refreshConnectionSourceHint();
       clearApiKeyFileCacheEntry(previousConfig);
       clearApiKeyFileCacheEntry(apiConfigs[index]);
       // 更新标题
-      titleElement.textContent = apiConfigs[index].displayName || apiConfigs[index].modelName || apiConfigs[index].baseUrl || '新配置';
+      const effectiveNextConfig = resolveEffectiveConfig(apiConfigs[index]) || apiConfigs[index];
+      titleElement.textContent = apiConfigs[index].displayName || apiConfigs[index].modelName || effectiveNextConfig.baseUrl || '新配置';
       saveAPIConfigs();
     };
-    if (connectionTypeSelect) {
-      connectionTypeSelect.addEventListener('change', saveCardBasicFields);
+    if (connectionSourceSelect) {
+      connectionSourceSelect.addEventListener('change', saveCardBasicFields);
     }
-    [baseUrlInput, displayNameInput, modelNameInput].forEach(input => {
+    [displayNameInput, modelNameInput].forEach(input => {
       input.addEventListener('change', saveCardBasicFields);
     });
-
-    // API Key 输入变化处理
-    apiKeyInput.addEventListener('change', () => {
-        const rawValue = apiKeyInput.value.trim();
-        let newApiKeyValue;
-        if (rawValue.includes(',')) {
-            newApiKeyValue = rawValue.split(',').map(k => k.trim()).filter(Boolean);
-            // 如果解析后只有一个key或没有key，则存为字符串
-            if (newApiKeyValue.length <= 1) {
-                newApiKeyValue = newApiKeyValue[0] || '';
-            }
-        } else {
-            newApiKeyValue = rawValue;
-        }
-
-        apiConfigs[index].apiKey = newApiKeyValue;
-
-        // 更新或初始化轮询索引状态
-        const configId = getConfigIdentifier(apiConfigs[index]);
-        if (Array.isArray(newApiKeyValue) && newApiKeyValue.length > 0) {
-            apiKeyUsageIndex[configId] = 0; // 重置索引
-        } else {
-            delete apiKeyUsageIndex[configId]; // 删除不再需要的索引
-        }
-
-        saveAPIConfigs();
-    });
-
-    // API Key 本地文件路径变化处理（每次请求会按该路径实时读取；失败时回退到输入框 key）。
-    if (apiKeyFilePathInput) {
-      apiKeyFilePathInput.addEventListener('change', () => {
-        clearApiKeyFileCacheEntry(apiConfigs[index]);
-        apiConfigs[index].apiKeyFilePath = (apiKeyFilePathInput.value || '').trim();
-        clearApiKeyFileCacheEntry(apiConfigs[index]);
-        saveAPIConfigs();
-      });
-    }
 
     // 自定义参数处理：失焦/变更后统一格式化为缩进 JSON。
     customParamsInput.addEventListener('focus', () => {
@@ -1767,10 +2159,6 @@ export function createApiManager(appContext) {
       const copied = JSON.parse(JSON.stringify(config));
       copied.id = generateUUID();
       apiConfigs.push(copied);
-      const newConfigId = getConfigIdentifier(copied);
-      if (Array.isArray(copied.apiKey) && copied.apiKey.length > 0) {
-          apiKeyUsageIndex[newConfigId] = 0;
-      }
       saveAPIConfigs();
       renderAPICards();
     });
@@ -1799,10 +2187,14 @@ export function createApiManager(appContext) {
           resetDeleteConfirm();
 
           const deletedConfig = apiConfigs.splice(index, 1)[0];
-          // 删除对应的轮询状态
-          const deletedConfigId = getConfigIdentifier(deletedConfig);
-          delete apiKeyUsageIndex[deletedConfigId];
-          clearApiKeyFileCacheEntry(deletedConfig);
+          const deletedSourceId = deletedConfig?.connectionSourceId || '';
+          const stillUsedByOthers = deletedSourceId
+            ? apiConfigs.some(cfg => cfg?.connectionSourceId === deletedSourceId)
+            : false;
+          if (!stillUsedByOthers && deletedSourceId) {
+            delete apiKeyUsageIndex[deletedSourceId];
+            clearApiKeyFileCacheEntry({ connectionSourceId: deletedSourceId });
+          }
 
           if (selectedConfigIndex >= apiConfigs.length) {
             selectedConfigIndex = apiConfigs.length - 1;
@@ -1875,7 +2267,8 @@ export function createApiManager(appContext) {
 
       const apiName = document.createElement('span');
       apiName.className = 'api-name';
-      apiName.textContent = config.displayName || config.modelName || config.baseUrl;
+      const effectiveConfig = resolveEffectiveConfig(config) || config;
+      apiName.textContent = config.displayName || config.modelName || effectiveConfig.baseUrl;
       apiName.title = apiName.textContent;
 
       item.appendChild(apiName);
@@ -2152,6 +2545,7 @@ export function createApiManager(appContext) {
    * @returns {Promise<Object>} 请求体对象
    */
   async function buildRequest({ messages, config, overrides = {} }) {
+    config = resolveEffectiveConfig(config) || config;
     // 构造请求基本结构
     let requestBody = {};
     // 全局开关：是否发送 signature（无论是否发送，接收端解析到 signature 仍会照常存入历史）
@@ -2439,6 +2833,7 @@ export function createApiManager(appContext) {
    * @throws {Error} 如果鉴权信息无效（当未填写 key/文件路径时会走免 key 请求）
    */
   async function sendRequest({ requestBody, config, signal, onStatus }) {
+    config = resolveEffectiveConfig(config) || config;
     // 说明：Fetch API 无法精确提供“上传进度/已上传完毕”的事件。
     // 这里的阶段回调只基于我们能观测到的关键生命周期节点（开始发起请求/请求已发出/收到响应头/遇到限流切换 Key 等），
     // 用于提升 UI 透明度，但不承诺网络层面的逐字节进度。
@@ -2772,6 +3167,8 @@ export function createApiManager(appContext) {
     const panel = currentAppContext.dom.apiSettingsPanel;
     const backButtonElement = currentAppContext.dom.apiSettingsBackButton;
     const addButton = currentAppContext.dom.apiSettingsAddButton;
+    const addConnectionSourceButton = currentAppContext.dom.connectionSourceAddButton
+      || document.getElementById('connection-source-add');
 
     // 显示/隐藏 API 设置（已并入“聊天记录”面板的标签页）
     toggleButton.addEventListener('click', async (e) => {
@@ -2816,6 +3213,20 @@ export function createApiManager(appContext) {
         addConfig();
       });
     }
+
+    if (addConnectionSourceButton) {
+      addConnectionSourceButton.addEventListener('click', (e) => {
+        e?.stopPropagation?.();
+        const nextSource = createDefaultConnectionSource({
+          name: `${CONNECTION_SOURCE_DEFAULT_NAME_PREFIX} ${connectionSources.length + 1}`
+        });
+        connectionSources.push(nextSource);
+        assignStableConnectionSourceNames(connectionSources);
+        saveAPIConfigs();
+        renderConnectionSources();
+        renderAPICards();
+      });
+    }
   }
 
   /**
@@ -2839,7 +3250,7 @@ export function createApiManager(appContext) {
         if (!config) config = apiConfigs.find(c => (c.modelName || '').trim() === preferredValue);
         if (config) {
           console.log(`根据 promptType "${promptType}" 使用配置: ${config.displayName || config.modelName}`);
-          return config;
+          return resolveEffectiveConfig(config) || config;
         }
         console.log(`未找到 promptType "${promptType}" 指定的配置 "${preferredValue}"，将使用默认选中配置。`);
       }
@@ -2851,14 +3262,14 @@ export function createApiManager(appContext) {
         const shortConvoConfig = apiConfigs.find(c => c.displayName?.includes(SHORT_CONVO_DISPLAY_NAME));
         if (shortConvoConfig) {
           console.log(`使用短对话配置: ${shortConvoConfig.displayName}`);
-          return shortConvoConfig;
+          return resolveEffectiveConfig(shortConvoConfig) || shortConvoConfig;
         }
         console.log(`未找到displayName包含"${SHORT_CONVO_DISPLAY_NAME}" 的配置，将继续默认逻辑。`);
       } else if (messagesCount < 300) {
         const mediumConvoConfig = apiConfigs.find(c => c.displayName?.includes(MEDIUM_CONVO_DISPLAY_NAME));
         if (mediumConvoConfig) {
           console.log(`使用中等长度对话配置: ${mediumConvoConfig.displayName}`);
-          return mediumConvoConfig;
+          return resolveEffectiveConfig(mediumConvoConfig) || mediumConvoConfig;
         }
         console.log(`未找到displayName包含"${MEDIUM_CONVO_DISPLAY_NAME}" 的配置，将继续默认逻辑。`);
       }
@@ -2866,7 +3277,7 @@ export function createApiManager(appContext) {
     // 3. 如果没有特定模型配置或找不到，使用当前选中的配置 (原有逻辑)
     const selectedConfig = apiConfigs[selectedConfigIndex] || apiConfigs[0]; // 保证总有返回值
     console.log(`使用当前选中配置: ${selectedConfig?.displayName || selectedConfig?.modelName}`);
-    return selectedConfig;
+    return resolveEffectiveConfig(selectedConfig) || selectedConfig;
   }
 
   /**
@@ -2887,73 +3298,90 @@ export function createApiManager(appContext) {
       return null;
     }
     const partialConnectionType = normalizeConnectionType(partialConfig.connectionType);
-    const inferredTypeForBase = partialConnectionType
-      || (isLegacyGeminiBaseUrl(partialConfig.baseUrl) ? CONNECTION_TYPE_GEMINI : CONNECTION_TYPE_OPENAI);
-    const normalizedPartialBaseUrl = normalizeConfigBaseUrlByConnection(inferredTypeForBase, partialConfig.baseUrl);
-    if (!normalizedPartialBaseUrl) return null;
+    const inferredType = partialConnectionType
+      || inferConnectionTypeByBaseUrl(partialConfig.baseUrl)
+      || CONNECTION_TYPE_OPENAI;
+    const normalizedPartialBaseUrl = normalizeConfigBaseUrlByConnection(inferredType, partialConfig.baseUrl);
 
-    // 尝试按 baseUrl 和 modelName 查找现有配置
-    let matchedConfig = apiConfigs.find(config =>
-      (partialConfig.id && config.id === partialConfig.id) ||
-      (
-        config.baseUrl === normalizedPartialBaseUrl
-        && config.modelName === partialConfig.modelName
-        && (!partialConnectionType || getConfigConnectionType(config) === partialConnectionType)
-      )
-    );
+    const normalizedModelName = (typeof partialConfig.modelName === 'string')
+      ? partialConfig.modelName.trim()
+      : '';
+    if (!normalizedModelName) return null;
 
-    // 如果找到完全匹配，返回该配置 (确保包含 apiKey 和轮询状态)
-    if (matchedConfig) {
-        // 确保返回的对象有 apiKey 和可能的轮询状态
-        const configId = getConfigIdentifier(matchedConfig);
-        return {
-            ...matchedConfig,
-            // nextApiKeyIndex: apiKeyUsageIndex[configId] || 0 // 附加轮询状态
-        };
+    let matchedConfig = null;
+    if (partialConfig.id) {
+      matchedConfig = apiConfigs.find(config => config.id === partialConfig.id) || null;
+    }
+    if (!matchedConfig && partialConfig.connectionSourceId) {
+      matchedConfig = apiConfigs.find(config =>
+        config.connectionSourceId === partialConfig.connectionSourceId
+        && (config.modelName || '').trim() === normalizedModelName
+      ) || null;
+    }
+    if (!matchedConfig && normalizedPartialBaseUrl) {
+      matchedConfig = apiConfigs.find((config) => {
+        const effective = resolveEffectiveConfig(config);
+        if (!effective) return false;
+        return (effective.modelName || '').trim() === normalizedModelName
+          && effective.baseUrl === normalizedPartialBaseUrl
+          && (!partialConnectionType || getConfigConnectionType(effective) === partialConnectionType);
+      }) || null;
+    }
+    if (!matchedConfig && partialConfig.displayName) {
+      matchedConfig = apiConfigs.find(config => (config.displayName || '').trim() === String(partialConfig.displayName).trim()) || null;
     }
 
-    // 如果没有找到完全匹配，尝试仅按 URL 匹配以获取可能的 API Key
-    const urlMatchedConfig = apiConfigs.find(config =>
-      config.baseUrl === normalizedPartialBaseUrl
-      && (!partialConnectionType || getConfigConnectionType(config) === partialConnectionType)
-    );
+    if (matchedConfig) {
+      return resolveEffectiveConfig(matchedConfig) || matchedConfig;
+    }
 
-    // 获取当前选中配置的 apiKey 作为备选
-    const currentSelectedConfig = apiConfigs[selectedConfigIndex];
-    const fallbackApiKey = currentSelectedConfig ? currentSelectedConfig.apiKey : '';
-    const fallbackApiKeyFilePath = currentSelectedConfig ? currentSelectedConfig.apiKeyFilePath : '';
+    const selectedRawConfig = apiConfigs[selectedConfigIndex] || apiConfigs[0] || null;
+    const selectedEffectiveConfig = resolveEffectiveConfig(selectedRawConfig) || null;
+    let selectedSourceId = selectedRawConfig?.connectionSourceId || connectionSources[0]?.id || '';
 
-    const inferredConnectionType = partialConnectionType
-      || (urlMatchedConfig ? getConfigConnectionType(urlMatchedConfig) : inferredTypeForBase);
+    if (partialConfig.connectionSourceId && getConnectionSourceById(partialConfig.connectionSourceId)) {
+      selectedSourceId = partialConfig.connectionSourceId;
+    } else if (normalizedPartialBaseUrl) {
+      const matchedSource = connectionSources.find((source) => {
+        const sourceType = normalizeConnectionType(source?.connectionType) || inferConnectionTypeByBaseUrl(source?.baseUrl);
+        const sourceBaseUrl = normalizeConfigBaseUrlByConnection(sourceType, source?.baseUrl);
+        if (sourceBaseUrl !== normalizedPartialBaseUrl) return false;
+        if (partialConnectionType && sourceType !== partialConnectionType) return false;
+        return true;
+      });
+      if (matchedSource?.id) {
+        selectedSourceId = matchedSource.id;
+      }
+    }
 
-    // 创建新的配置对象
-    const newConfig = {
-      connectionType: inferredConnectionType,
-      baseUrl: normalizeConfigBaseUrlByConnection(inferredConnectionType, normalizedPartialBaseUrl),
-      // 优先使用 URL 匹配到的配置的 apiKey，其次是当前选中的，最后是空字符串
-      // 注意：这里 apiKey 可能是数组或字符串
-      apiKey: urlMatchedConfig?.apiKey || fallbackApiKey || '',
-      apiKeyFilePath: urlMatchedConfig?.apiKeyFilePath || fallbackApiKeyFilePath || '',
-      modelName: partialConfig.modelName,
+    const transientConfig = {
+      id: generateUUID(),
+      connectionSourceId: selectedSourceId,
+      modelName: normalizedModelName,
       displayName: partialConfig.displayName || '',
       temperature: partialConfig.temperature ?? 1.0,
+      useStreaming: partialConfig.useStreaming !== false,
+      isFavorite: false,
       customParams: partialConfig.customParams || '',
       customSystemPrompt: partialConfig.customSystemPrompt || '',
-      userMessagePreprocessorTemplate: (typeof partialConfig.userMessagePreprocessorTemplate === 'string') ? partialConfig.userMessagePreprocessorTemplate : '',
+      userMessagePreprocessorTemplate: (typeof partialConfig.userMessagePreprocessorTemplate === 'string')
+        ? partialConfig.userMessagePreprocessorTemplate
+        : '',
       userMessagePreprocessorIncludeInHistory: !!partialConfig.userMessagePreprocessorIncludeInHistory,
-      maxChatHistory: 500, // 旧字段：保留默认值
+      maxChatHistory: 500,
       maxChatHistoryUser: 500,
-      maxChatHistoryAssistant: 500,
-      // isFavorite: false // 新创建的默认不收藏
+      maxChatHistoryAssistant: 500
     };
 
-     // 初始化新配置的轮询状态
-    const newConfigId = getConfigIdentifier(newConfig);
-    if (Array.isArray(newConfig.apiKey) && newConfig.apiKey.length > 0) {
-         apiKeyUsageIndex[newConfigId] = 0;
+    const hasSource = !!getConnectionSourceById(selectedSourceId);
+    if (!hasSource) {
+      transientConfig.connectionType = inferredType;
+      transientConfig.baseUrl = normalizedPartialBaseUrl || selectedEffectiveConfig?.baseUrl || '';
+      transientConfig.apiKey = normalizeApiKeyValue(partialConfig.apiKey || selectedEffectiveConfig?.apiKey || '');
+      transientConfig.apiKeyFilePath = normalizeApiKeyFilePath(partialConfig.apiKeyFilePath || selectedEffectiveConfig?.apiKeyFilePath || '');
     }
 
-    return newConfig;
+    return resolveEffectiveConfig(transientConfig) || transientConfig;
   }
 
   /**
@@ -2968,34 +3396,49 @@ export function createApiManager(appContext) {
    * @returns {Object|null} 匹配/构造的配置，未解析成功返回 null
    */
   function resolveApiParam(apiParam) {
-    if (apiParam == null) return apiConfigs[selectedConfigIndex] || apiConfigs[0] || null;
+    if (apiParam == null) {
+      const selected = apiConfigs[selectedConfigIndex] || apiConfigs[0] || null;
+      return resolveEffectiveConfig(selected) || selected;
+    }
 
     // 字符串：特殊值或 id/displayName/modelName
     if (typeof apiParam === 'string') {
       const key = apiParam.trim();
       if (key.toLowerCase() === 'selected' || key.toLowerCase() === 'follow_current') {
-        return apiConfigs[selectedConfigIndex] || apiConfigs[0] || null;
+        const selected = apiConfigs[selectedConfigIndex] || apiConfigs[0] || null;
+        return resolveEffectiveConfig(selected) || selected;
       }
       let config = apiConfigs.find(c => c.id && c.id === key);
       if (!config) config = apiConfigs.find(c => (c.displayName || '').trim() === key);
       if (!config) config = apiConfigs.find(c => (c.modelName || '').trim() === key);
-      return config || null;
+      return (resolveEffectiveConfig(config) || config || null);
     }
 
     // 对象：优先 id/displayName；favoriteIndex；否则按部分配置补全
     if (typeof apiParam === 'object') {
       if (apiParam.id) {
         const cfg = apiConfigs.find(c => c.id === apiParam.id);
-        if (cfg) return cfg;
+        if (cfg) return resolveEffectiveConfig(cfg) || cfg;
       }
       if (apiParam.displayName) {
         const cfg = apiConfigs.find(c => (c.displayName || '').trim() === String(apiParam.displayName).trim());
-        if (cfg) return cfg;
+        if (cfg) return resolveEffectiveConfig(cfg) || cfg;
+      }
+      if (apiParam.connectionSourceId) {
+        const cfg = apiConfigs.find((c) => {
+          if (!c || c.connectionSourceId !== apiParam.connectionSourceId) return false;
+          if (apiParam.modelName && (c.modelName || '').trim() !== String(apiParam.modelName).trim()) return false;
+          return true;
+        });
+        if (cfg) return resolveEffectiveConfig(cfg) || cfg;
       }
       if (typeof apiParam.favoriteIndex === 'number') {
         const favorites = apiConfigs.filter(c => c.isFavorite);
         const idx = apiParam.favoriteIndex;
-        if (idx >= 0 && idx < favorites.length) return favorites[idx];
+        if (idx >= 0 && idx < favorites.length) {
+          const favorite = favorites[idx];
+          return resolveEffectiveConfig(favorite) || favorite;
+        }
         return null;
       }
       // 作为部分配置尝试补全
@@ -3007,41 +3450,63 @@ export function createApiManager(appContext) {
 
   // 新增配置入口：集中处理默认值与持久化，避免各处复制逻辑。
   function addConfig(config = {}) {
-    // 确保新配置有必要的字段
-    const newConfig = {
-      id: generateUUID(),
-      apiKey: '',
-      apiKeyFilePath: '',
-      connectionType: CONNECTION_TYPE_OPENAI,
-      baseUrl: OPENAI_DEFAULT_BASE_URL,
-      modelName: 'new-model',
-      displayName: '新配置',
-      temperature: 1,
-      useStreaming: true,
-      isFavorite: false,
-      customParams: '',
-      customSystemPrompt: '',
-      userMessagePreprocessorTemplate: '',
-      userMessagePreprocessorIncludeInHistory: false,
-      maxChatHistory: 500, // 旧字段：保留默认值
-      maxChatHistoryUser: 500,
-      maxChatHistoryAssistant: 500,
-      ...config // 允许传入部分或完整配置覆盖默认值
-    };
-    // 处理传入的 apiKey 格式
-    if (typeof newConfig.apiKey === 'string' && newConfig.apiKey.includes(',')) {
-      newConfig.apiKey = newConfig.apiKey.split(',').map(k => k.trim()).filter(Boolean);
-    }
-    newConfig.connectionType = getConfigConnectionType(newConfig);
-    newConfig.baseUrl = normalizeConfigBaseUrlByConnection(newConfig.connectionType, newConfig.baseUrl);
-    newConfig.apiKeyFilePath = normalizeApiKeyFilePath(newConfig.apiKeyFilePath);
-    // 初始化轮询状态
-    const newConfigId = getConfigIdentifier(newConfig);
-    if (Array.isArray(newConfig.apiKey) && newConfig.apiKey.length > 0) {
-      apiKeyUsageIndex[newConfigId] = 0;
+    if (!Array.isArray(connectionSources) || connectionSources.length <= 0) {
+      connectionSources = [createDefaultConnectionSource()];
+      renderConnectionSources();
     }
 
-    apiConfigs.push(newConfig);
+    let connectionSourceId = (typeof config?.connectionSourceId === 'string') ? config.connectionSourceId.trim() : '';
+    const hasLegacyConnectionFields = ['connectionType', 'baseUrl', 'apiKey', 'apiKeyFilePath']
+      .some((field) => Object.prototype.hasOwnProperty.call(config || {}, field));
+
+    if (!connectionSourceId && hasLegacyConnectionFields) {
+      const signatureSource = normalizeConnectionSource({
+        connectionType: config.connectionType,
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        apiKeyFilePath: config.apiKeyFilePath
+      });
+      const signature = buildConnectionSourceDedupeKey(signatureSource);
+      const matchedSource = connectionSources.find(source => buildConnectionSourceDedupeKey(source) === signature) || null;
+      if (matchedSource?.id) {
+        connectionSourceId = matchedSource.id;
+      } else {
+        const nextSource = normalizeConnectionSource({
+          ...signatureSource,
+          id: generateUUID(),
+          name: config.connectionSourceName || ''
+        });
+        connectionSources.push(nextSource);
+        assignStableConnectionSourceNames(connectionSources);
+        connectionSourceId = nextSource.id;
+        renderConnectionSources();
+      }
+    }
+
+    if (!connectionSourceId || !getConnectionSourceById(connectionSourceId)) {
+      connectionSourceId = connectionSources[0]?.id || '';
+    }
+
+    const mergedConfig = createDefaultApiConfig(connectionSourceId, {
+      id: config.id || generateUUID(),
+      modelName: config.modelName || 'new-model',
+      displayName: config.displayName || '新配置',
+      temperature: config.temperature ?? 1,
+      useStreaming: config.useStreaming !== false,
+      isFavorite: !!config.isFavorite,
+      customParams: config.customParams || '',
+      customSystemPrompt: config.customSystemPrompt || '',
+      userMessagePreprocessorTemplate: (typeof config.userMessagePreprocessorTemplate === 'string')
+        ? config.userMessagePreprocessorTemplate
+        : '',
+      userMessagePreprocessorIncludeInHistory: !!config.userMessagePreprocessorIncludeInHistory,
+      maxChatHistory: Number.isFinite(config.maxChatHistory) ? config.maxChatHistory : 500,
+      maxChatHistoryUser: Number.isFinite(config.maxChatHistoryUser) ? config.maxChatHistoryUser : 500,
+      maxChatHistoryAssistant: Number.isFinite(config.maxChatHistoryAssistant) ? config.maxChatHistoryAssistant : 500
+    });
+
+    const normalizedConfig = normalizeApiConfigsAfterMigration([mergedConfig], connectionSources)[0] || mergedConfig;
+    apiConfigs.push(normalizedConfig);
     saveAPIConfigs();
     renderAPICards();
     renderFavoriteApis();
@@ -3054,6 +3519,7 @@ export function createApiManager(appContext) {
     init: loadAPIConfigs,
     loadAPIConfigs,
     saveAPIConfigs,
+    renderConnectionSources,
     renderAPICards,
     renderFavoriteApis,
     buildRequest,
@@ -3066,14 +3532,10 @@ export function createApiManager(appContext) {
     // 获取和设置配置
     getSelectedConfig: () => {
         const config = apiConfigs[selectedConfigIndex];
-        // if (config) {
-        //     const configId = getConfigIdentifier(config);
-        //     // 返回时附加当前的轮询索引
-        //     return { ...config, nextApiKeyIndex: apiKeyUsageIndex[configId] || 0 };
-        // }
-        return config; // 返回内存中的配置对象
+        return resolveEffectiveConfig(config) || config;
     },
-    getAllConfigs: () => [...apiConfigs], // 返回包含轮询状态的配置副本
+    getAllConfigs: () => apiConfigs.map(config => resolveEffectiveConfig(config) || config),
+    getAllConnectionSources: () => connectionSources.map(source => ({ ...source })),
     getSelectedIndex: () => selectedConfigIndex,
     setSelectedIndex: (index) => setSelectedIndexInternal(index),
 

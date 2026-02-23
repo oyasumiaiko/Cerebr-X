@@ -177,6 +177,7 @@ export function createChatHistoryUI(appContext) {
     if (!a && !b) return true;
     if (!a || !b) return false;
     return a.id === b.id
+      && a.connectionSourceId === b.connectionSourceId
       && a.displayName === b.displayName
       && a.modelName === b.modelName
       && a.baseUrl === b.baseUrl
@@ -234,6 +235,17 @@ export function createChatHistoryUI(appContext) {
       if (!lockConnectionType) return true;
       return getApiConfigConnectionType(config) === lockConnectionType;
     };
+    if (lock.connectionSourceId) {
+      const sourceCandidates = services.apiManager?.getAllConfigs?.() || [];
+      const resolvedBySource = sourceCandidates.find((config) => {
+        if (!config || config.connectionSourceId !== lock.connectionSourceId) return false;
+        if (lock.modelName && (config.modelName || '').trim() !== lock.modelName) return false;
+        return true;
+      }) || null;
+      if (isLockConnectionTypeMatched(resolvedBySource) && hasValidApiBaseUrl(resolvedBySource) && hasUsableApiCredential(resolvedBySource)) {
+        return resolvedBySource;
+      }
+    }
     // 若锁定信息包含 id，则必须按 id 命中配置，避免误用其它同名/同基址配置
     if (lock.id) {
       const resolvedById = services.apiManager.resolveApiParam({ id: lock.id });
@@ -6787,7 +6799,10 @@ export function createChatHistoryUI(appContext) {
       return getApiConfigConnectionType(config) === lockConnectionType;
     };
     let matched = null;
-    if (lock.id) {
+    if (lock.connectionSourceId) {
+      matched = configs.find(c => c.connectionSourceId === lock.connectionSourceId && matchConnectionType(c)) || null;
+    }
+    if (!matched && lock.id) {
       matched = configs.find(c => c.id === lock.id) || null;
     } else {
       if (!matched && lock.displayName) {

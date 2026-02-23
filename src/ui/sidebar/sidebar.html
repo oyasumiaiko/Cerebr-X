@@ -252,6 +252,49 @@
             </button>
             <span class="settings-title">API 设置</span>
         </div>
+        <div class="connection-sources-panel">
+            <div class="connection-sources-header">
+                <span class="connection-sources-title">连接源</span>
+                <button type="button" class="connection-source-add-button" id="connection-source-add">+ 新增连接源</button>
+            </div>
+            <div class="connection-sources-list" id="connection-sources-list">
+                <div class="connection-source-item template" style="display: none;">
+                    <div class="connection-source-item-header">
+                        <div class="connection-source-item-title"></div>
+                        <div class="connection-source-item-meta">
+                            <span class="connection-source-ref-count"></span>
+                            <button type="button" class="connection-source-delete-btn">删除</button>
+                        </div>
+                    </div>
+                    <div class="connection-source-item-grid">
+                        <div class="connection-source-field">
+                            <label>连接源名称</label>
+                            <input type="text" class="connection-source-name" placeholder="例如 本地 OpenAI 代理">
+                        </div>
+                        <div class="connection-source-field">
+                            <label>连接方式</label>
+                            <select class="connection-source-type">
+                                <option value="openai">OpenAI 兼容</option>
+                                <option value="gemini">Gemini</option>
+                            </select>
+                        </div>
+                        <div class="connection-source-field">
+                            <label class="connection-source-base-url-label">API 端点 URL</label>
+                            <input type="text" class="connection-source-base-url" placeholder="输入 Base URL">
+                            <div class="connection-source-base-url-hint">OpenAI 兼容模式走 chat/completions；无 key 时会按免鉴权模式请求。</div>
+                        </div>
+                        <div class="connection-source-field">
+                            <label>API Key（可选，支持逗号分隔轮询）</label>
+                            <input type="password" class="connection-source-api-key" placeholder="输入 API Key">
+                        </div>
+                        <div class="connection-source-field">
+                            <label>本地 Key 文件路径（可选）</label>
+                            <input type="text" class="connection-source-api-key-file-path" placeholder="例如 C:\\keys\\proxy_keys.txt">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
         <div class="api-cards">
             <!-- 卡片模板 -->
             <div class="api-card template" style="display: none;">
@@ -279,36 +322,9 @@
                     <div class="api-form-grid">
                         <div class="api-form-left">
                             <div class="form-group">
-                                <div class="form-group-header">
-                                    <label>API Key (可选；逗号分隔轮询多个 Key)</label>
-                                </div>
-                                <div class="input-wrapper">
-                                    <input type="password" class="api-key" placeholder="输入 API Key">
-                                    <button class="toggle-password-btn" title="切换密码显示">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                            <circle cx="12" cy="12" r="3"/>
-                                            <path class="eye-slash" d="M3 3l18 18"/>
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label>本地 Key 文件路径（可选，每行一个 Key）</label>
-                                <input type="text" class="api-key-file-path" placeholder="例如 C:\\keys\\gemini_keys.txt">
-                                <div class="api-key-file-path-hint">填写后将优先按请求实时读取本地文件；读取失败时自动回退到上方 API Key 输入框。若本地反代统一鉴权，可两者都留空以省略 key 参数。</div>
-                            </div>
-                            <div class="form-group">
-                                <label>连接方式</label>
-                                <select class="connection-type">
-                                    <option value="openai">OpenAI 兼容</option>
-                                    <option value="gemini">Gemini</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label class="base-url-label">API 端点 URL</label>
-                                <input type="text" class="base-url" placeholder="输入 Base URL">
-                                <div class="base-url-hint">OpenAI 兼容模式会使用 chat/completions 请求体；填写 API Key 时走 Bearer 鉴权，留空则按免 key 模式请求。</div>
+                                <label>连接源</label>
+                                <select class="connection-source-id"></select>
+                                <div class="connection-source-hint">鉴权信息与端点由连接源统一管理。</div>
                             </div>
                             <div class="form-group">
                                 <label>模型ID</label>
