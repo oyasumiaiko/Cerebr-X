@@ -2384,7 +2384,7 @@ input:checked + .slider::before {
 .api-cards {
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 6px;
 }
 
 .api-settings-actions {
