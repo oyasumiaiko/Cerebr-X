@@ -2432,6 +2432,10 @@ export function createMessageSender(appContext) {
     return (typeof apiKeyFilePath === 'string') && apiKeyFilePath.trim().length > 0;
   }
 
+  function hasValidApiBaseUrl(baseUrl) {
+    return (typeof baseUrl === 'string') && baseUrl.trim().length > 0;
+  }
+
   function hasUsableApiCredential(config) {
     if (!config || typeof config !== 'object') return false;
     return hasValidApiKey(config.apiKey) || hasValidApiKeyFilePath(config.apiKeyFilePath);
@@ -2439,7 +2443,7 @@ export function createMessageSender(appContext) {
 
   function validateApiConfig(config) {
     const target = config || apiManager.getSelectedConfig();
-    if (!target?.baseUrl || !hasUsableApiCredential(target)) {
+    if (!hasValidApiBaseUrl(target?.baseUrl) || !hasUsableApiCredential(target)) {
       messageProcessor.appendMessage('请在设置中完善 API 配置', 'ai', true);
       return false;
     }

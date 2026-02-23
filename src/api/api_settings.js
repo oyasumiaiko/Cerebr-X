@@ -698,6 +698,26 @@ export function createApiManager(appContext) {
         // 兼容旧格式：如果 apiKey 是带逗号的字符串，则转换为数组；并确保有 id
         apiConfigs.forEach(config => {
           if (!config.id) { config.id = generateUUID(); needResave = true; }
+          if (typeof config.baseUrl !== 'string') {
+            config.baseUrl = '';
+            needResave = true;
+          } else {
+            const trimmedBaseUrl = config.baseUrl.trim();
+            if (trimmedBaseUrl !== config.baseUrl) {
+              config.baseUrl = trimmedBaseUrl;
+              needResave = true;
+            }
+          }
+          if (typeof config.modelName !== 'string') {
+            config.modelName = '';
+            needResave = true;
+          } else {
+            const trimmedModelName = config.modelName.trim();
+            if (trimmedModelName !== config.modelName) {
+              config.modelName = trimmedModelName;
+              needResave = true;
+            }
+          }
           if (typeof config.apiKeyFilePath !== 'string') {
             config.apiKeyFilePath = '';
             needResave = true;
@@ -1390,9 +1410,9 @@ export function createApiManager(appContext) {
         const previousConfig = { ...apiConfigs[index] };
         apiConfigs[index] = {
           ...apiConfigs[index],
-          baseUrl: baseUrlInput.value,
+          baseUrl: (baseUrlInput.value || '').trim(),
           displayName: displayNameInput.value,
-          modelName: modelNameInput.value,
+          modelName: (modelNameInput.value || '').trim(),
         };
         // baseUrl/modelName 变化会影响缓存键，主动清理避免沿用旧缓存。
         clearApiKeyFileCacheEntry(previousConfig);
@@ -2222,6 +2242,10 @@ export function createApiManager(appContext) {
     };
 
     const configId = getConfigIdentifier(config);
+    const normalizedBaseUrl = (typeof config?.baseUrl === 'string') ? config.baseUrl.trim() : '';
+    const normalizedModelName = (typeof config?.modelName === 'string') ? config.modelName.trim() : '';
+    const statusApiBase = normalizedBaseUrl || String(config?.baseUrl || '');
+    const statusModelName = normalizedModelName || String(config?.modelName || '');
     // 确保黑名单已加载（若未调用过 loadAPIConfigs）
     if (!apiKeyBlacklist || typeof apiKeyBlacklist !== 'object') {
       try { await loadApiKeyBlacklist(); } catch (_) {}
@@ -2260,8 +2284,8 @@ export function createApiManager(appContext) {
       emitStatus({
         stage: 'api_key_file_reload_start',
         reason,
-        apiBase: config?.baseUrl || '',
-        modelName: config?.modelName || ''
+        apiBase: statusApiBase,
+        modelName: statusModelName
       });
 
       const refreshed = await resolveRuntimeApiKeys(config, emitStatus, { forceFileReload: true });
@@ -2315,52 +2339,92 @@ export function createApiManager(appContext) {
         triedCount: tried.size,
         isKeyRotation: isArrayKeys,
         keySource: resolvedKeys?.source || 'inline',
-        apiBase: config?.baseUrl || '',
-        modelName: config?.modelName || ''
+        apiBase: statusApiBase,
+        modelName: statusModelName
       });
 
       // 组装请求
-      let endpointUrl = config.baseUrl;
+      let endpointUrl = normalizedBaseUrl;
       const headers = { 'Content-Type': 'application/json' };
-      if (config.baseUrl === 'genai') {
+      if (normalizedBaseUrl === 'genai') {
+        if (!normalizedModelName) {
+          throw new Error('Gemini 模型名为空，请在 API 设置中填写 modelName');
+        }
+        const encodedKey = encodeURIComponent(selectedKey);
         if (config.useStreaming !== false) {
-          endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${config.modelName}:streamGenerateContent?key=${selectedKey}&alt=sse`;
+          endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${normalizedModelName}:streamGenerateContent?key=${encodedKey}&alt=sse`;
         } else {
-          endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${config.modelName}:generateContent?key=${selectedKey}`;
+          endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${normalizedModelName}:generateContent?key=${encodedKey}`;
         }
       } else {
+        if (!endpointUrl) {
+          throw new Error('API Base URL 为空，请在 API 设置中填写有效地址');
+        }
+        let parsedEndpoint = null;
+        try {
+          parsedEndpoint = new URL(endpointUrl);
+        } catch (_) {
+          throw new Error(`API Base URL 无效：${endpointUrl}`);
+        }
+        const protocol = String(parsedEndpoint?.protocol || '').toLowerCase();
+        if (protocol !== 'http:' && protocol !== 'https:') {
+          throw new Error(`API Base URL 协议不受支持：${protocol || 'unknown'}`);
+        }
         headers['Authorization'] = `Bearer ${selectedKey}`;
       }
 
       emitStatus({
         stage: 'http_request_start',
-        apiBase: config?.baseUrl || '',
-        modelName: config?.modelName || '',
-        useStreaming: config?.baseUrl === 'genai' ? (config.useStreaming !== false) : !!requestBody?.stream
+        apiBase: statusApiBase,
+        modelName: statusModelName,
+        useStreaming: normalizedBaseUrl === 'genai' ? (config.useStreaming !== false) : !!requestBody?.stream
       });
 
       // 重要：先创建 fetch Promise 再 emit “已发出请求”，让 UI 可以在等待响应头阶段展示更明确的状态。
       // 这里不向 onStatus 透出 endpointUrl，避免 Gemini 场景下 URL 携带 key 造成泄漏风险。
-      const fetchPromise = fetch(endpointUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-        signal
-      });
+      const endpointHint = (() => {
+        if (normalizedBaseUrl === 'genai') {
+          return `genai:${normalizedModelName}`;
+        }
+        try {
+          const parsed = new URL(endpointUrl);
+          return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+        } catch (_) {
+          return endpointUrl;
+        }
+      })();
+      let fetchPromise = null;
+      try {
+        fetchPromise = fetch(endpointUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(requestBody),
+          signal
+        });
+      } catch (error) {
+        if (error?.name === 'AbortError') throw error;
+        throw new Error(`网络请求初始化失败（${endpointHint}）：${error?.message || 'Failed to fetch'}`);
+      }
 
       emitStatus({
         stage: 'http_request_sent',
-        apiBase: config?.baseUrl || '',
-        modelName: config?.modelName || ''
+        apiBase: statusApiBase,
+        modelName: statusModelName
       });
 
-      const response = await fetchPromise;
+      let response = null;
+      try {
+        response = await fetchPromise;
+      } catch (error) {
+        if (error?.name === 'AbortError') throw error;
+        throw new Error(`网络请求失败（${endpointHint}）：${error?.message || 'Failed to fetch'}`);
+      }
       emitStatus({
         stage: 'http_response_headers_received',
         status: response?.status,
         ok: response?.ok,
-        apiBase: config?.baseUrl || '',
-        modelName: config?.modelName || ''
+        apiBase: statusApiBase,
+        modelName: statusModelName
       });
 
       // 处理 429：加入黑名单并尝试下一个 key
@@ -2368,8 +2432,8 @@ export function createApiManager(appContext) {
         emitStatus({
           stage: 'http_429_rate_limited',
           willRetry: !!isArrayKeys,
-          apiBase: config?.baseUrl || '',
-          modelName: config?.modelName || ''
+          apiBase: statusApiBase,
+          modelName: statusModelName
         });
         lastErrorResponse = response;
         try { await blacklistKey(selectedKey, 24 * 60 * 60 * 1000); } catch (_) {}
@@ -2406,8 +2470,8 @@ export function createApiManager(appContext) {
             stage: 'http_400_bad_request_not_blacklisted',
             status: 400,
             willRetry: false,
-            apiBase: config?.baseUrl || '',
-            modelName: config?.modelName || ''
+            apiBase: statusApiBase,
+            modelName: statusModelName
           });
           return response;
         }
@@ -2419,8 +2483,8 @@ export function createApiManager(appContext) {
           stage: 'http_auth_or_bad_request_key_blacklisted',
           status: response.status,
           willRetry: !!isArrayKeys,
-          apiBase: config?.baseUrl || '',
-          modelName: config?.modelName || ''
+          apiBase: statusApiBase,
+          modelName: statusModelName
         });
         lastErrorResponse = response;
         tried.add(selectedKey);
