@@ -1245,6 +1245,60 @@ export function createApiManager(appContext) {
         }
       }
     };
+    const customParamsErrorElemId = `custom-params-error-${index}`;
+    let lastFormattedCustomParams = '';
+    let customParamsValueBeforeEdit = '';
+    const ensureCustomParamsErrorElem = () => {
+      let errorElem = customParamsInput.parentNode.querySelector(`#${customParamsErrorElemId}`);
+      if (!errorElem) {
+        errorElem = document.createElement('div');
+        errorElem.id = customParamsErrorElemId;
+        errorElem.className = 'custom-params-error';
+        errorElem.style.color = 'red';
+        errorElem.style.fontSize = '12px';
+        errorElem.style.marginTop = '4px';
+        customParamsInput.parentNode.appendChild(errorElem);
+      }
+      return errorElem;
+    };
+    const clearCustomParamsError = () => {
+      customParamsInput.style.borderColor = '';
+      const errorElem = customParamsInput.parentNode.querySelector(`#${customParamsErrorElemId}`);
+      if (errorElem) errorElem.remove();
+    };
+    const showCustomParamsError = (message) => {
+      customParamsInput.style.borderColor = 'red';
+      const errorElem = ensureCustomParamsErrorElem();
+      errorElem.textContent = message;
+    };
+    const formatCustomParamsJson = (rawValue) => {
+      const trimmed = (typeof rawValue === 'string') ? rawValue.trim() : '';
+      if (!trimmed) return { ok: true, formatted: '' };
+      try {
+        const parsed = JSON.parse(trimmed);
+        return { ok: true, formatted: JSON.stringify(parsed, null, 2) };
+      } catch (error) {
+        return { ok: false, formatted: trimmed, error };
+      }
+    };
+    // 统一入口：右侧“自定义参数”只保留格式化后的 JSON 文本，避免出现同配置多种排版格式。
+    const commitCustomParamsFormatted = ({ persist = true } = {}) => {
+      const rawValue = customParamsInput.value;
+      const result = formatCustomParamsJson(rawValue);
+      if (!result.ok) {
+        const fallbackValue = (typeof customParamsValueBeforeEdit === 'string') ? customParamsValueBeforeEdit : '';
+        customParamsInput.value = fallbackValue;
+        showCustomParamsError('JSON 无效，已回退到上一次格式化内容');
+        return false;
+      }
+      customParamsInput.value = result.formatted;
+      lastFormattedCustomParams = result.formatted;
+      customParamsValueBeforeEdit = result.formatted;
+      apiConfigs[index].customParams = result.formatted;
+      clearCustomParamsError();
+      if (persist) saveAPIConfigs();
+      return true;
+    };
 
     // 在 temperature 设置后添加“聊天历史裁剪”设置：分别控制 user / AI(assistant) 的历史消息条数
     // 背景：超长对话时，AI 回复往往更长；允许只保留最近 N 条 AI，同时保留更多用户指令上下文。
@@ -1334,21 +1388,15 @@ export function createApiManager(appContext) {
       apiForm.appendChild(assistantHistoryGroup);
     }
 
-    // 传输模式：流式/非流式 美观开关
+    // 传输模式：右侧开关（开启=流式 SSE，关闭=非流式 JSON）
     const streamingGroup = document.createElement('div');
     streamingGroup.className = 'form-group';
-    const streamingHeader = document.createElement('div');
-    streamingHeader.className = 'form-group-header';
-    const streamingLabel = document.createElement('label');
-    streamingLabel.textContent = '传输模式';
-    const streamingHint = document.createElement('span');
-    streamingHint.className = 'temperature-value';
-    streamingHint.textContent = (config.useStreaming !== false) ? '流式 (SSE)' : '非流式 (JSON)';
-    streamingHeader.appendChild(streamingLabel);
-    streamingHeader.appendChild(streamingHint);
 
     const streamingRow = document.createElement('div');
     streamingRow.className = 'switch-row backup-form-row';
+    const streamingText = document.createElement('span');
+    streamingText.className = 'switch-text';
+    streamingText.textContent = '流式传输';
     const switchLabel = document.createElement('label');
     switchLabel.className = 'switch';
     const streamingToggle = document.createElement('input');
@@ -1356,26 +1404,21 @@ export function createApiManager(appContext) {
     streamingToggle.id = `use-streaming-${index}`;
     streamingToggle.className = 'use-streaming-toggle';
     streamingToggle.checked = (config.useStreaming !== false);
-    streamingToggle.title = '启用流式传输 (SSE)。禁用则使用一次性JSON响应。';
+    streamingToggle.title = streamingToggle.checked ? '当前：流式 (SSE)' : '当前：非流式 (JSON)';
     const slider = document.createElement('span');
     slider.className = 'slider';
     switchLabel.appendChild(streamingToggle);
     switchLabel.appendChild(slider);
-    const streamingToggleText = document.createElement('span');
-    streamingToggleText.className = 'switch-text';
-    streamingToggleText.textContent = streamingToggle.checked ? '启用' : '禁用';
+    streamingRow.appendChild(streamingText);
     streamingRow.appendChild(switchLabel);
-    streamingRow.appendChild(streamingToggleText);
 
     streamingToggle.addEventListener('change', () => {
       const enabled = !!streamingToggle.checked;
-      streamingToggleText.textContent = enabled ? '启用' : '禁用';
-      streamingHint.textContent = enabled ? '流式 (SSE)' : '非流式 (JSON)';
+      streamingToggle.title = enabled ? '当前：流式 (SSE)' : '当前：非流式 (JSON)';
       apiConfigs[index].useStreaming = enabled;
       saveAPIConfigs();
     });
 
-    streamingGroup.appendChild(streamingHeader);
     streamingGroup.appendChild(streamingRow);
     if (formLeft) {
       formLeft.appendChild(streamingGroup);
@@ -1461,7 +1504,9 @@ export function createApiManager(appContext) {
     modelNameInput.value = config.modelName ?? 'gpt-4o';
     temperatureInput.value = config.temperature ?? 1;
     temperatureValue.textContent = (config.temperature ?? 1).toFixed(1);
-    customParamsInput.value = config.customParams || '';
+    customParamsInput.value = (typeof config.customParams === 'string') ? config.customParams : '';
+    // 首次渲染也统一格式化，确保展示层始终是缩进 JSON 结构。
+    commitCustomParamsFormatted({ persist: false });
     if (customSystemPromptInput) {
       customSystemPromptInput.value = config.customSystemPrompt || '';
     }
@@ -1649,44 +1694,15 @@ export function createApiManager(appContext) {
       });
     }
 
-    // 自定义参数处理
+    // 自定义参数处理：失焦/变更后统一格式化为缩进 JSON。
+    customParamsInput.addEventListener('focus', () => {
+      customParamsValueBeforeEdit = lastFormattedCustomParams;
+    });
     customParamsInput.addEventListener('change', () => {
-      apiConfigs[index].customParams = customParamsInput.value;
-      saveAPIConfigs();
+      commitCustomParamsFormatted({ persist: true });
     });
     customParamsInput.addEventListener('blur', () => {
-      const value = customParamsInput.value.trim();
-       const errorElemId = `custom-params-error-${index}`;
-       let errorElem = customParamsInput.parentNode.querySelector(`#${errorElemId}`);
-
-      if (value === "") {
-        customParamsInput.style.borderColor = "";
-        if (errorElem) errorElem.remove();
-        apiConfigs[index].customParams = "";
-        saveAPIConfigs();
-        return;
-      }
-      try {
-        const parsed = JSON.parse(value);
-        customParamsInput.value = JSON.stringify(parsed, null, 2);
-        apiConfigs[index].customParams = customParamsInput.value;
-        if (errorElem) errorElem.remove();
-        customParamsInput.style.borderColor = "";
-        saveAPIConfigs();
-      } catch (e) {
-        customParamsInput.style.borderColor = "red";
-        if (!errorElem) {
-          errorElem = document.createElement("div");
-          errorElem.id = errorElemId; // 添加唯一ID
-          errorElem.className = "custom-params-error";
-          errorElem.style.color = "red";
-          errorElem.style.fontSize = "12px";
-          errorElem.style.marginTop = "4px";
-          customParamsInput.parentNode.appendChild(errorElem);
-        }
-        errorElem.textContent = "格式化失败：请检查 JSON 格式";
-        console.error("自定义参数格式化失败:", e);
-      }
+      commitCustomParamsFormatted({ persist: true });
     });
 
     // 自定义提示词处理（不做 JSON 校验，仅保存文本）

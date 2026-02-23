@@ -2551,19 +2551,20 @@ input:checked + .slider::before {
 /* 让右侧自定义参数区域撑满与左侧等高 */
 .api-card.expanded .api-form-right {
     min-height: 100%;
-}
-.api-card.expanded .api-form-right .custom-params {
-    height: 100%;
+    display: grid;
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    gap: 10px;
 }
 .api-card.expanded .api-form-right .custom-params-group,
-.api-card.expanded .api-form-right .custom-system-prompt-group {
+.api-card.expanded .api-form-right .custom-system-prompt-group,
+.api-card.expanded .api-form-right .user-message-template-group {
     display: flex;
     flex-direction: column;
-    flex: 1 1 0;
     min-height: 0;
 }
 .api-card.expanded .api-form-right .custom-params,
-.api-card.expanded .api-form-right .custom-system-prompt {
+.api-card.expanded .api-form-right .custom-system-prompt,
+.api-card.expanded .api-form-right .user-message-template {
     flex: 1 1 auto;
     min-height: 0;
 }
@@ -2603,21 +2604,15 @@ input:checked + .slider::before {
     opacity: 0.68;
 }
 
-.custom-params-group textarea.custom-params {
-    min-height: 140px;
-    resize: none;
-    overflow: auto;
-}
-.custom-system-prompt-group textarea.custom-system-prompt {
-    min-height: 140px;
-    resize: none;
-    overflow: auto;
-}
-
+.custom-params-group textarea.custom-params,
+.custom-system-prompt-group textarea.custom-system-prompt,
 .user-message-template-group textarea.user-message-template {
-    min-height: 120px;
+    min-height: 0;
+    height: 100%;
     resize: none;
     overflow: auto;
+    font-size: 13px;
+    line-height: 1.5;
 }
 
 .user-message-template-options {
@@ -6066,7 +6061,8 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 }
 
 .api-card .custom-params,
-.api-card .custom-system-prompt {
+.api-card .custom-system-prompt,
+.api-card .user-message-template {
     min-height: calc(3rem + 12px);
     padding: 6px 8px;
     border-radius: 4px;
@@ -6077,11 +6073,6 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     line-height: 1.4;
     resize: vertical;
     transition: all 0.2s ease;
-}
-
-/* 展开时，右列两个文本区域平分可用高度 */
-.api-card.expanded .api-form-right {
-    display: flex;
 }
 
 /* 新增截屏按钮样式 */
