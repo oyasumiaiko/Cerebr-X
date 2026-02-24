@@ -1369,8 +1369,8 @@ html:not(.fullscreen-mode) body.thread-mode-active #thread-container {
 #input-container {
     padding: 0;
     background-color: var(--cerebr-input-bg);
-    backdrop-filter: blur(var(--cerebr-main-ui-blur-radius, 0px));
-    -webkit-backdrop-filter: blur(var(--cerebr-main-ui-blur-radius, 0px));
+    /* backdrop-filter: blur(var(--cerebr-main-ui-blur-radius, 0px));
+    -webkit-backdrop-filter: blur(var(--cerebr-main-ui-blur-radius, 0px)); */
     display: flex;
     flex-direction: column;
     align-items: flex-start;
