@@ -591,31 +591,32 @@ export function createUIManager(appContext) {
       return null;
     };
 
-    // 按住 Alt 时使用加速滚动，提高浏览长对话的效率
-    container.addEventListener('wheel', (e) => {
-      if (!e.altKey) {
-        // 普通滚轮路径：不做 Alt 相关分流与归一化，保持最小开销。
-        if (mainAltScrollState.raf) {
-          stopMainAltScrollAnimation();
-        }
-        if (nestedAltScrollState.raf) {
-          stopNestedAltScrollAnimation();
-        }
+    const handleRegularWheel = (e) => {
+      if (e.altKey) return;
+      // 普通滚轮路径保持 passive，避免容器长期处于“滚动阻塞”状态。
+      if (mainAltScrollState.raf) {
+        stopMainAltScrollAnimation();
+      }
+      if (nestedAltScrollState.raf) {
+        stopNestedAltScrollAnimation();
+      }
 
-        const effectiveDeltaY = e.deltaY;
-        if (effectiveDeltaY < 0) {
-          messageSender.setShouldAutoScroll(false);
-          return;
-        }
-        if (effectiveDeltaY > 0) {
-          const effectiveScrollTop = Math.max(0, container.scrollTop || 0);
-          const distanceFromBottom = container.scrollHeight - effectiveScrollTop - container.clientHeight;
-          if (distanceFromBottom < AUTO_SCROLL_THRESHOLD) {
-            messageSender.setShouldAutoScroll(true);
-          }
-        }
+      const effectiveDeltaY = e.deltaY;
+      if (effectiveDeltaY < 0) {
+        messageSender.setShouldAutoScroll(false);
         return;
       }
+      if (effectiveDeltaY > 0) {
+        const effectiveScrollTop = Math.max(0, container.scrollTop || 0);
+        const distanceFromBottom = container.scrollHeight - effectiveScrollTop - container.clientHeight;
+        if (distanceFromBottom < AUTO_SCROLL_THRESHOLD) {
+          messageSender.setShouldAutoScroll(true);
+        }
+      }
+    };
+
+    const handleAltAcceleratedWheel = (e) => {
+      if (!e.altKey) return;
 
       const nestedScrollable = resolveAltWheelNestedScrollable(e.target);
       if (nestedScrollable) {
@@ -631,16 +632,13 @@ export function createUIManager(appContext) {
         return;
       }
 
-      let effectiveDeltaY = e.deltaY;
-      let projectedScrollTop = Math.max(0, container.scrollTop || 0);
-
       e.preventDefault();
       const acceleratedDeltaY = normalizeWheelDelta(e.deltaY, e.deltaMode) * ALT_SCROLL_MULTIPLIER;
       const acceleratedDeltaX = normalizeWheelDelta(e.deltaX, e.deltaMode) * ALT_SCROLL_MULTIPLIER;
 
       stopNestedAltScrollAnimation();
-      projectedScrollTop = animateMainAltScrollBy(acceleratedDeltaY, acceleratedDeltaX);
-      effectiveDeltaY = acceleratedDeltaY || 0;
+      const projectedScrollTop = animateMainAltScrollBy(acceleratedDeltaY, acceleratedDeltaX);
+      const effectiveDeltaY = acceleratedDeltaY || 0;
 
       if (effectiveDeltaY < 0) {
         messageSender.setShouldAutoScroll(false);
@@ -648,15 +646,43 @@ export function createUIManager(appContext) {
       }
 
       if (effectiveDeltaY > 0) {
-        const effectiveScrollTop = e.altKey ? projectedScrollTop : Math.max(0, container.scrollTop || 0);
-        const distanceFromBottom = container.scrollHeight - effectiveScrollTop - container.clientHeight;
+        const distanceFromBottom = container.scrollHeight - projectedScrollTop - container.clientHeight;
         if (distanceFromBottom < AUTO_SCROLL_THRESHOLD) {
           messageSender.setShouldAutoScroll(true);
         } else {
           messageSender.setShouldAutoScroll(false);
         }
       }
-    }, { passive: false });
+    };
+
+    let altWheelCaptureEnabled = false;
+    const enableAltWheelCapture = () => {
+      if (altWheelCaptureEnabled) return;
+      container.addEventListener('wheel', handleAltAcceleratedWheel, { passive: false });
+      altWheelCaptureEnabled = true;
+    };
+    const disableAltWheelCapture = () => {
+      if (!altWheelCaptureEnabled) return;
+      container.removeEventListener('wheel', handleAltAcceleratedWheel, { passive: false });
+      altWheelCaptureEnabled = false;
+    };
+
+    const handleWindowKeyDownForAltWheel = (event) => {
+      if (event.key === 'Alt') {
+        enableAltWheelCapture();
+      }
+    };
+    const handleWindowKeyUpForAltWheel = (event) => {
+      if (event.key === 'Alt') {
+        disableAltWheelCapture();
+      }
+    };
+
+    // 默认滚动路径始终 passive，仅在 Alt 按下时临时启用非被动监听。
+    container.addEventListener('wheel', handleRegularWheel, { passive: true });
+    window.addEventListener('keydown', handleWindowKeyDownForAltWheel, { passive: true });
+    window.addEventListener('keyup', handleWindowKeyUpForAltWheel, { passive: true });
+    window.addEventListener('blur', disableAltWheelCapture, { passive: true });
 
     container.addEventListener('mousedown', (e) => {
       stopMainAltScrollAnimation();

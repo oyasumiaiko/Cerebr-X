@@ -1335,42 +1335,55 @@
       const container = state.container;
       const isThreadState = state.key === 'thread';
       const threadModeActive = isThreadModeActive();
+      const modeEnabled = featureEnabled && fullscreenEnabled && (!isThreadState || threadModeActive);
+      if (!modeEnabled) {
+        setMinimapVisible(state, false);
+        return;
+      }
+
       const minimapSide = resolveMinimapSide(state, threadModeActive);
       const containerRect = container.getBoundingClientRect();
       const containerVisible = containerRect.width > 1 && containerRect.height > 1;
       const { trackHeight } = syncMinimapGeometry(state, minimapWidth, minimapSide);
+      if (!containerVisible || trackHeight < MINIMAP_MIN_HEIGHT) {
+        setMinimapVisible(state, false);
+        return;
+      }
+
+      const clientHeight = Math.max(0, container.clientHeight || 0);
+      const nativeScrollHeight = Math.max(0, container.scrollHeight || 0);
+      const quickScrollHeight = Math.max(clientHeight, nativeScrollHeight);
+      const canUseCachedContext = !state.needsMapRedraw
+        && !!state.renderContext
+        && state.lastClientHeight === clientHeight
+        && state.lastScrollHeight === quickScrollHeight
+        && state.lastMessageMode === messageDisplayMode
+        && state.lastMessageCount > 0;
+
+      // 滚动过程中优先走“只更新 thumb”的轻量路径，避免每帧遍历全部消息触发同步布局。
+      if (canUseCachedContext) {
+        setMinimapVisible(state, true);
+        updateMinimapThumb(state, trackHeight, state.renderContext);
+        return;
+      }
+
       const messages = collectDirectMessageElements(container);
       const messageCount = messages.length;
       const scrollHeight = resolveScrollableContentHeight(container);
-      const clientHeight = Math.max(0, container.clientHeight || 0);
-      const renderContext = buildMinimapRenderContext(messages, scrollHeight, clientHeight, messageDisplayMode);
-      state.renderContext = renderContext;
       const hasOverflow = scrollHeight > clientHeight + 1;
-      const shouldShow = featureEnabled
-        && fullscreenEnabled
-        && containerVisible
-        && (!isThreadState || threadModeActive)
-        && hasOverflow
-        && messageCount > 0
-        && trackHeight >= MINIMAP_MIN_HEIGHT;
+      const shouldShow = hasOverflow && messageCount > 0;
 
       setMinimapVisible(state, shouldShow);
       if (!shouldShow) return;
 
-      const metricsChanged = scrollHeight !== state.lastScrollHeight
-        || clientHeight !== state.lastClientHeight
-        || messageCount !== state.lastMessageCount
-        || messageDisplayMode !== state.lastMessageMode;
-      if (metricsChanged) state.needsMapRedraw = true;
-
-      if (state.needsMapRedraw) {
-        drawMinimapOverview(state, messages, trackHeight, renderContext);
-        state.needsMapRedraw = false;
-        state.lastScrollHeight = scrollHeight;
-        state.lastClientHeight = clientHeight;
-        state.lastMessageCount = messageCount;
-        state.lastMessageMode = messageDisplayMode;
-      }
+      const renderContext = buildMinimapRenderContext(messages, scrollHeight, clientHeight, messageDisplayMode);
+      state.renderContext = renderContext;
+      drawMinimapOverview(state, messages, trackHeight, renderContext);
+      state.needsMapRedraw = false;
+      state.lastScrollHeight = quickScrollHeight;
+      state.lastClientHeight = clientHeight;
+      state.lastMessageCount = messageCount;
+      state.lastMessageMode = messageDisplayMode;
 
       updateMinimapThumb(state, trackHeight, renderContext);
     }
