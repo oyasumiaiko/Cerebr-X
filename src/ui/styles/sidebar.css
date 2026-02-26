@@ -2776,6 +2776,53 @@ input:checked + .slider::before {
     opacity: 0.8;
 }
 
+.model-list-refresh-btn {
+    min-height: 24px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--cerebr-control-border);
+    background: transparent;
+    color: var(--cerebr-text-color);
+    font-size: 12px;
+    line-height: 1;
+    box-shadow: none;
+}
+
+.model-list-refresh-btn:hover {
+    background: var(--cerebr-control-bg-hover);
+    border-color: var(--cerebr-control-border-hover);
+}
+
+.model-list-refresh-btn:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+}
+
+.model-list-select {
+    margin-top: 6px;
+}
+
+.model-list-hint {
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    opacity: 0.68;
+}
+
+.model-list-hint.loading {
+    opacity: 0.86;
+}
+
+.model-list-hint.success {
+    opacity: 0.9;
+    color: color-mix(in srgb, var(--cerebr-status-success) 78%, var(--cerebr-text-color) 22%);
+}
+
+.model-list-hint.error {
+    opacity: 0.95;
+    color: color-mix(in srgb, var(--cerebr-status-warning) 86%, var(--cerebr-text-color) 14%);
+}
+
 .api-key-file-path-hint {
     margin-top: 4px;
     font-size: 12px;

@@ -70,6 +70,7 @@ export function createApiManager(appContext) {
   // 连接源配置区展开状态：默认折叠，减少设置页初始高度占用。
   let isConnectionSourcesPanelExpanded = false;
   const DELETE_CONFIRM_TIMEOUT_MS = 2600;
+  const MODEL_LIST_FETCH_TIMEOUT_MS = 15000;
 
   const {
     dom,
@@ -1462,6 +1463,276 @@ export function createApiManager(appContext) {
     return JSON.stringify([connectionType, normalizedBaseUrl, normalizedFilePath, normalizedKeys]);
   }
 
+  function normalizeUrlPathname(pathname) {
+    const raw = (typeof pathname === 'string') ? pathname.trim() : '';
+    if (!raw || raw === '/') return '';
+    const noTrailingSlash = raw.replace(/\/+$/, '');
+    return noTrailingSlash.startsWith('/') ? noTrailingSlash : `/${noTrailingSlash}`;
+  }
+
+  function appendUrlPathname(basePath, segment) {
+    const normalizedBasePath = normalizeUrlPathname(basePath);
+    const normalizedSegment = String(segment || '').replace(/^\/+/, '');
+    if (!normalizedSegment) return normalizedBasePath || '/';
+    if (!normalizedBasePath) return `/${normalizedSegment}`;
+    return `${normalizedBasePath}/${normalizedSegment}`;
+  }
+
+  function parseHttpBaseUrl(baseUrl) {
+    const raw = (typeof baseUrl === 'string') ? baseUrl.trim() : '';
+    if (!raw) return null;
+    try {
+      const parsed = new URL(raw);
+      const protocol = String(parsed.protocol || '').toLowerCase();
+      if (protocol !== 'http:' && protocol !== 'https:') return null;
+      return parsed;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function buildOpenAIModelListPaths(basePath) {
+    const normalizedBasePath = normalizeUrlPathname(basePath);
+    const seen = new Set();
+    const result = [];
+    const push = (path) => {
+      const normalized = normalizeUrlPathname(path) || '/';
+      if (seen.has(normalized)) return;
+      seen.add(normalized);
+      result.push(normalized);
+    };
+
+    const withoutKnownSuffix = normalizedBasePath
+      .replace(/\/chat\/completions(?:\/.*)?$/i, '')
+      .replace(/\/responses(?:\/.*)?$/i, '')
+      .replace(/\/completions(?:\/.*)?$/i, '');
+
+    if (/\/models$/i.test(normalizedBasePath)) {
+      push(normalizedBasePath);
+    }
+    if (withoutKnownSuffix) {
+      push(appendUrlPathname(withoutKnownSuffix, 'models'));
+    }
+
+    const versionHintPath = withoutKnownSuffix || normalizedBasePath;
+    const versionMatch = versionHintPath.match(/^(.*\/v\d+(?:alpha|beta)?)(?:\/.*)?$/i);
+    if (versionMatch?.[1]) {
+      push(appendUrlPathname(versionMatch[1], 'models'));
+    }
+
+    push('/v1/models');
+    push('/models');
+    return result;
+  }
+
+  function buildGeminiModelListPath(basePath) {
+    // Gemini 模型列表严格固定为 v1beta/models，只构造一个请求地址，避免多端点探测。
+    const normalizedBasePath = normalizeUrlPathname(basePath).replace(/:(streamGenerateContent|generateContent)$/i, '');
+    const trimmed = normalizedBasePath
+      .replace(/\/models\/[^/]+$/i, '')
+      .replace(/\/models$/i, '')
+      .replace(/\/v1beta$/i, '');
+    if (!trimmed) return '/v1beta/models';
+    return appendUrlPathname(trimmed, 'v1beta/models');
+  }
+
+  function buildModelListRequestCandidates(config, selectedKey) {
+    const connectionType = getConfigConnectionType(config);
+    const normalizedBaseUrl = normalizeConfigBaseUrlByConnection(connectionType, config?.baseUrl);
+    const parsedBase = parseHttpBaseUrl(normalizedBaseUrl);
+    if (!parsedBase) return [];
+
+    const pathCandidates = connectionType === CONNECTION_TYPE_GEMINI
+      ? [buildGeminiModelListPath(parsedBase.pathname || '/')]
+      : buildOpenAIModelListPaths(parsedBase.pathname || '/');
+
+    const seen = new Set();
+    const candidates = [];
+    pathCandidates.forEach((path) => {
+      const endpoint = new URL(parsedBase.toString());
+      endpoint.pathname = path;
+      endpoint.hash = '';
+      if (connectionType === CONNECTION_TYPE_GEMINI) {
+        if (endpoint.searchParams.get('alt') === 'sse') {
+          endpoint.searchParams.delete('alt');
+        }
+        if (selectedKey) {
+          endpoint.searchParams.set('key', selectedKey);
+        }
+      }
+      const finalUrl = endpoint.toString();
+      if (seen.has(finalUrl)) return;
+      seen.add(finalUrl);
+
+      const headers = { Accept: 'application/json' };
+      if (connectionType !== CONNECTION_TYPE_GEMINI && selectedKey) {
+        headers.Authorization = `Bearer ${selectedKey}`;
+      }
+      candidates.push({ url: finalUrl, headers });
+    });
+    return candidates;
+  }
+
+  function pickApiKeyForModelListing(config, keys) {
+    const normalizedKeys = normalizeApiKeys(keys);
+    if (normalizedKeys.length <= 0) return '';
+    if (normalizedKeys.length === 1) return normalizedKeys[0];
+    const configId = getConfigIdentifier(config || {});
+    const startIndex = Number.isFinite(apiKeyUsageIndex[configId]) ? apiKeyUsageIndex[configId] : 0;
+    const nextIndex = getNextUsableKeyIndex({ ...config, apiKey: normalizedKeys }, startIndex);
+    if (nextIndex < 0) return normalizedKeys[0];
+    apiKeyUsageIndex[configId] = (nextIndex + 1) % normalizedKeys.length;
+    return normalizedKeys[nextIndex];
+  }
+
+  async function fetchJsonWithTimeout(url, options = {}, timeoutMs = MODEL_LIST_FETCH_TIMEOUT_MS) {
+    const safeTimeout = Math.max(1000, Number(timeoutMs) || MODEL_LIST_FETCH_TIMEOUT_MS);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), safeTimeout);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      const text = await response.text();
+      if (!text) {
+        return { response, payload: null, parseError: null };
+      }
+      try {
+        const payload = JSON.parse(text);
+        return { response, payload, parseError: null };
+      } catch (error) {
+        return { response, payload: null, parseError: error };
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function collectModelEntries(payload) {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== 'object') return [];
+    const queue = [payload];
+    const visited = new Set();
+    const listKeys = ['data', 'models', 'items', 'results', 'model_list', 'modelList'];
+    const nestedKeys = ['result', 'response', 'output', 'payload'];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current || typeof current !== 'object') continue;
+      if (visited.has(current)) continue;
+      visited.add(current);
+
+      for (const key of listKeys) {
+        if (Array.isArray(current[key])) {
+          return current[key];
+        }
+      }
+      nestedKeys.forEach((key) => {
+        const nested = current[key];
+        if (nested && typeof nested === 'object') queue.push(nested);
+      });
+    }
+    return [];
+  }
+
+  function extractModelOption(entry, connectionType) {
+    if (typeof entry === 'string') {
+      const rawId = entry.trim();
+      if (!rawId) return null;
+      const normalizedId = connectionType === CONNECTION_TYPE_GEMINI ? normalizeGeminiModelName(rawId) : rawId;
+      if (!normalizedId) return null;
+      return { id: normalizedId, label: normalizedId };
+    }
+    if (!entry || typeof entry !== 'object') return null;
+    const rawId = [
+      entry.id,
+      entry.model,
+      entry.name,
+      entry.modelId,
+      entry.model_id,
+      entry.slug
+    ].find(value => (typeof value === 'string') && value.trim());
+    if (!rawId) return null;
+    const normalizedId = connectionType === CONNECTION_TYPE_GEMINI
+      ? normalizeGeminiModelName(rawId)
+      : String(rawId).trim();
+    if (!normalizedId) return null;
+
+    const displayName = [
+      entry.displayName,
+      entry.display_name,
+      entry.title,
+      entry.label
+    ].find(value => (typeof value === 'string') && value.trim());
+    const normalizedDisplayName = (typeof displayName === 'string') ? displayName.trim() : '';
+    const label = normalizedDisplayName
+      && normalizedDisplayName.toLowerCase() !== normalizedId.toLowerCase()
+      ? `${normalizedDisplayName} (${normalizedId})`
+      : normalizedId;
+    return { id: normalizedId, label };
+  }
+
+  function normalizeModelOptionsFromPayload(payload, connectionType) {
+    const entries = collectModelEntries(payload);
+    const optionById = new Map();
+    entries.forEach((entry) => {
+      const option = extractModelOption(entry, connectionType);
+      if (!option) return;
+      const key = option.id.toLowerCase();
+      if (!optionById.has(key)) optionById.set(key, option);
+    });
+    return Array.from(optionById.values()).sort((a, b) =>
+      a.id.localeCompare(b.id, 'en', { sensitivity: 'base' }));
+  }
+
+  // 模型列表接口在不同服务商上的路径风格不一致：
+  // - Gemini：固定只请求 v1beta/models（单端点，不探测其它路径）；
+  // - OpenAI 兼容 / Responses：保留候选路径探测以兼容不同网关实现。
+  async function fetchModelOptionsForConfig(config) {
+    const effectiveConfig = resolveEffectiveConfig(config) || config || {};
+    const connectionType = getConfigConnectionType(effectiveConfig);
+    const resolvedKeys = await resolveRuntimeApiKeys(effectiveConfig, () => {});
+    const selectedKey = pickApiKeyForModelListing(effectiveConfig, resolvedKeys?.keys || []);
+    const candidates = buildModelListRequestCandidates(effectiveConfig, selectedKey);
+    if (candidates.length <= 0) {
+      return { ok: false, options: [], endpoint: '', error: '端点 URL 无效，无法拉取模型列表。' };
+    }
+
+    let lastError = '';
+    for (const candidate of candidates) {
+      try {
+        const { response, payload, parseError } = await fetchJsonWithTimeout(candidate.url, {
+          method: 'GET',
+          headers: candidate.headers,
+          cache: 'no-store'
+        });
+        if (!response?.ok) {
+          lastError = `HTTP ${response?.status || 0}（${candidate.url}）`;
+          continue;
+        }
+        if (parseError || !payload) {
+          lastError = `响应不是有效 JSON（${candidate.url}）`;
+          continue;
+        }
+        const options = normalizeModelOptionsFromPayload(payload, connectionType);
+        if (options.length > 0) {
+          return { ok: true, options, endpoint: candidate.url, error: '' };
+        }
+        lastError = `未从响应中识别到模型列表（${candidate.url}）`;
+      } catch (error) {
+        if (error?.name === 'AbortError') {
+          lastError = `请求超时（${candidate.url}）`;
+        } else {
+          lastError = `${error?.message || '请求失败'}（${candidate.url}）`;
+        }
+      }
+    }
+
+    return {
+      ok: false,
+      options: [],
+      endpoint: candidates[candidates.length - 1]?.url || '',
+      error: lastError || '模型列表请求失败'
+    };
+  }
+
   // 将卡片索引安全转为数字，非法值返回 null。
   function parseCardIndex(value) {
     const index = Number.parseInt(value, 10);
@@ -1783,6 +2054,9 @@ export function createApiManager(appContext) {
     const connectionSourceHint = template.querySelector('.connection-source-hint');
     const displayNameInput = template.querySelector('.display-name');
     const modelNameInput = template.querySelector('.model-name');
+    const modelListRefreshBtn = template.querySelector('.model-list-refresh-btn');
+    const modelListSelect = template.querySelector('.model-list-select');
+    const modelListHint = template.querySelector('.model-list-hint');
     const temperatureInput = template.querySelector('.temperature');
     const temperatureValue = template.querySelector('.temperature-value');
     const apiForm = template.querySelector('.api-form');
@@ -1836,6 +2110,103 @@ export function createApiManager(appContext) {
       const sourceLabel = getConnectionTypeDisplayLabel(sourceType);
       connectionSourceHint.textContent = `${sourceLabel} · ${sourceBaseUrl || '未设置端点'} · 统一复用鉴权`;
       updateCardTitle();
+    };
+    let loadedModelOptions = [];
+    const setModelListHint = (message, state = '') => {
+      if (!modelListHint) return;
+      modelListHint.textContent = message || '';
+      modelListHint.classList.remove('loading', 'success', 'error');
+      if (state === 'loading' || state === 'success' || state === 'error') {
+        modelListHint.classList.add(state);
+      }
+    };
+    const refreshModelListSelect = () => {
+      if (!modelListSelect || !modelNameInput) return;
+      const currentModelName = (modelNameInput.value || '').trim();
+      modelListSelect.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = loadedModelOptions.length > 0
+        ? '从列表选择模型（可选）'
+        : '暂无模型列表（可手动输入）';
+      modelListSelect.appendChild(placeholder);
+
+      loadedModelOptions.forEach((item) => {
+        const option = document.createElement('option');
+        option.value = item.id;
+        option.textContent = item.label || item.id;
+        modelListSelect.appendChild(option);
+      });
+
+      if (currentModelName) {
+        const matched = loadedModelOptions.find(item => item.id === currentModelName);
+        if (matched) {
+          modelListSelect.value = matched.id;
+        } else {
+          const currentOption = document.createElement('option');
+          currentOption.value = currentModelName;
+          currentOption.textContent = `当前模型：${currentModelName}（未在列表中）`;
+          modelListSelect.appendChild(currentOption);
+          modelListSelect.value = currentModelName;
+        }
+      } else {
+        modelListSelect.value = '';
+      }
+      modelListSelect.disabled = loadedModelOptions.length <= 0;
+    };
+    const setModelListLoading = (isLoading) => {
+      if (modelListRefreshBtn) {
+        modelListRefreshBtn.disabled = !!isLoading;
+        modelListRefreshBtn.textContent = isLoading ? '加载中…' : '刷新列表';
+      }
+      if (modelListSelect) {
+        modelListSelect.disabled = !!isLoading || loadedModelOptions.length <= 0;
+      }
+    };
+    const resetModelListUi = () => {
+      loadedModelOptions = [];
+      refreshModelListSelect();
+      setModelListHint('可手动输入，或点击“刷新列表”自动拉取。');
+    };
+    const loadModelList = async () => {
+      const currentConfig = apiConfigs[index] || config || {};
+      const effectiveConfig = resolveEffectiveConfig(currentConfig) || currentConfig;
+      const effectiveBaseUrl = (typeof effectiveConfig?.baseUrl === 'string')
+        ? effectiveConfig.baseUrl.trim()
+        : '';
+      if (!effectiveBaseUrl) {
+        loadedModelOptions = [];
+        refreshModelListSelect();
+        setModelListHint('请先为该 API 绑定连接源并设置端点 URL。', 'error');
+        return;
+      }
+
+      setModelListLoading(true);
+      setModelListHint('正在拉取模型列表…', 'loading');
+      try {
+        const result = await fetchModelOptionsForConfig(effectiveConfig);
+        if (!template.isConnected) return;
+        if (!result.ok) {
+          loadedModelOptions = [];
+          refreshModelListSelect();
+          setModelListHint(result.error || '拉取模型列表失败', 'error');
+          return;
+        }
+        loadedModelOptions = result.options;
+        refreshModelListSelect();
+        let sourceHost = '';
+        try {
+          sourceHost = (new URL(result.endpoint)).host;
+        } catch (_) {
+          sourceHost = result.endpoint || '';
+        }
+        const suffix = sourceHost ? `（${sourceHost}）` : '';
+        setModelListHint(`已加载 ${loadedModelOptions.length} 个模型${suffix}`, 'success');
+      } finally {
+        if (template.isConnected) {
+          setModelListLoading(false);
+        }
+      }
     };
     const customParamsErrorElemId = `custom-params-error-${index}`;
     let lastFormattedCustomParams = '';
@@ -2066,6 +2437,7 @@ export function createApiManager(appContext) {
     if (userMessageTemplateHelpBtn) {
       userMessageTemplateHelpBtn.title = USER_MESSAGE_TEMPLATE_HELP_TEXT;
     }
+    resetModelListUi();
 
     // 监听温度变化
     temperatureInput.addEventListener('input', (e) => {
@@ -2091,6 +2463,25 @@ export function createApiManager(appContext) {
       saveAPIConfigs();
       renderFavoriteApis();
     });
+
+    if (modelListRefreshBtn) {
+      modelListRefreshBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await loadModelList();
+      });
+    }
+    if (modelListSelect) {
+      modelListSelect.addEventListener('change', () => {
+        if (!modelNameInput) return;
+        const selectedModelName = (modelListSelect.value || '').trim();
+        if (!selectedModelName) return;
+        if ((modelNameInput.value || '').trim() !== selectedModelName) {
+          modelNameInput.value = selectedModelName;
+          saveCardBasicFields();
+        }
+        setModelListHint(`已选择模型：${selectedModelName}`, 'success');
+      });
+    }
 
     // 阻止输入框和按钮点击事件冒泡
     const stopPropagation = (e) => e.stopPropagation();
@@ -2179,11 +2570,20 @@ export function createApiManager(appContext) {
       renderFavoriteApis();
     };
     if (connectionSourceSelect) {
-      connectionSourceSelect.addEventListener('change', saveCardBasicFields);
+      connectionSourceSelect.addEventListener('change', () => {
+        resetModelListUi();
+        saveCardBasicFields();
+      });
     }
-    [displayNameInput, modelNameInput].forEach(input => {
-      input.addEventListener('change', saveCardBasicFields);
-    });
+    if (displayNameInput) {
+      displayNameInput.addEventListener('change', saveCardBasicFields);
+    }
+    if (modelNameInput) {
+      modelNameInput.addEventListener('change', () => {
+        refreshModelListSelect();
+        saveCardBasicFields();
+      });
+    }
 
     // 自定义参数处理：失焦/变更后统一格式化为缩进 JSON。
     customParamsInput.addEventListener('focus', () => {
