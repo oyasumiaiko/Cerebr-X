@@ -525,6 +525,7 @@ export function createMessageSender(appContext) {
   function normalizeApiConnectionType(value) {
     const normalized = (typeof value === 'string') ? value.trim().toLowerCase() : '';
     if (normalized === 'gemini') return 'gemini';
+    if (normalized === 'openai_responses') return 'openai_responses';
     if (normalized === 'openai') return 'openai';
     return '';
   }
@@ -539,7 +540,7 @@ export function createMessageSender(appContext) {
   function isGeminiApiResponse(response, config) {
     const explicitType = normalizeApiConnectionType(config?.connectionType);
     if (explicitType === 'gemini') return true;
-    if (explicitType === 'openai') return false;
+    if (explicitType === 'openai' || explicitType === 'openai_responses') return false;
     if (isGeminiApiConfig(config)) return true;
     const url = (typeof response?.url === 'string') ? response.url.toLowerCase() : '';
     return url.includes('generativelanguage.googleapis.com') && !url.includes('openai');
@@ -562,6 +563,9 @@ export function createMessageSender(appContext) {
   }
 
   function isOpenAIResponsesApiConfig(config) {
+    const explicitType = normalizeApiConnectionType(config?.connectionType);
+    if (explicitType === 'openai_responses') return true;
+    if (explicitType === 'gemini') return false;
     if (isGeminiApiConfig(config)) return false;
     return isResponsesApiPath(normalizeApiPathForEndpointDetection(config?.baseUrl));
   }

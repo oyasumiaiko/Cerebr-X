@@ -275,13 +275,14 @@
                             <label>连接方式</label>
                             <select class="connection-source-type">
                                 <option value="openai">OpenAI 兼容</option>
+                                <option value="openai_responses">OpenAI Responses</option>
                                 <option value="gemini">Gemini</option>
                             </select>
                         </div>
                         <div class="connection-source-field">
                             <label class="connection-source-base-url-label">API 端点 URL</label>
                             <input type="text" class="connection-source-base-url" placeholder="输入 Base URL">
-                            <div class="connection-source-base-url-hint">OpenAI 兼容模式支持 chat/completions 与 responses；无 key 时会按免鉴权模式请求。</div>
+                            <div class="connection-source-base-url-hint">OpenAI 兼容模式走 chat/completions；无 key 时会按免鉴权模式请求。</div>
                         </div>
                         <div class="connection-source-field">
                             <label>API Key（可选，支持逗号分隔轮询）</label>

@@ -16,6 +16,7 @@ function normalizeApiBase(value) {
 function normalizeConnectionType(value) {
   const normalized = (typeof value === 'string') ? value.trim().toLowerCase() : '';
   if (normalized === 'gemini') return 'gemini';
+  if (normalized === 'openai_responses') return 'openai_responses';
   if (normalized === 'openai') return 'openai';
   return '';
 }
@@ -25,7 +26,7 @@ function normalizeConnectionType(value) {
  *
  * @param {{
  *   apiBase?: string,
- *   connectionType?: 'openai'|'gemini',
+ *   connectionType?: 'openai'|'openai_responses'|'gemini',
  *   geminiUseStreaming?: boolean,
  *   requestBodyStream?: boolean
  * }} [input]
@@ -41,7 +42,7 @@ export function resolveResponseHandlingMode(input = {}) {
   if (connectionType === 'gemini') {
     return geminiUseStreaming ? 'stream' : 'non_stream';
   }
-  if (connectionType === 'openai') {
+  if (connectionType === 'openai' || connectionType === 'openai_responses') {
     return requestBodyStream ? 'stream' : 'non_stream';
   }
   if (apiBase === 'genai') {

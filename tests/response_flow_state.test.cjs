@@ -42,6 +42,28 @@ test('resolveResponseHandlingMode follows requestBody.stream for non-Gemini APIs
   );
 });
 
+test('resolveResponseHandlingMode treats openai_responses as stream-gated by requestBody.stream', async () => {
+  const { resolveResponseHandlingMode } = await loadResponseFlowStateModule();
+
+  assert.equal(
+    resolveResponseHandlingMode({
+      apiBase: 'https://api.openai.com/v1/responses',
+      connectionType: 'openai_responses',
+      requestBodyStream: true
+    }),
+    'stream'
+  );
+
+  assert.equal(
+    resolveResponseHandlingMode({
+      apiBase: 'https://api.openai.com/v1/responses',
+      connectionType: 'openai_responses',
+      requestBodyStream: false
+    }),
+    'non_stream'
+  );
+});
+
 test('planStreamingRenderTransition keeps state on noop events', async () => {
   const { planStreamingRenderTransition } = await loadResponseFlowStateModule();
 

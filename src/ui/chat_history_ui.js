@@ -187,6 +187,7 @@ export function createChatHistoryUI(appContext) {
   function normalizeApiConnectionType(value) {
     const normalized = (typeof value === 'string') ? value.trim().toLowerCase() : '';
     if (normalized === 'gemini') return 'gemini';
+    if (normalized === 'openai_responses') return 'openai_responses';
     if (normalized === 'openai') return 'openai';
     return '';
   }
@@ -196,6 +197,7 @@ export function createChatHistoryUI(appContext) {
     if (explicit) return explicit;
     const baseUrl = typeof config?.baseUrl === 'string' ? config.baseUrl.trim().toLowerCase() : '';
     if (baseUrl === 'genai' || baseUrl.includes('generativelanguage.googleapis.com')) return 'gemini';
+    if (/(^|\/)responses(?:\/[^/?#]+)?\/?$/.test(baseUrl)) return 'openai_responses';
     return 'openai';
   }
 

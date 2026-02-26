@@ -133,6 +133,7 @@ function compactConversationApiLock(rawLock) {
   const normalizeConnectionType = (value) => {
     const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
     if (normalized === 'gemini') return 'gemini';
+    if (normalized === 'openai_responses') return 'openai_responses';
     if (normalized === 'openai') return 'openai';
     return '';
   };
@@ -145,6 +146,8 @@ function compactConversationApiLock(rawLock) {
   const normalizedBaseUrl = baseUrl.toLowerCase();
   if (!connectionType && (normalizedBaseUrl === 'genai' || normalizedBaseUrl.includes('generativelanguage.googleapis.com'))) {
     connectionType = 'gemini';
+  } else if (!connectionType && /(^|\/)responses(?:\/[^/?#]+)?\/?$/.test(normalizedBaseUrl)) {
+    connectionType = 'openai_responses';
   }
   if (!id && !connectionSourceId && !displayName && !modelName && !baseUrl) return null;
   return { id, connectionSourceId, displayName, modelName, baseUrl, connectionType };

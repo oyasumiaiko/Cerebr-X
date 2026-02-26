@@ -41,9 +41,11 @@ const USER_MESSAGE_TEMPLATE_INJECT_SNIPPET = [
   '{{/user}}'
 ].join('\n');
 const CONNECTION_TYPE_OPENAI = 'openai';
+const CONNECTION_TYPE_OPENAI_RESPONSES = 'openai_responses';
 const CONNECTION_TYPE_GEMINI = 'gemini';
 const GEMINI_LEGACY_BASE_URL = 'genai';
 const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1/chat/completions';
+const OPENAI_RESPONSES_DEFAULT_BASE_URL = 'https://api.openai.com/v1/responses';
 const GEMINI_DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com';
 const CONNECTION_SOURCE_DEFAULT_NAME_PREFIX = '连接源';
 
@@ -112,6 +114,7 @@ export function createApiManager(appContext) {
   function normalizeConnectionType(rawType) {
     const normalized = (typeof rawType === 'string') ? rawType.trim().toLowerCase() : '';
     if (normalized === CONNECTION_TYPE_GEMINI) return CONNECTION_TYPE_GEMINI;
+    if (normalized === CONNECTION_TYPE_OPENAI_RESPONSES) return CONNECTION_TYPE_OPENAI_RESPONSES;
     if (normalized === CONNECTION_TYPE_OPENAI) return CONNECTION_TYPE_OPENAI;
     return '';
   }
@@ -124,6 +127,7 @@ export function createApiManager(appContext) {
     const normalizedBaseUrl = (typeof baseUrl === 'string') ? baseUrl.trim().toLowerCase() : '';
     if (normalizedBaseUrl === GEMINI_LEGACY_BASE_URL) return CONNECTION_TYPE_GEMINI;
     if (normalizedBaseUrl.includes('generativelanguage.googleapis.com')) return CONNECTION_TYPE_GEMINI;
+    if (isOpenAIResponsesEndpoint(baseUrl)) return CONNECTION_TYPE_OPENAI_RESPONSES;
     return CONNECTION_TYPE_OPENAI;
   }
 
@@ -136,7 +140,17 @@ export function createApiManager(appContext) {
       }
       return trimmed;
     }
+    if (normalizedType === CONNECTION_TYPE_OPENAI_RESPONSES) {
+      return trimmed || OPENAI_RESPONSES_DEFAULT_BASE_URL;
+    }
     return trimmed;
+  }
+
+  function getConnectionTypeDisplayLabel(connectionType) {
+    const normalizedType = normalizeConnectionType(connectionType) || CONNECTION_TYPE_OPENAI;
+    if (normalizedType === CONNECTION_TYPE_GEMINI) return 'Gemini';
+    if (normalizedType === CONNECTION_TYPE_OPENAI_RESPONSES) return 'OpenAI Responses';
+    return 'OpenAI 兼容';
   }
 
   function normalizeConnectionSourceName(name) {
@@ -151,7 +165,7 @@ export function createApiManager(appContext) {
     const normalizedBaseUrl = normalizeConfigBaseUrlByConnection(sourceConnectionType, source?.baseUrl);
     try {
       const parsed = new URL(normalizedBaseUrl);
-      const provider = sourceConnectionType === CONNECTION_TYPE_GEMINI ? 'Gemini' : 'OpenAI';
+      const provider = getConnectionTypeDisplayLabel(sourceConnectionType);
       return `${provider} @ ${parsed.host}`;
     } catch (_) {
       const fallbackName = normalizedBaseUrl || `#${index + 1}`;
@@ -887,6 +901,8 @@ export function createApiManager(appContext) {
     let normalizedBaseUrl = normalizeConfigBaseUrlByConnection(normalizedType, source?.baseUrl);
     if (!normalizedBaseUrl && normalizedType === CONNECTION_TYPE_OPENAI) {
       normalizedBaseUrl = OPENAI_DEFAULT_BASE_URL;
+    } else if (!normalizedBaseUrl && normalizedType === CONNECTION_TYPE_OPENAI_RESPONSES) {
+      normalizedBaseUrl = OPENAI_RESPONSES_DEFAULT_BASE_URL;
     }
     const normalizedName = normalizeConnectionSourceName(source?.name);
     return {
@@ -1533,11 +1549,17 @@ export function createApiManager(appContext) {
         if (baseUrlHint) {
           baseUrlHint.textContent = '支持官方地址与代理地址；支持 {model}/{action}/{method}/{key} 占位符。';
         }
+      } else if (normalizedType === CONNECTION_TYPE_OPENAI_RESPONSES) {
+        if (baseUrlLabel) baseUrlLabel.textContent = 'OpenAI Responses 端点 URL';
+        baseUrlInput.placeholder = `例如 ${OPENAI_RESPONSES_DEFAULT_BASE_URL}`;
+        if (baseUrlHint) {
+          baseUrlHint.textContent = 'Responses 模式会按 input 结构请求并解析 response.output_text.* 事件；无 key 时会按免鉴权模式请求。';
+        }
       } else {
         if (baseUrlLabel) baseUrlLabel.textContent = 'API 端点 URL';
         baseUrlInput.placeholder = `例如 ${OPENAI_DEFAULT_BASE_URL}`;
         if (baseUrlHint) {
-          baseUrlHint.textContent = 'OpenAI 兼容模式支持 chat/completions 与 responses；无 key 时会按免鉴权模式请求。';
+          baseUrlHint.textContent = 'OpenAI 兼容模式走 chat/completions；无 key 时会按免鉴权模式请求。';
         }
       }
     };
@@ -1574,6 +1596,8 @@ export function createApiManager(appContext) {
       let nextBaseUrl = normalizeConfigBaseUrlByConnection(nextType, baseUrlInput?.value || '');
       if (!nextBaseUrl && nextType === CONNECTION_TYPE_OPENAI) {
         nextBaseUrl = OPENAI_DEFAULT_BASE_URL;
+      } else if (!nextBaseUrl && nextType === CONNECTION_TYPE_OPENAI_RESPONSES) {
+        nextBaseUrl = OPENAI_RESPONSES_DEFAULT_BASE_URL;
       }
 
       let apiKeyValue = normalizeApiKeyValue(apiKeyInput?.value || '');
@@ -1809,7 +1833,7 @@ export function createApiManager(appContext) {
       connectionSourceHint.classList.remove('warning');
       const sourceType = normalizeConnectionType(selectedSource.connectionType) || inferConnectionTypeByBaseUrl(selectedSource.baseUrl);
       const sourceBaseUrl = normalizeConfigBaseUrlByConnection(sourceType, selectedSource.baseUrl);
-      const sourceLabel = sourceType === CONNECTION_TYPE_GEMINI ? 'Gemini' : 'OpenAI 兼容';
+      const sourceLabel = getConnectionTypeDisplayLabel(sourceType);
       connectionSourceHint.textContent = `${sourceLabel} · ${sourceBaseUrl || '未设置端点'} · 统一复用鉴权`;
       updateCardTitle();
     };
@@ -2574,7 +2598,14 @@ export function createApiManager(appContext) {
 
   function isOpenAIResponsesEndpoint(baseUrl) {
     const path = getOpenAIEndpointPath(baseUrl);
-    return /(^|\/)responses\/?$/.test(path);
+    return /(^|\/)responses(?:\/[^/?#]+)?\/?$/.test(path);
+  }
+
+  function isOpenAIResponsesConnectionConfig(config) {
+    if (!config || typeof config !== 'object') return false;
+    const connectionType = getConfigConnectionType(config);
+    if (connectionType === CONNECTION_TYPE_OPENAI_RESPONSES) return true;
+    return isOpenAIResponsesEndpoint(config?.baseUrl);
   }
 
   async function convertOpenAIMessagesToResponsesInput(messages) {
@@ -2944,7 +2975,7 @@ export function createApiManager(appContext) {
         return base;
       }));
 
-      const useResponsesApi = isOpenAIResponsesEndpoint(config?.baseUrl);
+      const useResponsesApi = isOpenAIResponsesConnectionConfig(config);
       if (useResponsesApi) {
         const responsesInput = await convertOpenAIMessagesToResponsesInput(sanitizedMessages);
         requestBody = {
@@ -3482,7 +3513,7 @@ export function createApiManager(appContext) {
   /**
    * 从部分配置信息中获取完整的 API 配置
    * @param {Object} partialConfig - 部分 API 配置信息
-   * @param {'openai'|'gemini'} [partialConfig.connectionType] - 连接方式（可选）
+   * @param {'openai'|'openai_responses'|'gemini'} [partialConfig.connectionType] - 连接方式（可选）
    * @param {string} partialConfig.baseUrl - API 基础 URL
    * @param {string} partialConfig.modelName - 模型名称
    * @param {string} [partialConfig.apiKeyFilePath] - 本地 Key 文件路径（可选）
