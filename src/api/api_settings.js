@@ -73,7 +73,7 @@ export function createApiManager(appContext) {
   let isConnectionSourcesPanelExpanded = false;
   const DELETE_CONFIRM_TIMEOUT_MS = 2600;
   const MODEL_LIST_FETCH_TIMEOUT_MS = 15000;
-  // 模型列表缓存（按 connectionSourceId 聚合），用于“打开 API 设置时一次性预取”。
+  // 模型列表缓存（按 connectionSourceId 聚合）：同一连接源下的所有 API 卡片共享一份模型列表。
   const modelListCacheBySourceId = new Map();
   const modelListPendingBySourceId = new Map();
 
@@ -1836,16 +1836,6 @@ export function createApiManager(appContext) {
     }
   }
 
-  async function prefetchModelOptionsForAllSources(options = {}) {
-    const force = !!options?.force;
-    const sourceIds = connectionSources
-      .map(source => normalizeConnectionSourceId(source?.id))
-      .filter(Boolean);
-    if (sourceIds.length <= 0) return;
-    await Promise.allSettled(sourceIds.map(sourceId =>
-      fetchModelOptionsForConnectionSource(sourceId, { force })));
-  }
-
   // 将卡片索引安全转为数字，非法值返回 null。
   function parseCardIndex(value) {
     const index = Number.parseInt(value, 10);
@@ -2007,9 +1997,6 @@ export function createApiManager(appContext) {
       };
       clearApiKeyFileCacheEntry({ connectionSourceId: source.id });
       invalidateModelListCacheForSource(sourceId);
-      void fetchModelOptionsForConnectionSource(sourceId, { force: true }).catch((error) => {
-        console.warn('连接源变更后预取模型列表失败（可忽略）:', error);
-      });
       saveAPIConfigs();
       renderConnectionSources();
       renderAPICards();
@@ -2253,18 +2240,21 @@ export function createApiManager(appContext) {
       });
     };
 
-    const ensureModelOptionsLoaded = () => {
+    const ensureModelOptionsLoaded = ({ force = false } = {}) => {
       const selectedSourceId = getSelectedSourceId();
       if (!selectedSourceId) {
         applyModelNameOptions();
         return;
       }
+      const cachedState = modelListCacheBySourceId.get(selectedSourceId);
       const cachedOptions = getModelOptionsBySourceId(selectedSourceId);
-      if (cachedOptions.length > 0) {
+      if (!force && cachedOptions.length > 0) {
         applyModelNameOptions();
         return;
       }
-      void fetchModelOptionsForConnectionSource(selectedSourceId, { force: false }).then(() => {
+      // 仅在用户点击模型输入框时才请求；若该源之前拉取失败，点击时允许强制重试。
+      const shouldForce = force || cachedState?.status === 'error';
+      void fetchModelOptionsForConnectionSource(selectedSourceId, { force: shouldForce }).then(() => {
         if (!template.isConnected) return;
         const latestSourceId = getSelectedSourceId();
         if (latestSourceId !== selectedSourceId) return;
@@ -2503,7 +2493,6 @@ export function createApiManager(appContext) {
       userMessageTemplateHelpBtn.title = USER_MESSAGE_TEMPLATE_HELP_TEXT;
     }
     applyModelNameOptions();
-    ensureModelOptionsLoaded();
 
     // 监听温度变化
     temperatureInput.addEventListener('input', (e) => {
@@ -2619,7 +2608,6 @@ export function createApiManager(appContext) {
     if (connectionSourceSelect) {
       connectionSourceSelect.addEventListener('change', () => {
         applyModelNameOptions();
-        ensureModelOptionsLoaded();
         saveCardBasicFields();
       });
     }
@@ -2627,6 +2615,10 @@ export function createApiManager(appContext) {
       displayNameInput.addEventListener('change', saveCardBasicFields);
     }
     if (modelNameInput) {
+      modelNameInput.addEventListener('click', () => {
+        applyModelNameOptions();
+        ensureModelOptionsLoaded({ force: false });
+      });
       modelNameInput.addEventListener('change', saveCardBasicFields);
     }
 
@@ -3869,11 +3861,6 @@ export function createApiManager(appContext) {
         await chatHistoryUI?.activateTab?.(targetTab);
       }
 
-      // 打开 API 设置时统一预取一次所有连接源的模型列表，确保各卡片的模型输入框可直接下拉选择。
-      void prefetchModelOptionsForAllSources({ force: true }).catch((error) => {
-        console.warn('预取模型列表失败（可忽略）:', error);
-      });
-
     });
 
     // 返回聊天界面
@@ -3903,9 +3890,6 @@ export function createApiManager(appContext) {
         connectionSources.push(nextSource);
         assignStableConnectionSourceNames(connectionSources);
         invalidateModelListCacheForSource(nextSource.id);
-        void fetchModelOptionsForConnectionSource(nextSource.id, { force: true }).catch((error) => {
-          console.warn('新增连接源后预取模型列表失败（可忽略）:', error);
-        });
         saveAPIConfigs();
         renderConnectionSources();
         renderAPICards();
