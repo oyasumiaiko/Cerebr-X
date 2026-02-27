@@ -6,6 +6,25 @@
 import { replacePlaceholders } from './prompt_resolver.js';
 
 const ROLE_BLOCK_REGEX = /{{#\s*message\b[^}]*\brole\s*=\s*["']?(user|assistant|system|ai|model)["']?[^}]*}}([\s\S]*?){{\/\s*message\s*}}|{{#\s*(user|assistant|system|ai|model)\s*}}([\s\S]*?){{\/\s*\3\s*}}/gi;
+const OMIT_DEFAULT_SYSTEM_PROMPT_MARKER_REGEX = /{{\s*no_system_prompt\s*}}/gi;
+
+/**
+ * 解析并剥离模板里的“控制标记”。
+ * 约定：
+ * - {{no_system_prompt}}：仅控制发送行为（不发送默认系统提示词），本身不会发给模型。
+ *
+ * @param {string} template
+ * @returns {{ templateText: string, omitDefaultSystemPrompt: boolean }}
+ */
+export function resolveUserMessageTemplateControls(template) {
+  const rawTemplate = (typeof template === 'string') ? template : '';
+  if (!rawTemplate) {
+    return { templateText: '', omitDefaultSystemPrompt: false };
+  }
+  const omitDefaultSystemPrompt = /{{\s*no_system_prompt\s*}}/i.test(rawTemplate);
+  const templateText = rawTemplate.replace(OMIT_DEFAULT_SYSTEM_PROMPT_MARKER_REGEX, '');
+  return { templateText, omitDefaultSystemPrompt };
+}
 
 function renderTemplateText(template, inputText) {
   const rawTemplate = (typeof template === 'string') ? template : '';
@@ -98,7 +117,8 @@ function buildTemplateMessages(renderedText) {
  * @returns {string}
  */
 export function renderUserMessageTemplate({ template, inputText }) {
-  return renderTemplateText(template, inputText);
+  const { templateText } = resolveUserMessageTemplateControls(template);
+  return renderTemplateText(templateText, inputText);
 }
 
 /**
@@ -113,13 +133,23 @@ export function renderUserMessageTemplate({ template, inputText }) {
  * @param {Object} args
  * @param {string} args.template
  * @param {string} args.inputText
- * @returns {{renderedText: string, injectedMessages: Array<{role: string, content: string}>, hasInjectedBlocks: boolean, injectOnly: boolean}}
+ * @returns {{renderedText: string, injectedMessages: Array<{role: string, content: string}>, hasInjectedBlocks: boolean, injectOnly: boolean, hasTemplate: boolean, omitDefaultSystemPrompt: boolean}}
  */
 export function renderUserMessageTemplateWithInjection({ template, inputText }) {
-  const rawTemplate = (typeof template === 'string') ? template : '';
-  const renderedText = renderTemplateText(template, inputText);
+  const {
+    templateText: rawTemplate,
+    omitDefaultSystemPrompt
+  } = resolveUserMessageTemplateControls(template);
+  const renderedText = renderTemplateText(rawTemplate, inputText);
   if (!rawTemplate.trim()) {
-    return { renderedText, injectedMessages: [], hasInjectedBlocks: false, injectOnly: false };
+    return {
+      renderedText,
+      injectedMessages: [],
+      hasInjectedBlocks: false,
+      injectOnly: false,
+      hasTemplate: false,
+      omitDefaultSystemPrompt
+    };
   }
 
   const { messages, hasRoleBlocks } = buildTemplateMessages(renderedText);
@@ -131,7 +161,9 @@ export function renderUserMessageTemplateWithInjection({ template, inputText }) 
     renderedText,
     injectedMessages,
     hasInjectedBlocks,
-    injectOnly
+    injectOnly,
+    hasTemplate: true,
+    omitDefaultSystemPrompt
   };
 }
 

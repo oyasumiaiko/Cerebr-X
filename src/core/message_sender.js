@@ -2723,6 +2723,7 @@ export function createMessageSender(appContext) {
    * @param {boolean} [options.forceSendFullHistory] - 是否强制发送完整历史
    * @param {Object|null} [options.pageContentSnapshot] - 若提供则使用该网页内容快照，避免再次获取
    * @param {Array<Object>|null} [options.conversationSnapshot] - 若提供则使用该会话历史快照（数组 of nodes）构建消息
+   * @param {boolean} [options.omitDefaultSystemPrompt] - 是否跳过“提示词设置”里的默认系统提示词
    * @returns {Promise<{ ok: true, apiConfig: Object } | { ok: false, error: Error, apiConfig: Object, retryHint: Object, retry: (delayMs?: number, override?: Object) => Promise<any> }>} 结果对象（供外部无状态重试）
    */
   async function sendMessageCore(options = {}) {
@@ -2740,6 +2741,7 @@ export function createMessageSender(appContext) {
       resolvedApiConfig = null,
       pageContentSnapshot = null,
       conversationSnapshot = null,
+      omitDefaultSystemPrompt: externalOmitDefaultSystemPrompt = false,
       aspectRatioOverride: externalAspectRatioOverride = null
     } = options;
 
@@ -2813,6 +2815,7 @@ export function createMessageSender(appContext) {
     let injectedMessages = [];
     let hasInjectedBlocks = false;
     let injectOnly = false;
+    let omitDefaultSystemPrompt = externalOmitDefaultSystemPrompt === true;
 
     let templateHasContent = false;
     if (skipUserMessagePreprocess) {
@@ -2825,10 +2828,11 @@ export function createMessageSender(appContext) {
       const template = (typeof preprocessorConfig?.userMessagePreprocessorTemplate === 'string')
         ? preprocessorConfig.userMessagePreprocessorTemplate
         : '';
-      const hasTemplate = template.trim().length > 0;
+      const baseText = resolvePreprocessBaseText({ messageText, regenerateMode, messageId });
+      const templateResult = renderUserMessageTemplateWithInjection({ template, inputText: baseText });
+      omitDefaultSystemPrompt = omitDefaultSystemPrompt || templateResult.omitDefaultSystemPrompt === true;
+      const hasTemplate = templateResult.hasTemplate === true;
       if (hasTemplate) {
-        const baseText = resolvePreprocessBaseText({ messageText, regenerateMode, messageId });
-        const templateResult = renderUserMessageTemplateWithInjection({ template, inputText: baseText });
         preprocessedMessageText = templateResult.renderedText;
         injectedMessages = templateResult.injectedMessages;
         hasInjectedBlocks = templateResult.hasInjectedBlocks;
@@ -3290,6 +3294,7 @@ export function createMessageSender(appContext) {
         injectedSystemMessages,
         pageContent: pageContentResponse,
         imageContainsScreenshot: !!imageContainsScreenshot,
+        omitDefaultSystemPrompt,
         currentPromptType,
         regenerateMode,
         messageId,
@@ -3489,6 +3494,7 @@ export function createMessageSender(appContext) {
         forceSendFullHistory,
         pageContentSnapshot: pageContentResponse || null,
         conversationSnapshot: Array.isArray(conversationChain) ? conversationChain : null,
+        omitDefaultSystemPrompt,
         aspectRatioOverride,
         __skipUserMessagePreprocess: skipNextPreprocess,
         // 透传外部策略决定的API（若有）

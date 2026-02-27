@@ -32,6 +32,7 @@
  * @property {Array<string>} injectedSystemMessages 额外注入的系统消息
  * @property {{title: string, url: string, content: string}|null} pageContent 网页内容（可空）
  * @property {boolean} imageContainsScreenshot 是否包含截图
+ * @property {boolean|undefined} [omitDefaultSystemPrompt] 是否跳过“提示词设置”中的默认系统提示词
  * @property {string|null} currentPromptType 当前提示词类型
  * @property {boolean} regenerateMode 是否为重新生成模式
  * @property {string|null} messageId 重新生成目标消息ID
@@ -52,6 +53,7 @@
  *   injectedSystemMessages: [],
  *   pageContent: { title, url, content },
  *   imageContainsScreenshot: false,
+ *   omitDefaultSystemPrompt: false,
  *   currentPromptType: 'summary',
  *   regenerateMode: false,
  *   messageId: null,
@@ -70,6 +72,7 @@ export function composeMessages(args) {
     injectedSystemMessages,
     pageContent,
     imageContainsScreenshot,
+    omitDefaultSystemPrompt,
     currentPromptType,
     regenerateMode,
     messageId,
@@ -122,7 +125,8 @@ export function composeMessages(args) {
     ? `\n\n当前网页内容：\n标题：${pageContent.title}\nURL：${pageContent.url}\n内容：${pageContent.content}`
     : '';
 
-  let systemMessageContent = prompts.system?.prompt || '';
+  // 仅跳过“提示词设置”中的默认 system.prompt；其他 system 注入（截图/附加系统消息/网页内容）保持不变。
+  let systemMessageContent = (omitDefaultSystemPrompt === true) ? '' : (prompts.system?.prompt || '');
   if (imageContainsScreenshot) {
     systemMessageContent += "\n用户附加了当前页面的屏幕截图";
   }

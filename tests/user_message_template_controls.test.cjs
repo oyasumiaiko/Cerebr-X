@@ -1,0 +1,99 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+
+function toDataUrl(source) {
+  return `data:text/javascript;base64,${Buffer.from(source, 'utf8').toString('base64')}`;
+}
+
+async function loadMessagePreprocessorModule() {
+  const promptResolverPath = path.resolve(__dirname, '../src/core/prompt_resolver.js');
+  const promptResolverSource = await fs.readFile(promptResolverPath, 'utf8');
+  const promptResolverUrl = toDataUrl(promptResolverSource);
+
+  const preprocessorPath = path.resolve(__dirname, '../src/core/message_preprocessor.js');
+  let preprocessorSource = await fs.readFile(preprocessorPath, 'utf8');
+  preprocessorSource = preprocessorSource.replace("'./prompt_resolver.js'", `'${promptResolverUrl}'`);
+  return import(toDataUrl(preprocessorSource));
+}
+
+async function loadMessageComposerModule() {
+  const thoughtsParserPath = path.resolve(__dirname, '../src/utils/thoughts_parser.js');
+  const thoughtsParserSource = await fs.readFile(thoughtsParserPath, 'utf8');
+  const thoughtsParserUrl = toDataUrl(thoughtsParserSource);
+
+  const composerPath = path.resolve(__dirname, '../src/core/message_composer.js');
+  let composerSource = await fs.readFile(composerPath, 'utf8');
+  composerSource = composerSource.replace("'../utils/thoughts_parser.js'", `'${thoughtsParserUrl}'`);
+  return import(toDataUrl(composerSource));
+}
+
+test('resolveUserMessageTemplateControls strips no_system_prompt marker', async () => {
+  const { resolveUserMessageTemplateControls } = await loadMessagePreprocessorModule();
+  const result = resolveUserMessageTemplateControls('  {{no_system_prompt}}\n{{input}}');
+
+  assert.equal(result.omitDefaultSystemPrompt, true);
+  assert.equal(result.templateText.includes('no_system_prompt'), false);
+  assert.equal(result.templateText.trim(), '{{input}}');
+});
+
+test('renderUserMessageTemplateWithInjection treats marker-only template as empty', async () => {
+  const { renderUserMessageTemplateWithInjection } = await loadMessagePreprocessorModule();
+  const result = renderUserMessageTemplateWithInjection({
+    template: ' \n {{no_system_prompt}} \n ',
+    inputText: '原始输入'
+  });
+
+  assert.equal(result.omitDefaultSystemPrompt, true);
+  assert.equal(result.hasTemplate, false);
+  assert.equal(result.renderedText, '原始输入');
+  assert.deepEqual(result.injectedMessages, []);
+  assert.equal(result.hasInjectedBlocks, false);
+  assert.equal(result.injectOnly, false);
+});
+
+test('composeMessages omits default system prompt when requested', async () => {
+  const { composeMessages } = await loadMessageComposerModule();
+  const messages = composeMessages({
+    prompts: { system: { prompt: '默认系统提示词' } },
+    injectedSystemMessages: ['额外系统消息'],
+    pageContent: null,
+    imageContainsScreenshot: false,
+    omitDefaultSystemPrompt: true,
+    currentPromptType: 'none',
+    regenerateMode: false,
+    messageId: null,
+    conversationChain: [{ id: 'u1', role: 'user', content: 'hello' }],
+    sendChatHistory: true,
+    maxHistory: 16,
+    maxUserHistory: null,
+    maxAssistantHistory: null
+  });
+
+  assert.equal(messages[0].role, 'system');
+  assert.equal(messages[0].content.includes('默认系统提示词'), false);
+  assert.equal(messages[0].content.includes('额外系统消息'), true);
+});
+
+test('composeMessages drops system message when only default system prompt exists and marker is enabled', async () => {
+  const { composeMessages } = await loadMessageComposerModule();
+  const messages = composeMessages({
+    prompts: { system: { prompt: '默认系统提示词' } },
+    injectedSystemMessages: [],
+    pageContent: null,
+    imageContainsScreenshot: false,
+    omitDefaultSystemPrompt: true,
+    currentPromptType: 'none',
+    regenerateMode: false,
+    messageId: null,
+    conversationChain: [{ id: 'u1', role: 'user', content: 'hello' }],
+    sendChatHistory: true,
+    maxHistory: 16,
+    maxUserHistory: null,
+    maxAssistantHistory: null
+  });
+
+  assert.equal(messages[0].role, 'user');
+  assert.equal(messages.some((item) => item.role === 'system'), false);
+});

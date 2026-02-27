@@ -23,11 +23,13 @@ const USER_MESSAGE_TEMPLATE_HELP_TEXT = [
   '模板语法：',
   '- {{input}} / {{text}} / {{message}}：用户输入',
   '- {{datetime}} / {{date}} / {{time}}：时间占位符',
+  '- {{no_system_prompt}}：不发送“提示词设置”中的默认系统提示词（标记本身不会发给模型）',
   '- 角色块（直接写在模板中，按出现顺序发送）：',
   '  {{#system}}...{{/system}} / {{#assistant}}...{{/assistant}} / {{#user}}...{{/user}}',
   '  或 {{#message role="assistant"}}...{{/message}}',
   '- 角色块外的文本会在 trim 后作为 user 消息插入到相对位置（空白则忽略）',
-  '- 若模板包含任意角色块，则发送时会替换最后一条 user（不发送空白消息）'
+  '- 若模板包含任意角色块，则发送时会替换最后一条 user（不发送空白消息）',
+  '- 控制标记会在预处理开始前先过滤；若过滤后模板为空，则按“无模板”逻辑原样发送用户输入'
 ].join('\n');
 const USER_MESSAGE_TEMPLATE_INJECT_SNIPPET = [
   '{{#system}}',
@@ -2139,7 +2141,7 @@ export function createApiManager(appContext) {
    * @param {number} [config.temperature] - temperature 值（可为 0）
    * @param {boolean} [config.isFavorite] - 是否收藏
    * @param {string} [config.customParams] - 自定义参数
-   * @param {string} [config.userMessagePreprocessorTemplate] - 用户消息预处理模板（支持 {{#system}}/{{#assistant}}/{{#user}} 角色块）
+   * @param {string} [config.userMessagePreprocessorTemplate] - 用户消息预处理模板（支持 {{#system}}/{{#assistant}}/{{#user}} 角色块与 {{no_system_prompt}} 控制标记）
    * @param {boolean} [config.userMessagePreprocessorIncludeInHistory] - 预处理结果是否写入历史
    * @param {number} index - 该配置在 apiConfigs 数组中的索引
    * @param {HTMLElement} templateCard - 用于克隆的卡片模板 DOM
@@ -3971,7 +3973,7 @@ export function createApiManager(appContext) {
    * @param {string} [partialConfig.apiKeyFilePath] - 本地 Key 文件路径（可选）
    * @param {number} [partialConfig.temperature] - 温度值
    * @param {string} [partialConfig.customParams] - 自定义参数字符串
-   * @param {string} [partialConfig.userMessagePreprocessorTemplate] - 用户消息预处理模板（支持 {{#system}}/{{#assistant}}/{{#user}} 角色块）
+   * @param {string} [partialConfig.userMessagePreprocessorTemplate] - 用户消息预处理模板（支持 {{#system}}/{{#assistant}}/{{#user}} 角色块与 {{no_system_prompt}} 控制标记）
    * @param {boolean} [partialConfig.userMessagePreprocessorIncludeInHistory] - 预处理结果是否写入历史
    * @returns {Object|null} 完整的 API 配置对象或 null
    */
