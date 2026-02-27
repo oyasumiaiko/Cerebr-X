@@ -2243,13 +2243,11 @@ export function createApiManager(appContext) {
     const ensureModelOptionsLoaded = ({ force = false } = {}) => {
       const selectedSourceId = getSelectedSourceId();
       if (!selectedSourceId) {
-        applyModelNameOptions();
         return;
       }
       const cachedState = modelListCacheBySourceId.get(selectedSourceId);
       const cachedOptions = getModelOptionsBySourceId(selectedSourceId);
       if (!force && cachedOptions.length > 0) {
-        applyModelNameOptions();
         return;
       }
       // 仅在用户点击模型输入框时才请求；若该源之前拉取失败，点击时允许强制重试。
@@ -2616,7 +2614,6 @@ export function createApiManager(appContext) {
     }
     if (modelNameInput) {
       modelNameInput.addEventListener('click', () => {
-        applyModelNameOptions();
         ensureModelOptionsLoaded({ force: false });
       });
       modelNameInput.addEventListener('change', saveCardBasicFields);
