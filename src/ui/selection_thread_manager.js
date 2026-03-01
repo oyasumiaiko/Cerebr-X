@@ -686,6 +686,31 @@ export function createSelectionThreadManager(appContext) {
     return (value || '').replace(/\\/g, '/');
   }
 
+  function isDirectImageUrl(value) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (!text) return false;
+    return /^(file:\/\/|https?:|data:|blob:|chrome-extension:|moz-extension:)/i.test(text);
+  }
+
+  function normalizeImageUrlCandidate(value) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (!text) return '';
+    if (!/^file:\/\//i.test(text)) return text;
+    const lowered = text.toLowerCase();
+    const markers = ['data:image/', 'https://', 'http://', 'blob:', 'chrome-extension://', 'moz-extension://'];
+    let markerIndex = -1;
+    for (const marker of markers) {
+      const idx = lowered.indexOf(marker);
+      if (idx > 0 && (markerIndex === -1 || idx < markerIndex)) {
+        markerIndex = idx;
+      }
+    }
+    if (markerIndex > 0) {
+      return text.slice(markerIndex);
+    }
+    return text;
+  }
+
   async function loadDownloadRoot() {
     if (loadDownloadRoot.cached) return loadDownloadRoot.cached;
     try {
@@ -702,8 +727,19 @@ export function createSelectionThreadManager(appContext) {
 
   function buildFileUrlFromRelative(relPath, rootPath) {
     if (!relPath) return null;
+    const raw = normalizeImageUrlCandidate(relPath);
+    if (!raw) return null;
+    if (isDirectImageUrl(raw)) return raw;
+    const normalizedRaw = normalizePath(raw).trim();
+    if (!normalizedRaw) return null;
+    if (/^[A-Za-z]:\//.test(normalizedRaw)) {
+      return `file:///${normalizedRaw}`;
+    }
+    if (normalizedRaw.startsWith('/')) {
+      return `file://${normalizedRaw}`;
+    }
     const root = normalizePath(rootPath || '');
-    const rel = normalizePath(relPath).replace(/^\/+/, '');
+    const rel = normalizedRaw.replace(/^\/+/, '');
     if (!root) return rel;
     const full = `${root}${rel}`;
     let normalized = normalizePath(full);
@@ -717,15 +753,17 @@ export function createSelectionThreadManager(appContext) {
 
   async function resolveImageUrlForDisplay(imageUrlObj) {
     if (!imageUrlObj) return '';
-    const rawUrl = imageUrlObj.url;
-    const relPath = imageUrlObj.path || (rawUrl && !rawUrl.startsWith('file://') ? rawUrl : null);
-    if (typeof rawUrl === 'string' && rawUrl.startsWith('file://')) return rawUrl;
+    const rawUrl = normalizeImageUrlCandidate(imageUrlObj.url);
+    const rawPath = normalizeImageUrlCandidate(imageUrlObj.path);
+    if (isDirectImageUrl(rawUrl)) return rawUrl;
+    if (isDirectImageUrl(rawPath)) return rawPath;
+    const relPath = rawPath || rawUrl;
     if (relPath) {
       const root = await loadDownloadRoot();
       const fileUrl = root ? buildFileUrlFromRelative(relPath, root) : null;
       return fileUrl || relPath;
     }
-    return rawUrl || '';
+    return rawUrl || rawPath || '';
   }
 
   function extractInlineImgSrcs(html) {

@@ -466,17 +466,42 @@ export function createChatHistoryUI(appContext) {
     return normalizePath(p || '').replace(/^\/+/, '').toLowerCase();
   }
 
+  function isDirectImageUrl(value) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (!text) return false;
+    return /^(file:\/\/|https?:|data:|blob:|chrome-extension:|moz-extension:)/i.test(text);
+  }
+
+  function normalizeImageUrlCandidate(value) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (!text) return '';
+    if (!/^file:\/\//i.test(text)) return text;
+    const lowered = text.toLowerCase();
+    const markers = ['data:image/', 'https://', 'http://', 'blob:', 'chrome-extension://', 'moz-extension://'];
+    let markerIndex = -1;
+    for (const marker of markers) {
+      const idx = lowered.indexOf(marker);
+      if (idx > 0 && (markerIndex === -1 || idx < markerIndex)) {
+        markerIndex = idx;
+      }
+    }
+    if (markerIndex > 0) {
+      return text.slice(markerIndex);
+    }
+    return text;
+  }
+
   function resolveImageUrlForGallery(imageUrlObj, downloadRoot) {
     if (!imageUrlObj) return '';
-    const rawUrl = typeof imageUrlObj.url === 'string' ? imageUrlObj.url : '';
-    const relPath = typeof imageUrlObj.path === 'string' ? imageUrlObj.path : '';
-    if (rawUrl.startsWith('file://')) return rawUrl;
+    const rawUrl = normalizeImageUrlCandidate(imageUrlObj.url);
+    const relPath = normalizeImageUrlCandidate(imageUrlObj.path);
+    if (isDirectImageUrl(rawUrl)) return rawUrl;
+    if (isDirectImageUrl(relPath)) return relPath;
     if (relPath) {
       const fileUrl = downloadRoot ? buildFileUrlFromRelative(relPath, downloadRoot) : null;
       return fileUrl || relPath;
     }
     if (rawUrl) {
-      if (/^(https?:|data:|blob:|chrome-extension:|moz-extension:)/i.test(rawUrl)) return rawUrl;
       const fileUrl = downloadRoot ? buildFileUrlFromRelative(rawUrl, downloadRoot) : null;
       return fileUrl || rawUrl;
     }
@@ -10791,8 +10816,19 @@ export function createChatHistoryUI(appContext) {
 
   function buildFileUrlFromRelative(relPath, rootPath) {
     if (!relPath) return null;
+    const raw = normalizeImageUrlCandidate(relPath);
+    if (!raw) return null;
+    if (isDirectImageUrl(raw)) return raw;
+    const normalizedRaw = normalizePath(raw).trim();
+    if (!normalizedRaw) return null;
+    if (/^[A-Za-z]:\//.test(normalizedRaw)) {
+      return `file:///${normalizedRaw}`;
+    }
+    if (normalizedRaw.startsWith('/')) {
+      return `file://${normalizedRaw}`;
+    }
     const root = normalizePath(rootPath || downloadRootCache || '');
-    const rel = normalizePath(relPath).replace(/^\/+/, '');
+    const rel = normalizedRaw.replace(/^\/+/, '');
     if (!root) {
       return rel; // 无根路径时返回相对路径，避免生成 file:///Images/...
     }
@@ -10835,16 +10871,18 @@ export function createChatHistoryUI(appContext) {
 
   async function resolveImageUrlForDisplay(imageUrlObj) {
     if (!imageUrlObj) return '';
-    const rawUrl = imageUrlObj.url;
-    const relPath = imageUrlObj.path || (rawUrl && !rawUrl.startsWith('file://') ? rawUrl : null);
-    if (typeof rawUrl === 'string' && rawUrl.startsWith('file://')) return rawUrl;
+    const rawUrl = normalizeImageUrlCandidate(imageUrlObj.url);
+    const rawPath = normalizeImageUrlCandidate(imageUrlObj.path);
+    if (isDirectImageUrl(rawUrl)) return rawUrl;
+    if (isDirectImageUrl(rawPath)) return rawPath;
+    const relPath = rawPath || rawUrl;
     if (relPath) {
       const root = await loadDownloadRoot();
       // 如果没有 root，返回相对路径以避免生成错误的 file:///Images/...，需要用户手动设置根路径
       const fileUrl = root ? buildFileUrlFromRelative(relPath, root) : null;
       return fileUrl || relPath;
     }
-    return rawUrl || '';
+    return rawUrl || rawPath || '';
   }
 
   function formatTimestampForPath(ts) {
