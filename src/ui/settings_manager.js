@@ -75,7 +75,9 @@ export function createSettingsManager(appContext) {
   };
 
   // Services from appContext.services
-  const messageSender = services.messageSender;
+  // 注意：settingsManager 早于 messageSender 创建，不能在这里捕获“当下值”。
+  // 必须按需读取 services.messageSender，才能拿到后续初始化完成后的真实实例。
+  const getMessageSender = () => services.messageSender;
   // const themeManagerService = services.themeManager; // If themeManager is a shared service
   const uiManager = services.uiManager; // For closeExclusivePanels
 
@@ -3143,7 +3145,8 @@ export function createSettingsManager(appContext) {
     }
     
     // 更新消息发送器设置
-    if (messageSender) {
+    const messageSender = getMessageSender();
+    if (messageSender && typeof messageSender.setSendChatHistory === 'function') {
       messageSender.setSendChatHistory(enabled);
     }
   }
@@ -3154,6 +3157,7 @@ export function createSettingsManager(appContext) {
       autoRetrySwitch.checked = normalized;
     }
 
+    const messageSender = getMessageSender();
     if (messageSender && typeof messageSender.setAutoRetry === 'function') {
       messageSender.setAutoRetry(normalized);
     }

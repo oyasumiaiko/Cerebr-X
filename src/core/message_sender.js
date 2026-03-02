@@ -300,6 +300,33 @@ export function createMessageSender(appContext) {
   }
 
   /**
+   * 将“自动重试”设置值规范化为布尔值。
+   *
+   * 兼容场景：
+   * - 正常 UI 勾选写入的 boolean；
+   * - 旧版本/外部导入可能写入的字符串（"true"/"1"/"on"）或数字（1/0）。
+   *
+   * 返回 null 表示“无法识别”，调用方应保持当前内存态不变，避免误覆盖。
+   *
+   * @param {any} value
+   * @returns {boolean|null}
+   */
+  function normalizeAutoRetrySetting(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) return null;
+      return value !== 0;
+    }
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (!normalized) return null;
+      if (['true', '1', 'on', 'yes', 'y'].includes(normalized)) return true;
+      if (['false', '0', 'off', 'no', 'n'].includes(normalized)) return false;
+    }
+    return null;
+  }
+
+  /**
    * 纯函数：从“模板替换后的完整提示词”中提取 <SELECTION> 对应的原文。
    *
    * 设计背景：
@@ -2797,8 +2824,9 @@ export function createMessageSender(appContext) {
     }
 
     const autoRetrySetting = settingsManager?.getSetting?.('autoRetry');
-    if (typeof autoRetrySetting === 'boolean') {
-      autoRetryEnabled = autoRetrySetting;
+    const normalizedAutoRetrySetting = normalizeAutoRetrySetting(autoRetrySetting);
+    if (normalizedAutoRetrySetting !== null) {
+      autoRetryEnabled = normalizedAutoRetrySetting;
     }
 
     const autoRetryAttempt = (typeof options.__autoRetryAttempt === 'number' && options.__autoRetryAttempt >= 0)
@@ -3620,6 +3648,11 @@ export function createMessageSender(appContext) {
           scrollToBottom(errorScrollContainer);
         }
         attachManualRetryAction(messageElement, retry);
+
+        // 关键修复：当我们把 loading 占位“升级”为错误消息后，避免 finally 阶段再把它当作占位节点删除。
+        if (attempt && attempt.loadingMessage === messageElement) {
+          attempt.loadingMessage = null;
+        }
       }
 
       if (autoRetryEnabled && typeof showNotification === 'function') {
