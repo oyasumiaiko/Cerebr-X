@@ -2584,18 +2584,29 @@ export function createMessageSender(appContext) {
       if (retryBtn.disabled) return;
       const boundMessageId = (messageElement.getAttribute('data-message-id') || '').trim();
       const isEphemeralErrorMessage = !boundMessageId;
+      const shouldReuseErrorBubble = !isEphemeralErrorMessage;
       let retryResult = null;
-      resetErrorUiState(messageElement);
-      setMessageStatusText(messageElement, '正在重试...', {
-        clearRetryActions: true,
-        clearThoughts: true,
-        clearTitle: true
-      });
-      messageElement.classList.add('loading-message');
-      messageElement.classList.add('updating');
       retryBtn.disabled = true;
       const originalText = retryBtn.textContent;
       retryBtn.textContent = '重试中...';
+      if (shouldReuseErrorBubble) {
+        // 有 message-id 的错误消息可被后续请求原地复用，因此在原节点上切换到“重试中”状态。
+        resetErrorUiState(messageElement);
+        setMessageStatusText(messageElement, '正在重试...', {
+          clearRetryActions: true,
+          clearThoughts: true,
+          clearTitle: true
+        });
+        messageElement.classList.add('loading-message');
+        messageElement.classList.add('updating');
+      } else {
+        // 无 message-id 的错误占位无法被 sendMessageCore 复用。
+        // 这里先移除该占位，避免与后续新建的 loading 占位并存，导致“重试时出现两条消息”。
+        resetErrorUiState(messageElement);
+        if (messageElement.isConnected) {
+          messageElement.remove();
+        }
+      }
       try {
         retryResult = await retryFn();
       } catch (error) {
