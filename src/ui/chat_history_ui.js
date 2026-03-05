@@ -3605,7 +3605,8 @@ export function createChatHistoryUI(appContext) {
     if (durationText) metaParts.push(`耗时 ${durationText}`);
     if (reused) metaParts.push('缓存结果');
 
-    const summaryTitle = queryText ? `搜索 “${queryText}”` : '搜索结果';
+    // 搜索词已在输入框中可见，这里不重复回显原始查询文本，避免信息冗余。
+    const summaryTitle = '搜索结果';
     summary.textContent = '';
     const titleSpan = document.createElement('span');
     titleSpan.className = 'summary-title';
