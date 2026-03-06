@@ -5433,7 +5433,7 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
 .chat-history-item {
     border-bottom: 1px solid var(--cerebr-border-color);
     padding: 6px 0;
-    cursor: pointer;
+    cursor: default;
     position: relative;
     display: flex;
     align-items: flex-start;
@@ -5607,6 +5607,7 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    cursor: pointer;
 }
 
 .chat-history-item .info {
@@ -5616,6 +5617,7 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     align-items: center;
     gap: 6px;
     min-width: 0;
+    cursor: pointer;
 }
 
 .chat-history-item .info .info-content {
@@ -5905,6 +5907,10 @@ input[type="range"].temperature::-webkit-slider-thumb:active {
     gap: 4px;
     margin-top: 6px;
     flex-wrap: wrap;
+}
+
+.highlight-snippet-actions.is-toggleable {
+    cursor: pointer;
 }
 
 .highlight-snippet-meta {

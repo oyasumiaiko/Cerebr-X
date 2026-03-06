@@ -7516,7 +7516,6 @@ export function createChatHistoryUI(appContext) {
       });
 
       const totalSnippetCount = allExcerpts.length;
-      const visibleSnippetCount = visibleExcerpts.length;
       const totalHitCount = Math.max(0, Number(snippetData.totalHitCount || 0));
       const matchedMessageCount = Math.max(0, Number(snippetData.matchedMessageCount || 0));
       const hasMoreToToggle = totalSnippetCount > previewExcerpts.length;
@@ -7534,22 +7533,32 @@ export function createChatHistoryUI(appContext) {
         actions.appendChild(meta);
 
         if (hasMoreToToggle) {
+          const toggleSnippetExpansion = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setSearchSnippetExpanded(panel, conv.id, !expanded);
+            item.replaceWith(createConversationItemElement(conv, highlightPlan, isPinned, panel));
+          };
+
+          actions.classList.add('is-toggleable');
+          actions.setAttribute('role', 'button');
+          actions.setAttribute('tabindex', '0');
+          actions.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+          actions.addEventListener('click', toggleSnippetExpansion);
+          actions.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            toggleSnippetExpansion(event);
+          });
+
           const separator = document.createElement('span');
           separator.className = 'highlight-snippet-meta-separator';
           separator.textContent = '·';
           actions.appendChild(separator);
 
-          const toggleButton = document.createElement('button');
-          toggleButton.type = 'button';
-          toggleButton.className = 'highlight-snippet-toggle';
-          toggleButton.textContent = expanded ? '收起' : '展开全部';
-          toggleButton.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            setSearchSnippetExpanded(panel, conv.id, !expanded);
-            item.replaceWith(createConversationItemElement(conv, highlightPlan, isPinned, panel));
-          });
-          actions.appendChild(toggleButton);
+          const toggleText = document.createElement('span');
+          toggleText.className = 'highlight-snippet-toggle';
+          toggleText.textContent = expanded ? '收起' : '展开全部';
+          actions.appendChild(toggleText);
         }
 
         snippetDiv.appendChild(actions);
@@ -7572,11 +7581,13 @@ export function createChatHistoryUI(appContext) {
       snippetRendered = renderSearchSnippetBlock(buildFallbackSearchSnippetData(conv.messages, highlightTerms));
     }
 
-    item.addEventListener('click', async () => {
+    const openConversationByItemHeader = async () => {
       const matchInfo = getSearchMatchInfoForConversation(conv.id);
       const jumpMessageId = matchInfo?.messageId || null;
       await openConversationFromSearchResult(conv.id, jumpMessageId);
-    });
+    };
+    summaryDiv.addEventListener('click', openConversationByItemHeader);
+    infoDiv.addEventListener('click', openConversationByItemHeader);
     
     item.addEventListener('contextmenu', (e) => {
       e.preventDefault();
