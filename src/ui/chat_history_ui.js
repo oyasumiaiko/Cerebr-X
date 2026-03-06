@@ -1644,21 +1644,23 @@ export function createChatHistoryUI(appContext) {
       matchInfo.matchedMessageCount = matchedMessageKeySet.size;
     };
 
-    const appendMessagePreview = (plainText, messageId) => {
+    const appendMessagePreview = (plainText, messageId, messageIndex, hitCount) => {
       if (!highlightTerms.length) return;
       const preview = buildMessagePreviewExcerpt(plainText, highlightTerms, SEARCH_RESULT_SNIPPET_CONTEXT_LENGTH);
       if (!preview) return;
       preview.messageId = messageId || null;
+      preview.messageIndex = Number.isFinite(messageIndex) ? messageIndex : matchInfo.excerpts.length;
+      preview.hitCount = Math.max(0, Number(hitCount || 0));
       matchInfo.excerpts.push(preview);
     };
 
-    const collectHighlightHitsForMessage = (plainText, messageId, messageKey) => {
+    const collectHighlightHitsForMessage = (plainText, messageId, messageKey, messageIndex) => {
       if (!plainText || !highlightRegex) return 0;
       const hitCount = countRegexMatches(plainText, highlightRegex);
       if (hitCount <= 0) return 0;
       matchInfo.totalHitCount += hitCount;
       registerMatchedMessage(messageKey);
-      appendMessagePreview(plainText, messageId);
+      appendMessagePreview(plainText, messageId, messageIndex, hitCount);
       return hitCount;
     };
 
@@ -1701,12 +1703,16 @@ export function createChatHistoryUI(appContext) {
               if (!matchInfo.messageId && messageId) {
                 matchInfo.messageId = messageId;
               }
-              collectHighlightHitsForMessage(plainText, messageId, messageKey);
+              collectHighlightHitsForMessage(plainText, messageId, messageKey, index);
             }
           }
           continue;
         }
 
+      }
+      sortSearchSnippetExcerptsByCoverage(matchInfo.excerpts, positiveTerms);
+      if (matchInfo.excerpts[0]?.messageId) {
+        matchInfo.messageId = matchInfo.excerpts[0].messageId;
       }
 
       const matched = !!matchInfo.messageId || matchInfo.matchedMessageCount > 0;
@@ -1760,10 +1766,14 @@ export function createChatHistoryUI(appContext) {
           matchInfo.messageId = messageId;
         }
 
-        collectHighlightHitsForMessage(plainText, messageId, messageKey);
+        collectHighlightHitsForMessage(plainText, messageId, messageKey, index);
         continue;
       }
 
+    }
+    sortSearchSnippetExcerptsByCoverage(matchInfo.excerpts, highlightTerms);
+    if (matchInfo.excerpts[0]?.messageId) {
+      matchInfo.messageId = matchInfo.excerpts[0].messageId;
     }
 
     const matched = remainingSet.size === 0;
@@ -1936,6 +1946,48 @@ export function createChatHistoryUI(appContext) {
     return collapsed;
   }
 
+  function countMatchedHighlightTerms(sourceText, highlightTerms) {
+    if (!sourceText) return 0;
+    const lowerText = sourceText.toLowerCase();
+    const seen = new Set();
+    let matchedCount = 0;
+
+    for (const term of Array.isArray(highlightTerms) ? highlightTerms : []) {
+      const lowerTerm = typeof term === 'string' ? term.trim().toLowerCase() : '';
+      if (!lowerTerm || seen.has(lowerTerm)) continue;
+      seen.add(lowerTerm);
+      if (lowerText.includes(lowerTerm)) {
+        matchedCount += 1;
+      }
+    }
+
+    return matchedCount;
+  }
+
+  function sortSearchSnippetExcerptsByCoverage(excerpts, highlightTerms) {
+    const list = Array.isArray(excerpts) ? excerpts : [];
+    if (list.length <= 1) return list;
+
+    const uniqueTerms = new Set();
+    for (const term of Array.isArray(highlightTerms) ? highlightTerms : []) {
+      const lowerTerm = typeof term === 'string' ? term.trim().toLowerCase() : '';
+      if (lowerTerm) uniqueTerms.add(lowerTerm);
+    }
+    if (uniqueTerms.size <= 1) return list;
+
+    list.sort((left, right) => {
+      const coverageDelta = Math.max(0, Number(right?.matchedTermCount || 0)) - Math.max(0, Number(left?.matchedTermCount || 0));
+      if (coverageDelta !== 0) return coverageDelta;
+
+      const hitDelta = Math.max(0, Number(right?.hitCount || 0)) - Math.max(0, Number(left?.hitCount || 0));
+      if (hitDelta !== 0) return hitDelta;
+
+      return Math.max(0, Number(left?.messageIndex || 0)) - Math.max(0, Number(right?.messageIndex || 0));
+    });
+
+    return list;
+  }
+
   /**
    * 基于单条消息内全部命中位置生成一行预览。
    * 规则：
@@ -1963,7 +2015,8 @@ export function createChatHistoryUI(appContext) {
     if (!parts.length) return null;
 
     return {
-      parts
+      parts,
+      matchedTermCount: countMatchedHighlightTerms(sourceText, highlightTerms)
     };
   }
 
@@ -7021,8 +7074,12 @@ export function createChatHistoryUI(appContext) {
       const preview = buildMessagePreviewExcerpt(plainText, highlightTerms, SEARCH_RESULT_SNIPPET_CONTEXT_LENGTH);
       if (!preview) continue;
       preview.messageId = msg?.id || '';
+      preview.messageIndex = index;
+      preview.hitCount = hitCount;
       excerpts.push(preview);
     }
+
+    sortSearchSnippetExcerptsByCoverage(excerpts, highlightTerms);
 
     return {
       excerpts,
