@@ -285,6 +285,60 @@ export function createMessageProcessor(appContext) {
     return chatContainer;
   }
 
+  // 选区保护：当用户正在选中某条 AI 消息中的文本时，暂停对这条消息做整段 innerHTML 重渲染。
+  //
+  // 背景：
+  // - 流式输出会频繁调用 updateAIMessage；
+  // - 现有实现每次都会重写 `.text-content.innerHTML`，浏览器会把旧文本节点整体替换掉；
+  // - 一旦用户正在选中文本，Range 绑定的节点被替换，选区就会闪烁、坍塌或直接消失。
+  //
+  // 这里采用“延迟渲染而不是强行恢复选区”的策略：
+  // - 生成过程继续收流、继续写历史节点；
+  // - 仅把这条消息的“最新待渲染快照”缓存在内存里；
+  // - 等用户取消选区后，再把最后一版内容一次性渲染到 DOM。
+  //
+  // 这样做的优点是：
+  // - 不需要把 DOM Range 映射回 Markdown/高亮后的复杂 HTML；
+  // - 不会因为代码块高亮、KaTeX、折叠块等二次渲染而引入新的偏移误差；
+  // - 代价只是“选中期间这条消息暂停视觉更新”，对交互更稳定。
+  const deferredAiRenderByMessageId = new Map();
+  let deferredAiRenderFlushRafId = null;
+
+  function getSafeWindowSelection() {
+    try {
+      return window.getSelection ? window.getSelection() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function isNodeInsideMessage(node, messageElement) {
+    if (!node || !messageElement || typeof messageElement.contains !== 'function') return false;
+    return messageElement.contains(node);
+  }
+
+  function isMessageRenderBlockedBySelection(messageElement) {
+    const selection = getSafeWindowSelection();
+    if (!messageElement || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      return false;
+    }
+    return isNodeInsideMessage(selection.anchorNode, messageElement)
+      && isNodeInsideMessage(selection.focusNode, messageElement);
+  }
+
+  function clearDeferredAiRenderFlag(messageElement) {
+    if (!messageElement?.dataset) return;
+    delete messageElement.dataset.selectionRenderDeferred;
+  }
+
+  function markDeferredAiRender(messageId, payload, messageElement = null) {
+    if (!messageId || !payload) return;
+    deferredAiRenderByMessageId.set(messageId, payload);
+    if (messageElement?.dataset) {
+      messageElement.dataset.selectionRenderDeferred = 'true';
+    }
+  }
+
   // --- 超长对话虚拟化（远距离消息折叠）---
   // 目标：当消息数量极大时，只让“视野附近”的消息保持完整 DOM；
   //      对于视野很远处的消息，仅保留高度占位，从而显著降低布局/绘制压力。
@@ -969,6 +1023,92 @@ export function createMessageProcessor(appContext) {
     return messageDiv;
   }
 
+  function renderAiMessageDom(messageDiv, node, safeAnswerContent, resolvedThoughts) {
+    if (!messageDiv) return false;
+
+    clearDeferredAiRenderFlag(messageDiv);
+
+    // 统一清理“错误态”残留，避免重试成功后仍显示红字/旧重试按钮。
+    try {
+      messageDiv.classList.remove('error-message');
+      messageDiv.classList.remove('loading-message');
+      messageDiv.classList.remove('regenerating');
+      const retryActions = messageDiv.querySelectorAll('.error-retry-actions');
+      retryActions.forEach((actionEl) => actionEl.remove());
+      const rootTextNodes = Array.from(messageDiv.childNodes || []).filter(node => node && node.nodeType === 3);
+      rootTextNodes.forEach((node) => node.remove());
+    } catch (_) {}
+
+    messageDiv.setAttribute('data-original-text', safeAnswerContent);
+    // 思考过程文本由 setupThoughtsDisplay 统一处理
+    setupThoughtsDisplay(messageDiv, resolvedThoughts, processMathAndMarkdown);
+
+    let textContentDiv = messageDiv.querySelector('.text-content');
+    if (!textContentDiv) {
+      textContentDiv = document.createElement('div');
+      textContentDiv.classList.add('text-content');
+      const thoughtsDiv = messageDiv.querySelector('.thoughts-content');
+      if (thoughtsDiv && thoughtsDiv.nextSibling) {
+        messageDiv.insertBefore(textContentDiv, thoughtsDiv.nextSibling);
+      } else {
+        messageDiv.appendChild(textContentDiv);
+      }
+    }
+
+    textContentDiv.innerHTML = processMathAndMarkdown(safeAnswerContent);
+
+    decorateMarkdownLinks(messageDiv);
+
+    textContentDiv.querySelectorAll('pre code').forEach(block => {
+      hljs.highlightElement(block);
+    });
+
+    bindInlineImagePreviews(messageDiv);
+
+    try {
+      services.selectionThreadManager?.decorateMessageElement?.(messageDiv, node);
+    } catch (e) {
+      console.warn('更新 AI 消息时应用划词线程高亮失败:', e);
+    }
+    scrollToBottom(resolveScrollContainerForMessage(messageDiv));
+    messageVirtualizer.scheduleUpdate(resolveMessageListContainer(messageDiv));
+    return true;
+  }
+
+  function flushDeferredAiRenders() {
+    if (!deferredAiRenderByMessageId.size) return;
+
+    for (const [messageId, payload] of deferredAiRenderByMessageId.entries()) {
+      const messageDiv = resolveMessageElement(messageId);
+      if (!messageDiv) {
+        deferredAiRenderByMessageId.delete(messageId);
+        continue;
+      }
+      if (isMessageRenderBlockedBySelection(messageDiv)) {
+        continue;
+      }
+
+      deferredAiRenderByMessageId.delete(messageId);
+      renderAiMessageDom(
+        messageDiv,
+        payload?.node || null,
+        payload?.safeAnswerContent || '',
+        payload?.resolvedThoughts
+      );
+    }
+  }
+
+  function scheduleFlushDeferredAiRenders() {
+    if (deferredAiRenderFlushRafId != null) return;
+    const schedule = (typeof requestAnimationFrame === 'function')
+      ? requestAnimationFrame
+      : (cb) => setTimeout(cb, 16);
+    deferredAiRenderFlushRafId = schedule(() => {
+      deferredAiRenderFlushRafId = null;
+      flushDeferredAiRenders();
+    });
+  }
+
   /**
    * 更新AI消息内容，包括思考过程和最终答案
    * @param {string} messageId - 要更新的消息的ID
@@ -1038,55 +1178,22 @@ export function createMessageProcessor(appContext) {
       return true;
     }
 
-    // 统一清理“错误态”残留，避免重试成功后仍显示红字/旧重试按钮。
-    try {
-      messageDiv.classList.remove('error-message');
-      messageDiv.classList.remove('loading-message');
-      messageDiv.classList.remove('regenerating');
-      const retryActions = messageDiv.querySelectorAll('.error-retry-actions');
-      retryActions.forEach((actionEl) => actionEl.remove());
-      const rootTextNodes = Array.from(messageDiv.childNodes || []).filter(node => node && node.nodeType === 3);
-      rootTextNodes.forEach((node) => node.remove());
-    } catch (_) {}
-
-    messageDiv.setAttribute('data-original-text', safeAnswerContent);
-    // 思考过程文本由 setupThoughtsDisplay 统一处理
-
-    // Setup/Update thoughts display
-    // Pass `processMathAndMarkdown` from the outer scope
-    setupThoughtsDisplay(messageDiv, resolvedThoughts, processMathAndMarkdown);
-
-    let textContentDiv = messageDiv.querySelector('.text-content');
-    if (!textContentDiv) { // Should exist if appendMessage created it, but good to check
-        textContentDiv = document.createElement('div');
-        textContentDiv.classList.add('text-content');
-        // Ensure textContentDiv is after thoughtsDiv if thoughtsDiv was added
-        const thoughtsDiv = messageDiv.querySelector('.thoughts-content');
-        if (thoughtsDiv && thoughtsDiv.nextSibling) {
-            messageDiv.insertBefore(textContentDiv, thoughtsDiv.nextSibling);
-        } else {
-            messageDiv.appendChild(textContentDiv);
-        }
+    // 若用户正在这条消息里拖选文本，则只缓存“最后一版待渲染内容”，等选区结束后再补渲染。
+    if (isMessageRenderBlockedBySelection(messageDiv)) {
+      markDeferredAiRender(
+        messageId,
+        {
+          node,
+          safeAnswerContent,
+          resolvedThoughts
+        },
+        messageDiv
+      );
+      return true;
     }
-    
-    textContentDiv.innerHTML = processMathAndMarkdown(safeAnswerContent);
 
-    decorateMarkdownLinks(messageDiv);
-
-    textContentDiv.querySelectorAll('pre code').forEach(block => {
-      hljs.highlightElement(block);
-    });
-
-    bindInlineImagePreviews(messageDiv);
-
-    try {
-      services.selectionThreadManager?.decorateMessageElement?.(messageDiv, node);
-    } catch (e) {
-      console.warn('更新 AI 消息时应用划词线程高亮失败:', e);
-    }
-    scrollToBottom(resolveScrollContainerForMessage(messageDiv));
-    messageVirtualizer.scheduleUpdate(resolveMessageListContainer(messageDiv));
-    return true;
+    deferredAiRenderByMessageId.delete(messageId);
+    return renderAiMessageDom(messageDiv, node, safeAnswerContent, resolvedThoughts);
   }
 
   function bindInlineImagePreviews(container) {
@@ -1213,6 +1320,13 @@ export function createMessageProcessor(appContext) {
     });
   } catch (error) {
     console.warn('订阅 enableDollarMath 设置变化失败:', error);
+  }
+
+  // 监听全局选区变化：一旦用户取消/移出当前选区，就把之前延迟的 AI 消息 DOM 更新补上。
+  try {
+    document.addEventListener('selectionchange', scheduleFlushDeferredAiRenders);
+  } catch (error) {
+    console.warn('绑定 selectionchange 监听失败，选区保护将退化为仅本次渲染有效:', error);
   }
 
   // 在创建消息处理器时安装一次全局链接拦截器
