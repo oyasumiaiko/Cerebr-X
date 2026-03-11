@@ -199,6 +199,16 @@ export function createMessageSender(appContext) {
   let pageContent = null;
   let shouldSendChatHistory = true;
   let autoRetryEnabled = false;
+  // 同一会话内若已有流式/自动重试任务，后续发送默认进入该会话的 FIFO 队列。
+  // 设计目标：
+  // - 仅约束“当前会话”的串行发送，不影响其它会话后台继续生成；
+  // - 队列按会话隔离，避免不同会话的消息互相串线；
+  // - 关闭该开关后，恢复为“中断当前会话生成并立即发送下一条”。
+  let queueCurrentConversationMessages = true;
+  const conversationSendQueues = new Map();
+  const conversationQueueDrainLocks = new Set();
+  let draftConversationQueueSerial = 0;
+  let activeDraftConversationQueueKey = `__draft_queue_${draftConversationQueueSerial}`;
   // 固定 API 失效提示的去重窗口，避免连续发送刷屏
   let lastInvalidApiLockNotice = { conversationId: '', at: 0 };
   // 流式标记：若当前数据流进入 <think> 段落，则持续写入思考块直到遇到 </think>
@@ -1179,6 +1189,314 @@ export function createMessageSender(appContext) {
     return (typeof value === 'string' && value.trim()) ? value.trim() : '';
   }
 
+  /**
+   * 当前“未落盘新会话”的临时队列键。
+   *
+   * 为什么需要它：
+   * - 首条消息刚发出时，会话 ID 可能尚未写入 IndexedDB；
+   * - 这时用户继续发送，仍然需要把消息排到“同一个未落盘会话”的队列里；
+   * - 待真实 conversationId 确定后，再把该临时队列迁移到正式会话键。
+   *
+   * 说明：
+   * - 这里只在当前标签页内使用，不会跨标签共享；
+   * - 一旦显式切换到“新建空白会话”，会重新生成新的 draft key，避免残留队列复用到下一段新会话。
+   */
+  function getActiveDraftConversationQueueKey() {
+    return activeDraftConversationQueueKey;
+  }
+
+  function rotateActiveDraftConversationQueueKey() {
+    draftConversationQueueSerial += 1;
+    activeDraftConversationQueueKey = `__draft_queue_${draftConversationQueueSerial}`;
+    return activeDraftConversationQueueKey;
+  }
+
+  function resolveConversationQueueKey(conversationId) {
+    const normalizedId = normalizeConversationId(conversationId);
+    return normalizedId || getActiveDraftConversationQueueKey();
+  }
+
+  function getCurrentActiveConversationQueueKey() {
+    const activeId = normalizeConversationId(currentConversationId)
+      || normalizeConversationId(chatHistoryUI?.getCurrentConversationId?.());
+    return resolveConversationQueueKey(activeId);
+  }
+
+  function getConversationSendQueue(queueKey) {
+    const normalizedQueueKey = resolveConversationQueueKey(queueKey);
+    const queue = conversationSendQueues.get(normalizedQueueKey);
+    return Array.isArray(queue) ? queue : [];
+  }
+
+  function ensureConversationSendQueue(queueKey) {
+    const normalizedQueueKey = resolveConversationQueueKey(queueKey);
+    const existing = conversationSendQueues.get(normalizedQueueKey);
+    if (Array.isArray(existing)) return existing;
+    const created = [];
+    conversationSendQueues.set(normalizedQueueKey, created);
+    return created;
+  }
+
+  function enqueueConversationSend(queueKey, queuedTask) {
+    const queue = ensureConversationSendQueue(queueKey);
+    queue.push(queuedTask);
+    return queue.length;
+  }
+
+  function hasQueuedMessagesForConversation(queueKey) {
+    return getConversationSendQueue(queueKey).length > 0;
+  }
+
+  function cloneDataSafely(value) {
+    if (value == null) return value ?? null;
+    try {
+      return structuredClone(value);
+    } catch (_) {
+      try {
+        return JSON.parse(JSON.stringify(value));
+      } catch (_) {
+        return value;
+      }
+    }
+  }
+
+  function getLastMainConversationNode(messages) {
+    const list = Array.isArray(messages) ? messages : [];
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const node = list[i];
+      if (!node || node.threadId || node.threadHiddenSelection) continue;
+      return node;
+    }
+    return null;
+  }
+
+  function buildMainConversationChainFromMessages(messages) {
+    const list = Array.isArray(messages) ? messages : [];
+    if (list.length === 0) return [];
+
+    const tailNode = getLastMainConversationNode(list);
+    if (!tailNode?.id) {
+      return list.filter((node) => node && !node.threadId && !node.threadHiddenSelection);
+    }
+
+    const nodeById = new Map();
+    list.forEach((node) => {
+      if (node?.id) nodeById.set(node.id, node);
+    });
+
+    const chain = [];
+    const seen = new Set();
+    let currentId = tailNode.id;
+    while (currentId && !seen.has(currentId)) {
+      seen.add(currentId);
+      const node = nodeById.get(currentId);
+      if (!node) break;
+      if (!node.threadId && !node.threadHiddenSelection) {
+        chain.unshift(node);
+      }
+      currentId = typeof node.parentId === 'string' ? node.parentId.trim() : '';
+    }
+
+    return chain.length > 0
+      ? chain
+      : list.filter((node) => node && !node.threadId && !node.threadHiddenSelection);
+  }
+
+  function getDetachedConversationParentMessageId(historyMessagesRef) {
+    return getLastMainConversationNode(historyMessagesRef)?.id || null;
+  }
+
+  function moveConversationSendQueue(fromQueueKey, toQueueKey) {
+    const normalizedFromKey = resolveConversationQueueKey(fromQueueKey);
+    const normalizedToKey = resolveConversationQueueKey(toQueueKey);
+    if (!normalizedFromKey || !normalizedToKey || normalizedFromKey === normalizedToKey) return;
+
+    const fromQueue = conversationSendQueues.get(normalizedFromKey);
+    if (!Array.isArray(fromQueue) || fromQueue.length === 0) {
+      conversationSendQueues.delete(normalizedFromKey);
+      return;
+    }
+
+    const targetQueue = ensureConversationSendQueue(normalizedToKey);
+    targetQueue.push(...fromQueue);
+    conversationSendQueues.delete(normalizedFromKey);
+  }
+
+  function isConversationQueueKeyActive(queueKey) {
+    return getCurrentActiveConversationQueueKey() === resolveConversationQueueKey(queueKey);
+  }
+
+  function doesAttemptBelongToConversationQueueKey(attemptState, queueKey) {
+    if (!attemptState || attemptState.finished) return false;
+    return resolveConversationQueueKey(attemptState.boundConversationId) === resolveConversationQueueKey(queueKey);
+  }
+
+  function doesRetryTaskBelongToConversationQueueKey(retryTask, queueKey) {
+    if (!retryTask) return false;
+    return resolveConversationQueueKey(retryTask.boundConversationId) === resolveConversationQueueKey(queueKey);
+  }
+
+  function hasPendingWorkForConversationQueue(queueKey) {
+    const normalizedQueueKey = resolveConversationQueueKey(queueKey);
+    if (conversationQueueDrainLocks.has(normalizedQueueKey)) return true;
+
+    for (const attemptState of activeAttempts.values()) {
+      if (doesAttemptBelongToConversationQueueKey(attemptState, normalizedQueueKey)) {
+        return true;
+      }
+    }
+
+    for (const retryTask of pendingRetryAttempts.values()) {
+      if (doesRetryTaskBelongToConversationQueueKey(retryTask, normalizedQueueKey)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function scheduleConversationQueueFlush(queueKey, options = {}) {
+    const normalizedQueueKey = resolveConversationQueueKey(queueKey);
+    if (!normalizedQueueKey) return;
+    const normalizedOptions = (options && typeof options === 'object') ? options : {};
+    const delayMs = Number.isFinite(normalizedOptions.delayMs)
+      ? Math.max(0, normalizedOptions.delayMs)
+      : 0;
+
+    setTimeout(() => {
+      void flushConversationSendQueue(normalizedQueueKey);
+    }, delayMs);
+  }
+
+  /**
+   * 启动指定会话队列中的下一条消息。
+   *
+   * 设计说明：
+   * - 前台会话直接复用当前 UI / 内存态；
+   * - 后台会话会先加载该会话的历史快照，再在 detached history 上继续发送；
+   * - 全程不切换当前可见对话，因此用户可以切到别的会话，原会话仍在后台按 FIFO 自动续发。
+   */
+  async function flushConversationSendQueue(queueKey) {
+    const normalizedQueueKey = resolveConversationQueueKey(queueKey);
+    if (!normalizedQueueKey) return false;
+    if (conversationQueueDrainLocks.has(normalizedQueueKey)) return false;
+    if (hasPendingWorkForConversationQueue(normalizedQueueKey)) return false;
+
+    const queue = conversationSendQueues.get(normalizedQueueKey);
+    if (!Array.isArray(queue) || queue.length === 0) {
+      conversationSendQueues.delete(normalizedQueueKey);
+      return false;
+    }
+
+    const nextTask = queue.shift();
+    if (queue.length === 0) {
+      conversationSendQueues.delete(normalizedQueueKey);
+    }
+    if (!nextTask || !nextTask.options) {
+      if (hasQueuedMessagesForConversation(normalizedQueueKey)) {
+        scheduleConversationQueueFlush(normalizedQueueKey);
+      }
+      return false;
+    }
+
+    conversationQueueDrainLocks.add(normalizedQueueKey);
+    try {
+      let dispatchOptions = nextTask.options;
+      const queueConversationId = normalizeConversationId(normalizedQueueKey);
+      const shouldDispatchInBackground = !!(queueConversationId && !isConversationQueueKeyActive(normalizedQueueKey));
+      if (shouldDispatchInBackground) {
+        const conversationSnapshot = await chatHistoryUI?.getConversationSnapshotById?.(queueConversationId);
+        if (!conversationSnapshot || !Array.isArray(conversationSnapshot.messages)) {
+          throw new Error(`后台续发失败：找不到会话 ${queueConversationId} 的历史快照`);
+        }
+        dispatchOptions = {
+          ...dispatchOptions,
+          conversationIdOverride: queueConversationId,
+          historyMessagesSnapshot: cloneDataSafely(conversationSnapshot.messages) || [],
+          conversationApiLockSnapshot: cloneDataSafely(
+            dispatchOptions?.conversationApiLockSnapshot ?? conversationSnapshot.apiLock ?? null
+          )
+        };
+      }
+      await sendMessageCore(dispatchOptions);
+    } catch (error) {
+      console.error('处理会话发送队列失败:', error);
+    } finally {
+      conversationQueueDrainLocks.delete(normalizedQueueKey);
+      if (hasQueuedMessagesForConversation(normalizedQueueKey)) {
+        scheduleConversationQueueFlush(normalizedQueueKey);
+      }
+    }
+
+    return true;
+  }
+
+  async function waitForConversationQueueIdle(queueKey, timeoutMs = 3000) {
+    const normalizedQueueKey = resolveConversationQueueKey(queueKey);
+    const safeTimeoutMs = Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : 3000;
+    const startAt = Date.now();
+
+    while (hasPendingWorkForConversationQueue(normalizedQueueKey)) {
+      if ((Date.now() - startAt) >= safeTimeoutMs) break;
+      await new Promise((resolve) => setTimeout(resolve, 16));
+    }
+  }
+
+  function abortRequestsForConversationQueue(queueKey, options = {}) {
+    const normalizedQueueKey = resolveConversationQueueKey(queueKey);
+    if (!normalizedQueueKey) return false;
+
+    const normalizedOptions = (options && typeof options === 'object') ? options : {};
+    const suppressQueueFlush = normalizedOptions.suppressQueueFlush === true;
+    let abortedAny = false;
+    const canceledRetryQueueKeys = new Set();
+
+    for (const attemptState of activeAttempts.values()) {
+      if (!doesAttemptBelongToConversationQueueKey(attemptState, normalizedQueueKey)) continue;
+      attemptState.manualAbort = true;
+      try { attemptState.controller?.abort(); } catch (error) { console.error('中止会话内请求失败:', error); }
+      abortedAny = true;
+    }
+
+    for (const retryTask of Array.from(pendingRetryAttempts.values())) {
+      if (!doesRetryTaskBelongToConversationQueueKey(retryTask, normalizedQueueKey)) continue;
+      const canceled = cancelPendingRetryTask(retryTask, 'retry canceled by conversation abort');
+      abortedAny = canceled || abortedAny;
+      if (canceled) {
+        canceledRetryQueueKeys.add(resolveConversationQueueKey(retryTask.boundConversationId));
+      }
+    }
+
+    if (!suppressQueueFlush) {
+      for (const canceledQueueKey of canceledRetryQueueKeys) {
+        scheduleConversationQueueFlush(canceledQueueKey);
+      }
+    }
+
+    return abortedAny;
+  }
+
+  function updateCurrentConversationContext(id) {
+    const previousConversationId = normalizeConversationId(currentConversationId);
+    const previousQueueKey = previousConversationId || getActiveDraftConversationQueueKey();
+    const nextConversationId = normalizeConversationId(id);
+
+    if (!previousConversationId && nextConversationId) {
+      moveConversationSendQueue(previousQueueKey, nextConversationId);
+    } else if (previousConversationId && !nextConversationId) {
+      rotateActiveDraftConversationQueueKey();
+    }
+
+    currentConversationId = nextConversationId || null;
+    clearBackgroundCompletedConversationMarker(nextConversationId);
+
+    try {
+      services.conversationPresence?.setActiveConversationId?.(currentConversationId);
+    } catch (_) {}
+
+    scheduleConversationQueueFlush(nextConversationId || getActiveDraftConversationQueueKey());
+  }
+
 
   function resolveAbortTarget(target) {
     const isElementTarget = target && typeof target === 'object' && target.nodeType === 1;
@@ -1324,6 +1642,15 @@ export function createMessageSender(appContext) {
     }
   }
 
+  function isAttemptUsingDetachedMainConversationHistory(attemptState) {
+    const historyMessages = Array.isArray(attemptState?.historyMessagesRef)
+      ? attemptState.historyMessagesRef
+      : null;
+    if (!historyMessages) return false;
+    const activeHistoryMessages = chatHistoryManager?.chatHistory?.messages || [];
+    return !attemptState?.threadContext && historyMessages !== activeHistoryMessages;
+  }
+
   async function persistAttemptConversationSnapshot(attemptState, options = {}) {
     if (!attemptState || typeof chatHistoryUI?.saveCurrentConversation !== 'function') return null;
     captureAttemptConversationContext(attemptState);
@@ -1374,7 +1701,7 @@ export function createMessageSender(appContext) {
       if (savedId) {
         updateAttemptBoundConversationId(attemptState, savedId);
         if (shouldActivate) {
-          currentConversationId = savedId;
+          updateCurrentConversationContext(savedId);
         }
       }
       attemptState.lastPersistAt = Date.now();
@@ -1454,6 +1781,83 @@ export function createMessageSender(appContext) {
       Object.assign(node, historyPatch);
     }
     node.hasInlineImages = Array.isArray(processedContent) && processedContent.some(p => p?.type === 'image_url');
+    return node;
+  }
+
+  function createUserHistoryNodeForDetachedList(payload) {
+    const {
+      content,
+      imagesHTML,
+      historyParentId,
+      historyPatch,
+      meta,
+      historyMessagesRef,
+      pageMeta = null
+    } = payload || {};
+    const targetMessages = Array.isArray(historyMessagesRef) ? historyMessagesRef : null;
+    if (!targetMessages) return null;
+
+    const processedContent = imageHandler.processImageTags(content || '', imagesHTML || '');
+    const node = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      role: 'user',
+      content: processedContent,
+      parentId: historyParentId || null,
+      children: [],
+      timestamp: Date.now(),
+      thoughtsRaw: null,
+      thoughtSignature: null,
+      thoughtSignatureSource: null,
+      reasoning_content: null,
+      tool_calls: null,
+      apiUuid: null,
+      apiDisplayName: '',
+      apiModelId: '',
+      apiUsage: null,
+      hasInlineImages: false,
+      promptType: null,
+      promptMeta: null,
+      preprocessOriginalText: null,
+      preprocessRenderedText: null,
+      pageMeta: null
+    };
+
+    targetMessages.push(node);
+    if (historyParentId) {
+      const parentNode = targetMessages.find((item) => item && item.id === historyParentId);
+      if (parentNode) {
+        if (!Array.isArray(parentNode.children)) {
+          parentNode.children = [];
+        }
+        parentNode.children.push(node.id);
+      }
+    }
+
+    if (meta && typeof meta === 'object') {
+      if (typeof meta.promptType === 'string') {
+        node.promptType = meta.promptType;
+      }
+      if (meta.promptMeta && typeof meta.promptMeta === 'object') {
+        node.promptMeta = meta.promptMeta;
+      }
+    }
+
+    if (historyPatch && typeof historyPatch === 'object') {
+      Object.assign(node, historyPatch);
+    }
+
+    const hasOtherUserMessage = targetMessages.some(
+      (item) => item && item.id !== node.id && String(item.role || '').toLowerCase() === 'user'
+    );
+    if (!hasOtherUserMessage && pageMeta && typeof pageMeta === 'object') {
+      const url = typeof pageMeta.url === 'string' ? pageMeta.url.trim() : '';
+      const title = typeof pageMeta.title === 'string' ? pageMeta.title.trim() : '';
+      if (url || title) {
+        node.pageMeta = { url, title };
+      }
+    }
+
+    node.hasInlineImages = Array.isArray(processedContent) && processedContent.some((part) => part?.type === 'image_url');
     return node;
   }
 
@@ -2771,6 +3175,12 @@ export function createMessageSender(appContext) {
    * @param {string} [options.specificPromptType] - 指定使用的提示词类型
    * @param {Object|null} [options.promptMeta] - 与提示词类型相关的补充信息（例如 { selectionText }）
    * @param {string} [options.originalMessageText] - 原始消息文本，用于恢复输入框内容
+   * @param {string|null} [options.inputImagesHtmlSnapshot] - 入队时冻结的图片 HTML 片段
+   * @param {boolean|null} [options.inputHasImagesSnapshot] - 入队时冻结的“是否有图”状态
+   * @param {boolean|null} [options.inputHasScreenshotSnapshot] - 入队时冻结的“是否含截图”状态
+   * @param {string} [options.conversationIdOverride] - 强制绑定本次发送所属的会话ID（用于后台队列）
+   * @param {Array<Object>|null} [options.historyMessagesSnapshot] - 后台队列使用的会话消息快照（完整列表）
+   * @param {Object|null} [options.conversationApiLockSnapshot] - 后台发送时沿用的会话 API 锁快照
    * @param {boolean} [options.regenerateMode] - 是否为重新生成模式
    * @param {string} [options.messageId] - 重新生成模式下的消息ID（通常是用户消息的ID）
    * @param {string|null} [options.targetAiMessageId] - 重新生成模式下要“原地替换”的 AI 消息ID（为空则按旧逻辑追加新消息）
@@ -2789,6 +3199,12 @@ export function createMessageSender(appContext) {
       specificPromptType = null,
       promptMeta: externalPromptMeta = null,
       originalMessageText = null,
+      inputImagesHtmlSnapshot = null,
+      inputHasImagesSnapshot = null,
+      inputHasScreenshotSnapshot = null,
+      conversationIdOverride = '',
+      historyMessagesSnapshot = null,
+      conversationApiLockSnapshot = undefined,
       regenerateMode = false,
       messageId = null,
       targetAiMessageId = null,
@@ -2798,7 +3214,8 @@ export function createMessageSender(appContext) {
       pageContentSnapshot = null,
       conversationSnapshot = null,
       omitDefaultSystemPrompt: externalOmitDefaultSystemPrompt = false,
-      aspectRatioOverride: externalAspectRatioOverride = null
+      aspectRatioOverride: externalAspectRatioOverride = null,
+      __skipClearInputs = false
     } = options;
 
     const conversationApiInfo = (typeof chatHistoryUI?.resolveActiveConversationApiConfig === 'function')
@@ -2845,12 +3262,24 @@ export function createMessageSender(appContext) {
       : 0;
     let aspectRatioOverride = externalAspectRatioOverride || null;
 
-    const hasImagesInInput = inputController ? inputController.hasImages() : !!imageContainer.querySelector('.image-tag');
+    const snapshotImagesHtml = (typeof inputImagesHtmlSnapshot === 'string')
+      ? inputImagesHtmlSnapshot
+      : null;
+    const resolvedInputImagesHtml = snapshotImagesHtml !== null
+      ? snapshotImagesHtml
+      : (inputController ? inputController.getImagesHTML() : imageContainer.innerHTML);
+    const hasImagesInInput = (typeof inputHasImagesSnapshot === 'boolean')
+      ? inputHasImagesSnapshot
+      : (snapshotImagesHtml !== null
+        ? !!snapshotImagesHtml.trim()
+        : (inputController ? inputController.hasImages() : !!imageContainer.querySelector('.image-tag')));
     // 如果是重新生成，使用原始消息文本；否则从输入框获取
     let messageText = (originalMessageText !== null && originalMessageText !== undefined)
       ? originalMessageText
       : (inputController ? inputController.getInputText() : messageInput.textContent);
-    const imageContainsScreenshot = inputController ? inputController.hasScreenshot() : !!imageContainer.querySelector('img[alt="page-screenshot.png"]');
+    const imageContainsScreenshot = (typeof inputHasScreenshotSnapshot === 'boolean')
+      ? inputHasScreenshotSnapshot
+      : (inputController ? inputController.hasScreenshot() : !!imageContainer.querySelector('img[alt="page-screenshot.png"]'));
 
     // 输入为空且没有图片时，仍可能由模板生成结构化消息；是否早退需在模板解析后再判断。
     const isEmptyMessageRaw = !messageText && !hasImagesInInput;
@@ -3059,6 +3488,15 @@ export function createMessageSender(appContext) {
     try {
       // 开始处理消息：为本次请求注册 attempt，并在必要时开启全局“正在处理”状态
       attempt = beginAttempt();
+      if (Array.isArray(historyMessagesSnapshot)) {
+        attempt.historyMessagesRef = historyMessagesSnapshot;
+      }
+      if (conversationIdOverride) {
+        updateAttemptBoundConversationId(attempt, conversationIdOverride);
+      }
+      if (conversationApiLockSnapshot !== undefined) {
+        attempt.boundApiLock = cloneDataSafely(conversationApiLockSnapshot);
+      }
       // 固定本次请求绑定的会话上下文，后续即使切到其它会话也可继续后台落库。
       captureAttemptConversationContext(attempt);
       const signal = attempt.controller.signal;
@@ -3094,6 +3532,8 @@ export function createMessageSender(appContext) {
 
       // 在重新生成模式下，不添加新的用户消息
       let userMessageDiv;
+      let detachedUserMessageNode = null;
+      const isDetachedMainConversationSend = isAttemptUsingDetachedMainConversationHistory(attempt);
       if (!isEmptyMessageRaw && !regenerateMode) {
         const promptMetaForHistory = buildPromptMetaForHistory({
           promptType: currentPromptType || 'none',
@@ -3117,7 +3557,7 @@ export function createMessageSender(appContext) {
               'user',
               false,
               null,
-              inputController ? inputController.getImagesHTML() : imageContainer.innerHTML,
+              resolvedInputImagesHtml,
               null,
               null,
               historyMeta,
@@ -3141,14 +3581,26 @@ export function createMessageSender(appContext) {
           }
         }
 
-        if (!userMessageDiv) {
+        if (!userMessageDiv && isDetachedMainConversationSend) {
+          detachedUserMessageNode = createUserHistoryNodeForDetachedList({
+            content: messageTextForHistory,
+            imagesHTML: resolvedInputImagesHtml,
+            historyParentId: getDetachedConversationParentMessageId(attempt?.historyMessagesRef || []),
+            historyPatch: preprocessHistoryPatch || null,
+            meta: historyMeta,
+            historyMessagesRef: attempt?.historyMessagesRef || null,
+            pageMeta: pageContentSnapshot || null
+          });
+        }
+
+        if (!userMessageDiv && !detachedUserMessageNode) {
           const messageOptions = preprocessHistoryPatch ? { historyPatch: preprocessHistoryPatch } : null;
           userMessageDiv = messageProcessor.appendMessage(
             messageTextForHistory,
             'user',
             false,
             null,
-            inputController ? inputController.getImagesHTML() : imageContainer.innerHTML,
+            resolvedInputImagesHtml,
             null,
             null,
             historyMeta,
@@ -3165,8 +3617,12 @@ export function createMessageSender(appContext) {
       } else if (attempt) {
         // 普通对话：锁定本次 AI 回复应挂载的父节点，避免后续链路断裂。
         const regenParentId = (regenerateMode && typeof messageId === 'string') ? messageId.trim() : '';
-        const userMessageId = userMessageDiv?.getAttribute?.('data-message-id') || '';
-        const fallbackParentId = chatHistoryManager.chatHistory.currentNode || null;
+        const userMessageId = userMessageDiv?.getAttribute?.('data-message-id')
+          || detachedUserMessageNode?.id
+          || '';
+        const fallbackParentId = isDetachedMainConversationSend
+          ? getDetachedConversationParentMessageId(attempt?.historyMessagesRef || [])
+          : (chatHistoryManager.chatHistory.currentNode || null);
         attempt.parentMessageIdForAi = regenParentId || userMessageId || fallbackParentId;
       }
 
@@ -3176,12 +3632,12 @@ export function createMessageSender(appContext) {
       if (attempt) {
         captureAttemptConversationContext(attempt);
       }
-      if (!regenerateMode && userMessageDiv) {
+      if (!regenerateMode && (userMessageDiv || detachedUserMessageNode)) {
         await persistAttemptConversationSnapshot(attempt, { force: true });
       }
 
       // 清空输入区域
-      if (!regenerateMode) {
+      if (!regenerateMode && !__skipClearInputs) {
         clearInputs();
       }
 
@@ -3241,9 +3697,10 @@ export function createMessageSender(appContext) {
       // 添加加载状态消息（仅在“追加新消息”模式下需要占位）
       if (!canUpdateExistingAiMessage) {
         const threadUiActive = isThreadUiActive(activeThreadContext);
+        const shouldRenderMainConversationDom = isAttemptMainConversationActive(attempt);
         const loadingOptions = activeThreadContext
           ? { container: activeThreadContext.container, skipDom: !threadUiActive }
-          : null;
+          : (!shouldRenderMainConversationDom ? { skipDom: true } : null);
         loadingMessage = messageProcessor.appendMessage('正在处理...', 'ai', true, null, null, null, null, null, loadingOptions);
         attempt.loadingMessage = loadingMessage;
         if (loadingMessage) {
@@ -3278,14 +3735,19 @@ export function createMessageSender(appContext) {
           // - 更可靠的依据是本次请求实际使用的 pageContentResponse（它来自 content script，对应实际被总结/发送的页面内容）；
           // - 因此这里不仅要“补齐缺失”，还要允许在发现不一致时进行“校准覆盖”，避免新会话错绑到上一个对话的网页。
           try {
-            if (!regenerateMode && userMessageDiv) {
-              const userMessageId = userMessageDiv.getAttribute('data-message-id') || '';
+            if (!regenerateMode && (userMessageDiv || detachedUserMessageNode)) {
+              const userMessageId = userMessageDiv?.getAttribute?.('data-message-id')
+                || detachedUserMessageNode?.id
+                || '';
               const node = userMessageId
-                ? chatHistoryManager?.chatHistory?.messages?.find(m => m.id === userMessageId)
+                ? resolveAttemptAiNode({ historyMessagesRef: attempt?.historyMessagesRef || [] }, userMessageId)
                 : null;
               const isUser = !!(node && String(node.role || '').toLowerCase() === 'user');
               if (isUser) {
-                const hasOtherUserMessage = chatHistoryManager.chatHistory.messages.some(
+                const historyMessages = Array.isArray(attempt?.historyMessagesRef)
+                  ? attempt.historyMessagesRef
+                  : (chatHistoryManager.chatHistory.messages || []);
+                const hasOtherUserMessage = historyMessages.some(
                   (m) => m && m.id !== node.id && String(m.role || '').toLowerCase() === 'user'
                 );
                 if (!hasOtherUserMessage) {
@@ -3323,6 +3785,8 @@ export function createMessageSender(appContext) {
       } else if (activeThreadContext) {
         const threadChainOverride = (regenerateMode && messageId) ? messageId : null;
         conversationChain = buildThreadConversationChain(activeThreadContext, threadChainOverride);
+      } else if (isAttemptUsingDetachedMainConversationHistory(attempt)) {
+        conversationChain = buildMainConversationChainFromMessages(attempt?.historyMessagesRef || []);
       } else {
         conversationChain = getCurrentConversationChain();
       }
@@ -3335,7 +3799,9 @@ export function createMessageSender(appContext) {
       // 兜底：若主链断裂导致上下文过短，回退到“按显示顺序的主聊天记录”。
       // 典型症状：currentNode 正常，但 parentId 链缺失，getCurrentConversationChain 只返回 1 条。
       if (!activeThreadContext && sendChatHistoryFlag && Array.isArray(conversationChain) && conversationChain.length <= 1) {
-        const historyMessages = chatHistoryManager?.chatHistory?.messages || [];
+        const historyMessages = isAttemptUsingDetachedMainConversationHistory(attempt)
+          ? (attempt?.historyMessagesRef || [])
+          : (chatHistoryManager?.chatHistory?.messages || []);
         if (historyMessages.length > conversationChain.length) {
           const fallback = historyMessages.filter((node) => !node?.threadId && !node?.threadHiddenSelection);
           if (fallback.length > conversationChain.length) {
@@ -3496,7 +3962,7 @@ export function createMessageSender(appContext) {
         || normalizeConversationId(attempt?.boundConversationId)
         || normalizeConversationId(chatHistoryUI?.getCurrentConversationId?.());
       if (finalConversationId && isAttemptMainConversationActive(attempt)) {
-        currentConversationId = finalConversationId;
+        updateCurrentConversationContext(finalConversationId);
       }
       if (attempt) {
         attempt.completedSuccessfully = true;
@@ -3675,6 +4141,7 @@ export function createMessageSender(appContext) {
       return { ok: false, error, apiConfig: (effectiveApiConfig || resolvedApiConfig || preferredApiConfig || lockConfig || apiManager.getSelectedConfig()), retryHint, retry };
     } finally {
       finalizeAttempt(attempt);
+      scheduleConversationQueueFlush(attempt?.boundConversationId || getCurrentActiveConversationQueueKey());
     }
     // 成功：返回 ok 与实际使用的 api 配置（供外部记录/重试）
     return { ok: true, apiConfig: (effectiveApiConfig || resolvedApiConfig || preferredApiConfig || lockConfig || apiManager.getSelectedConfig()) };
@@ -3747,6 +4214,56 @@ export function createMessageSender(appContext) {
       aspectRatio: aspectRatio || null
     };
   }
+
+  /**
+   * 为“排队中的待发送消息”冻结最小必要快照。
+   *
+   * 为什么这里只冻结输入区与页面快照，而不冻结整段会话历史：
+   * - 用户要求队列按 FIFO 串行发送，后一条应在前一条回复完成后再基于“最新会话状态”发出；
+   * - 因此会话历史必须在真正执行时再读取，才能拿到前一条 AI 回复；
+   * - 但输入区文本/图片若不提前冻结，就会在用户继续编辑时被覆盖，甚至误清掉当前草稿。
+   */
+  async function buildQueuedSendOptions(baseOptions, snapshot = {}) {
+    const normalizedBaseOptions = (baseOptions && typeof baseOptions === 'object') ? baseOptions : {};
+    const normalizedSnapshot = (snapshot && typeof snapshot === 'object') ? snapshot : {};
+    const activeConversationApiInfo = (typeof chatHistoryUI?.resolveActiveConversationApiConfig === 'function')
+      ? chatHistoryUI.resolveActiveConversationApiConfig()
+      : null;
+    const queueResolvedApiConfig = cloneDataSafely(
+      normalizedBaseOptions.resolvedApiConfig
+      || resolveApiParamForSend(normalizedBaseOptions.api)
+      || activeConversationApiInfo?.lockConfig
+      || apiManager.getSelectedConfig()
+      || null
+    );
+    const queueConversationApiLockSnapshot = cloneDataSafely(
+      chatHistoryUI?.getActiveConversationApiLock?.() || null
+    );
+    const queueConversationId = normalizeConversationId(currentConversationId)
+      || normalizeConversationId(chatHistoryUI?.getCurrentConversationId?.());
+    const queuedOptions = {
+      ...normalizedBaseOptions,
+      originalMessageText: typeof normalizedSnapshot.baseText === 'string'
+        ? normalizedSnapshot.baseText
+        : (normalizedBaseOptions.originalMessageText ?? ''),
+      inputImagesHtmlSnapshot: typeof normalizedSnapshot.imagesHtml === 'string'
+        ? normalizedSnapshot.imagesHtml
+        : '',
+      inputHasImagesSnapshot: !!normalizedSnapshot.hasImages,
+      inputHasScreenshotSnapshot: !!normalizedSnapshot.hasScreenshot,
+      __skipClearInputs: true,
+      resolvedApiConfig: queueResolvedApiConfig || normalizedBaseOptions.resolvedApiConfig || null,
+      conversationApiLockSnapshot: queueConversationApiLockSnapshot,
+      conversationIdOverride: queueConversationId || normalizedBaseOptions.conversationIdOverride || ''
+    };
+
+    if (!queuedOptions.pageContentSnapshot && !isTemporaryMode) {
+      queuedOptions.pageContentSnapshot = await getPageContent();
+    }
+
+    return queuedOptions;
+  }
+
   /**
    * Public send entry:
    * - Handles slash commands and trailing control markers.
@@ -3832,6 +4349,68 @@ export function createMessageSender(appContext) {
     }
     if (aspectRatio) {
       singleOpts.aspectRatioOverride = aspectRatio;
+    }
+
+    const queueSetting = settingsManager?.getSetting?.('queueCurrentConversationMessages');
+    if (typeof queueSetting === 'boolean') {
+      queueCurrentConversationMessages = queueSetting;
+    }
+
+    const currentConversationQueueKey = getCurrentActiveConversationQueueKey();
+    const hasPendingWorkInCurrentConversation = hasPendingWorkForConversationQueue(currentConversationQueueKey);
+    const hasQueuedMessagesInCurrentConversation = hasQueuedMessagesForConversation(currentConversationQueueKey);
+    const canQueueOrInterrupt = !!(
+      singleOpts.regenerateMode
+      || singleOpts.forceSendFullHistory
+      || baseText
+      || hasImagesInInput
+    );
+
+    if ((hasPendingWorkInCurrentConversation || hasQueuedMessagesInCurrentConversation) && canQueueOrInterrupt) {
+      const shouldEnqueue = hasQueuedMessagesInCurrentConversation || queueCurrentConversationMessages;
+
+      if (shouldEnqueue) {
+        const imagesHtmlSnapshot = !singleOpts.regenerateMode
+          ? (inputController ? inputController.getImagesHTML() : imageContainer.innerHTML)
+          : '';
+        const hasScreenshotSnapshot = !singleOpts.regenerateMode
+          ? (inputController ? inputController.hasScreenshot() : !!imageContainer.querySelector('img[alt="page-screenshot.png"]'))
+          : false;
+
+        // 入队后立即清空本次输入，避免用户误以为发送未被接收；
+        // 真正执行时使用冻结快照，不再触碰此后的实时输入框内容。
+        if (!singleOpts.regenerateMode) {
+          clearInputs();
+          inputController?.focusToEnd?.();
+        }
+
+        const queuedOptions = await buildQueuedSendOptions(singleOpts, {
+          baseText,
+          imagesHtml: imagesHtmlSnapshot,
+          hasImages: hasImagesInInput,
+          hasScreenshot: hasScreenshotSnapshot
+        });
+        const queueLength = enqueueConversationSend(currentConversationQueueKey, {
+          options: queuedOptions,
+          queuedAt: Date.now()
+        });
+        scheduleConversationQueueFlush(currentConversationQueueKey);
+
+        if (typeof showNotification === 'function') {
+          const waitingCount = Math.max(0, queueLength - 1);
+          showNotification({
+            message: waitingCount > 0
+              ? `已加入发送队列，前方还有 ${waitingCount} 条`
+              : '已加入发送队列，当前回复完成后自动发送',
+            type: 'info',
+            duration: 1800
+          });
+        }
+        return { ok: true, queued: true, queueLength };
+      }
+
+      abortRequestsForConversationQueue(currentConversationQueueKey, { suppressQueueFlush: true });
+      await waitForConversationQueueIdle(currentConversationQueueKey);
     }
 
     return sendMessageCore(singleOpts);
@@ -5345,6 +5924,7 @@ export function createMessageSender(appContext) {
     if (!activeAttempts.size && !pendingRetryAttempts.size) return false;
 
     let abortedAny = false;
+    const canceledRetryQueueKeys = new Set();
     const strictTarget = !!(options && typeof options === 'object' && options.strictTarget);
     const { targetElement, normalizedTargetId } = resolveAbortTarget(target);
 
@@ -5358,7 +5938,11 @@ export function createMessageSender(appContext) {
 
       for (const retryTask of Array.from(pendingRetryAttempts.values())) {
         if (!doesRetryTaskMatchAbortTarget(retryTask, normalizedTargetId)) continue;
-        abortedAny = cancelPendingRetryTask(retryTask, 'retry canceled by manual abort') || abortedAny;
+        const canceled = cancelPendingRetryTask(retryTask, 'retry canceled by manual abort');
+        abortedAny = canceled || abortedAny;
+        if (canceled) {
+          canceledRetryQueueKeys.add(resolveConversationQueueKey(retryTask.boundConversationId));
+        }
       }
 
       if (!abortedAny && !strictTarget) {
@@ -5370,7 +5954,11 @@ export function createMessageSender(appContext) {
         } else {
           const lastRetryTask = Array.from(pendingRetryAttempts.values()).slice(-1)[0] || null;
           if (lastRetryTask) {
-            abortedAny = cancelPendingRetryTask(lastRetryTask, 'retry canceled by manual abort') || abortedAny;
+            const canceled = cancelPendingRetryTask(lastRetryTask, 'retry canceled by manual abort');
+            abortedAny = canceled || abortedAny;
+            if (canceled) {
+              canceledRetryQueueKeys.add(resolveConversationQueueKey(lastRetryTask.boundConversationId));
+            }
           }
         }
       }
@@ -5383,7 +5971,11 @@ export function createMessageSender(appContext) {
       }
 
       for (const retryTask of Array.from(pendingRetryAttempts.values())) {
-        abortedAny = cancelPendingRetryTask(retryTask, 'retry canceled by global abort') || abortedAny;
+        const canceled = cancelPendingRetryTask(retryTask, 'retry canceled by global abort');
+        abortedAny = canceled || abortedAny;
+        if (canceled) {
+          canceledRetryQueueKeys.add(resolveConversationQueueKey(retryTask.boundConversationId));
+        }
       }
 
       if (abortedAny) {
@@ -5407,6 +5999,10 @@ export function createMessageSender(appContext) {
       }
     }
 
+    for (const queueKey of canceledRetryQueueKeys) {
+      scheduleConversationQueueFlush(queueKey);
+    }
+
     return abortedAny;
   }
 
@@ -5423,23 +6019,17 @@ export function createMessageSender(appContext) {
     autoRetryEnabled = !!value;
   }
 
+  function setQueueCurrentConversationMessages(value) {
+    queueCurrentConversationMessages = value !== false;
+  }
+
   /**
    * 设置当前会话ID
    * @public
    * @param {string} id - 会话ID
    */
   function setCurrentConversationId(id) {
-    currentConversationId = id;
-    // console.log(`消息发送器: 设置当前会话ID为 ${id}`);
-    clearBackgroundCompletedConversationMarker(id);
-
-    // 同步到“会话-标签页存在性”服务：用于聊天记录面板提示“该会话已在其它标签页打开”
-    // 设计说明：
-    // - setCurrentConversationId 是当前工程里变更会话ID的统一入口（加载历史/新建会话/分支/清空等最终都会调用）；
-    // - 把上报逻辑放在这里，可以确保不会遗漏任何会话切换场景，且对其它模块保持低耦合（可选服务，失败不影响主流程）。
-    try {
-      services.conversationPresence?.setActiveConversationId?.(id);
-    } catch (_) {}
+    updateCurrentConversationContext(id);
   }
 
   /**
@@ -5485,6 +6075,7 @@ export function createMessageSender(appContext) {
     getTemporaryModeState,
     setSendChatHistory,
     setAutoRetry,
+    setQueueCurrentConversationMessages,
     setCurrentConversationId,
     getCurrentConversationId,
     getShouldAutoScroll,

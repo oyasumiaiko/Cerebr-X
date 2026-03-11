@@ -2333,6 +2333,36 @@ export function createChatHistoryUI(appContext) {
     return cached;
   }
 
+  function cloneConversationSnapshot(conversation) {
+    if (!conversation || typeof conversation !== 'object') return null;
+    try {
+      return structuredClone(conversation);
+    } catch (_) {
+      try {
+        return JSON.parse(JSON.stringify(conversation));
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
+  /**
+   * 获取指定会话的“可安全后台修改”的快照副本。
+   *
+   * 设计说明：
+   * - 后台自动续发需要读到某个会话的最新历史，但不能直接原地修改 loadedConversations 中的缓存对象；
+   * - 因此这里返回深拷贝，调用方可在副本上追加消息、增量写库，不会污染当前 UI 正在使用的内存对象；
+   * - 真正持久化时仍通过 saveCurrentConversation/updateConversationInCache 回写正式缓存。
+   *
+   * @param {string} conversationId
+   * @param {boolean} [forceReload=false]
+   * @returns {Promise<Object|null>}
+   */
+  async function getConversationSnapshotById(conversationId, forceReload = false) {
+    const conversation = await getConversationFromCacheOrLoad(conversationId, forceReload);
+    return cloneConversationSnapshot(conversation);
+  }
+
   function getActiveConversationSummary() {
     return (typeof activeConversation?.summary === 'string') ? activeConversation.summary : '';
   }
@@ -13956,6 +13986,7 @@ export function createChatHistoryUI(appContext) {
     getActiveConversationSummary,
     updateConversationSummary,
     clearMemoryCache,
+    getConversationSnapshotById,
     formatRelativeTime,
     createForkConversation,
     restartAutoBackupScheduler,

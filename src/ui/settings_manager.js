@@ -115,6 +115,9 @@ export function createSettingsManager(appContext) {
     // 说明：即使关闭该开关，Cerebr 仍会在接收响应时照常把 signature 存入历史，便于用户随时重新开启。
     shouldSendSignature: true,
     autoRetry: false,
+    // 同一会话内若已有流式回复，后续发送默认进入 FIFO 队列；
+    // 关闭后恢复为“中断当前会话生成并立即发送下一条”。
+    queueCurrentConversationMessages: true,
     sidebarPosition: 'right', // 'left' 或 'right'
     stopAtTop: true, // 滚动到顶部时停止
     scaleFactor: 1, // Added default scaleFactor
@@ -672,6 +675,15 @@ export function createSettingsManager(appContext) {
       group: 'behavior',
       defaultValue: DEFAULT_SETTINGS.autoRetry,
       apply: (v) => applyAutoRetry(v)
+    },
+    {
+      key: 'queueCurrentConversationMessages',
+      type: 'toggle',
+      id: 'queue-current-conversation-messages-switch',
+      label: '同对话发送排队',
+      group: 'behavior',
+      defaultValue: DEFAULT_SETTINGS.queueCurrentConversationMessages,
+      apply: (v) => applyQueueCurrentConversationMessages(v)
     },
     {
       key: 'showModelNameInPlaceholder',
@@ -3162,6 +3174,14 @@ export function createSettingsManager(appContext) {
       messageSender.setAutoRetry(normalized);
     }
   }
+
+  function applyQueueCurrentConversationMessages(enabled) {
+    const normalized = enabled !== false;
+    const messageSender = getMessageSender();
+    if (messageSender && typeof messageSender.setQueueCurrentConversationMessages === 'function') {
+      messageSender.setQueueCurrentConversationMessages(normalized);
+    }
+  }
   
   // 应用“输入框占位符显示模型名”设置
   function applyShowModelNameInPlaceholder(enabled) {
@@ -3392,6 +3412,8 @@ export function createSettingsManager(appContext) {
   function setSendChatHistory(enabled) { setSetting('shouldSendChatHistory', enabled); }
 
   function setAutoRetry(enabled) { setSetting('autoRetry', enabled); }
+
+  function setQueueCurrentConversationMessages(enabled) { setSetting('queueCurrentConversationMessages', enabled); }
   
   // 设置侧边栏位置
   function setSidebarPosition(position) { console.log(`设置侧边栏位置: ${position}`); setSetting('sidebarPosition', position); }
@@ -3470,6 +3492,7 @@ export function createSettingsManager(appContext) {
     setStopAtTop,
     setSendChatHistory,
     setAutoRetry,
+    setQueueCurrentConversationMessages,
     setSidebarPosition,
     refreshBackgroundImage,
     applyTheme
