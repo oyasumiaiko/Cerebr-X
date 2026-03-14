@@ -37,6 +37,7 @@ export function createMessageSender(appContext) {
   const getCurrentConversationChain = chatHistoryManager.getCurrentConversationChain;
   const chatContainer = dom.chatContainer;
   const threadContainer = dom.threadContainer;
+  const inputContainer = dom.inputContainer;
   const messageInput = dom.messageInput; // 保持兼容：占位符/样式仍可直接操作
   const imageContainer = dom.imageContainer; // 将逐步迁移到 inputController
   const scrollToBottom = utils.scrollToBottom;
@@ -1326,12 +1327,35 @@ export function createMessageSender(appContext) {
     };
   }
 
+  function getConversationQueuedSendPreviewMountPoint() {
+    if (inputContainer) {
+      return {
+        host: inputContainer,
+        // 预览插在图片区 / 文本输入行之前，形成“紧贴输入框上缘”的队列托盘。
+        anchor: imageContainer || inputContainer.firstElementChild || null
+      };
+    }
+
+    return {
+      host: chatContainer || null,
+      anchor: chatContainer?.firstElementChild || null
+    };
+  }
+
   function getConversationQueuedSendPreviewContainer() {
-    return chatContainer?.querySelector?.('.conversation-send-queue-preview') || null;
+    const { host } = getConversationQueuedSendPreviewMountPoint();
+    if (!host) {
+      return document.querySelector('.conversation-send-queue-preview');
+    }
+
+    return Array.from(host.children || []).find((child) => (
+      child?.classList?.contains('conversation-send-queue-preview')
+    )) || null;
   }
 
   function ensureConversationQueuedSendPreviewContainer() {
-    if (!chatContainer) return null;
+    const { host, anchor } = getConversationQueuedSendPreviewMountPoint();
+    if (!host) return null;
 
     let container = getConversationQueuedSendPreviewContainer();
     if (!container) {
@@ -1341,20 +1365,34 @@ export function createMessageSender(appContext) {
       container.setAttribute('aria-label', '当前会话待发送消息队列');
     }
 
-    if (chatContainer.firstElementChild !== container) {
-      chatContainer.prepend(container);
+    // 兼容旧实现：若容器曾被插到聊天滚动区顶部或输入区外部，这里统一迁回输入框附近。
+    document.querySelectorAll('.conversation-send-queue-preview').forEach((node) => {
+      if (node !== container) node.remove();
+    });
+
+    const shouldAppendToTail = !anchor || anchor === container;
+    if (container.parentElement !== host) {
+      if (shouldAppendToTail) {
+        host.appendChild(container);
+      } else {
+        host.insertBefore(container, anchor);
+      }
+    } else if (!shouldAppendToTail && container.nextElementSibling !== anchor) {
+      host.insertBefore(container, anchor);
+    } else if (shouldAppendToTail && host.lastElementChild !== container) {
+      host.appendChild(container);
     }
 
     return container;
   }
 
   /**
-   * 刷新“当前会话待发送队列”的顶部预览。
+   * 刷新“当前会话待发送队列”的输入框上方预览。
    *
    * 交互目标：
-   * - 用户在同一会话里连续发送多条消息时，能立刻看到哪些消息已排队；
-   * - 只展示“当前激活会话”的 queue，避免不同会话串 UI；
-   * - FIFO 顺序与内部 queue 一致：越早排队的消息越靠上。
+   * - 队列项应紧贴输入框，给用户明确的“已进入待发送队列”反馈；
+   * - 多条消息按 FIFO 从上到下排列，越早排队的越靠上；
+   * - 只展示当前激活会话的 queue，避免不同会话串 UI。
    */
   function refreshCurrentConversationQueuedSendPreview() {
     const existingContainer = getConversationQueuedSendPreviewContainer();
@@ -1376,11 +1414,11 @@ export function createMessageSender(appContext) {
 
     const title = document.createElement('div');
     title.className = 'conversation-send-queue-preview__title';
-    title.textContent = '待发送队列';
+    title.textContent = '发送队列';
 
     const count = document.createElement('div');
     count.className = 'conversation-send-queue-preview__count';
-    count.textContent = `${queue.length} 条`;
+    count.textContent = `排队中 ${queue.length}`;
 
     header.appendChild(title);
     header.appendChild(count);
@@ -1399,7 +1437,7 @@ export function createMessageSender(appContext) {
 
       const orderChip = document.createElement('span');
       orderChip.className = 'conversation-send-queue-preview__chip conversation-send-queue-preview__chip--order';
-      orderChip.textContent = `第 ${index + 1} 条`;
+      orderChip.textContent = `队列 ${index + 1}`;
       meta.appendChild(orderChip);
 
       if (preview.regenerateMode) {
