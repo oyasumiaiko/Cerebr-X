@@ -809,10 +809,12 @@ export async function getDatabaseStats() {
       thoughtSignature: 0,
       thoughtSignatureSource: 0,
       reasoning_content: 0,
+      response_reasoning_summary: 0,
       preprocessOriginalText: 0,
       preprocessRenderedText: 0,
       threadSelectionText: 0,
       tool_calls: 0,
+      response_tool_calls: 0,
       groundingMetadata: 0,
       promptMeta: 0,
       pageMeta: 0
@@ -846,6 +848,11 @@ export async function getDatabaseStats() {
         size += bytes;
         addMetaSize('reasoning_content', bytes);
       }
+      if (typeof msg.response_reasoning_summary === 'string' && msg.response_reasoning_summary) {
+        const bytes = encoder.encode(msg.response_reasoning_summary).length;
+        size += bytes;
+        addMetaSize('response_reasoning_summary', bytes);
+      }
       if (typeof msg.preprocessOriginalText === 'string' && msg.preprocessOriginalText) {
         const bytes = encoder.encode(msg.preprocessOriginalText).length;
         size += bytes;
@@ -865,6 +872,11 @@ export async function getDatabaseStats() {
         const bytes = calcJsonBytes(msg.tool_calls);
         size += bytes;
         addMetaSize('tool_calls', bytes);
+      }
+      if (msg.response_tool_calls) {
+        const bytes = calcJsonBytes(msg.response_tool_calls);
+        size += bytes;
+        addMetaSize('response_tool_calls', bytes);
       }
       if (msg.groundingMetadata) {
         const bytes = calcJsonBytes(msg.groundingMetadata);

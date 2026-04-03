@@ -8401,7 +8401,108 @@ body.chat-empty .empty-state-content {
     display: block;
 }
   
-  /* --- End of Styles for Thinking Process --- */
+/* Responses API 工具调用记录 */
+.message .response-tool-calls {
+    margin: 8px 0 0;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 50%, transparent);
+    background: color-mix(in srgb, var(--cerebr-message-ai-bg) 80%, transparent);
+    overflow: hidden;
+}
+
+.message .response-tool-calls > summary {
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 0.84em;
+    color: color-mix(in srgb, var(--cerebr-text-color) 72%, transparent);
+    user-select: none;
+}
+
+.message .response-tool-calls[open] > summary {
+    border-bottom: 1px solid color-mix(in srgb, var(--cerebr-border-color) 36%, transparent);
+}
+
+.message .response-tool-call-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px 12px;
+}
+
+.message .response-tool-call-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.83em;
+    color: color-mix(in srgb, var(--cerebr-text-color) 82%, transparent);
+}
+
+.message .response-tool-call-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.message .response-tool-call-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--cerebr-accent-color, var(--cerebr-border-color)) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 55%, transparent);
+    font-size: 0.88em;
+    color: color-mix(in srgb, var(--cerebr-text-color) 70%, transparent);
+}
+
+.message .response-tool-call-primary {
+    flex: 1 1 180px;
+    min-width: 0;
+    word-break: break-word;
+}
+
+.message .response-tool-call-status,
+.message .response-tool-call-secondary,
+.message .response-tool-call-source-title {
+    color: color-mix(in srgb, var(--cerebr-text-color) 60%, transparent);
+}
+
+.message .response-tool-call-arguments {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--cerebr-bg-color) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 36%, transparent);
+    font-size: 0.82em;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+}
+
+.message .response-tool-call-sources {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.message .response-tool-call-source-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.message .response-tool-call-source-link {
+    color: var(--cerebr-link-color, #3b82f6);
+    text-decoration: none;
+    word-break: break-all;
+}
+
+.message .response-tool-call-source-link:hover {
+    text-decoration: underline;
+}
+  
+/* --- End of Styles for Thinking Process --- */
 
 
   /* Inline editor for message re-edit */

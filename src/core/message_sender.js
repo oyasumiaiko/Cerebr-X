@@ -652,17 +652,199 @@ export function createMessageSender(appContext) {
     }).join('');
   }
 
+  /**
+   * 递归裁剪 Responses 元数据里的空值，避免把“空数组/空对象/空字符串”落进历史记录。
+   * @param {any} value
+   * @returns {any}
+   */
+  function compactResponsesMetaValue(value) {
+    if (value == null) return undefined;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed ? trimmed : undefined;
+    }
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : undefined;
+    }
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      const compactedItems = value
+        .map(item => compactResponsesMetaValue(item))
+        .filter(item => typeof item !== 'undefined');
+      return compactedItems.length > 0 ? compactedItems : undefined;
+    }
+    if (typeof value === 'object') {
+      const compactedObject = {};
+      Object.entries(value).forEach(([key, childValue]) => {
+        const compactedChild = compactResponsesMetaValue(childValue);
+        if (typeof compactedChild !== 'undefined') {
+          compactedObject[key] = compactedChild;
+        }
+      });
+      return Object.keys(compactedObject).length > 0 ? compactedObject : undefined;
+    }
+    return undefined;
+  }
+
+  /**
+   * 规范化 Responses 工具返回里的 sources 条目，只保留 UI / 持久化真正会用到的轻量字段。
+   * @param {any} source
+   * @returns {Object|null}
+   */
+  function normalizeResponsesToolCallSource(source) {
+    if (!source || typeof source !== 'object') return null;
+    const normalized = compactResponsesMetaValue({
+      type: source.type,
+      title: source.title || source.name || '',
+      url: source.url || '',
+      domain: source.domain || source.hostname || '',
+      provider: source.provider || ''
+    });
+    return (normalized && typeof normalized === 'object' && !Array.isArray(normalized)) ? normalized : null;
+  }
+
+  /**
+   * 把 Responses output item 归一化为适合 IndexedDB/界面展示的“工具调用记录”。
+   * 说明：
+   * - 不直接存整条原始 item，避免把大量无用字段和空值一起带进历史；
+   * - 这里优先覆盖 web_search_call / function_call，其余 *_call 类型保留最小公共字段。
+   * @param {any} item
+   * @returns {Object|null}
+   */
+  function normalizeResponsesToolCallRecord(item) {
+    if (!item || typeof item !== 'object') return null;
+    const type = String(item.type || '').trim().toLowerCase();
+    if (!type || (!type.endsWith('_call') && type !== 'function_call')) return null;
+
+    const id = (typeof item.call_id === 'string' && item.call_id)
+      || (typeof item.id === 'string' && item.id)
+      || (typeof item.item_id === 'string' && item.item_id)
+      || '';
+    const status = (typeof item.status === 'string') ? item.status : '';
+
+    if (type === 'function_call') {
+      const normalized = compactResponsesMetaValue({
+        type,
+        id,
+        status,
+        name: item.name || '',
+        arguments: item.arguments || ''
+      });
+      return (normalized && typeof normalized === 'object' && !Array.isArray(normalized)) ? normalized : null;
+    }
+
+    if (type === 'web_search_call') {
+      const action = (item.action && typeof item.action === 'object' && !Array.isArray(item.action))
+        ? item.action
+        : {};
+      const query = (typeof action.query === 'string') ? action.query : '';
+      const queries = Array.isArray(action.queries)
+        ? action.queries.filter(value => typeof value === 'string' && value.trim()).map(value => value.trim())
+        : [];
+      const sources = Array.isArray(action.sources)
+        ? action.sources
+          .map(source => normalizeResponsesToolCallSource(source))
+          .filter(Boolean)
+        : [];
+
+      const normalized = compactResponsesMetaValue({
+        type,
+        id,
+        status,
+        action_type: action.type || '',
+        query,
+        queries,
+        url: action.url || action.page_url || '',
+        title: action.title || action.page_title || '',
+        pattern: action.pattern || action.find || action.find_text || '',
+        sources
+      });
+      return (normalized && typeof normalized === 'object' && !Array.isArray(normalized)) ? normalized : null;
+    }
+
+    const normalized = compactResponsesMetaValue({
+      type,
+      id,
+      status,
+      name: item.name || '',
+      arguments: item.arguments || ''
+    });
+    return (normalized && typeof normalized === 'object' && !Array.isArray(normalized)) ? normalized : null;
+  }
+
+  function getResponsesToolCallRecordKey(record, fallbackIndex = 0) {
+    if (!record || typeof record !== 'object') {
+      return `unknown:${fallbackIndex}`;
+    }
+    const type = (typeof record.type === 'string' && record.type) ? record.type : 'unknown';
+    const id = (typeof record.id === 'string' && record.id) ? record.id : '';
+    if (id) return `${type}:${id}`;
+    if (type === 'function_call') {
+      return `${type}:${record.name || ''}:${fallbackIndex}`;
+    }
+    if (type === 'web_search_call') {
+      return `${type}:${record.action_type || ''}:${record.query || ''}:${record.url || ''}:${record.pattern || ''}:${fallbackIndex}`;
+    }
+    return `${type}:${fallbackIndex}`;
+  }
+
+  /**
+   * 合并多批 Responses 工具调用记录。
+   * 用途：
+   * - 流式场景下，`response.output_item.done` / `response.completed` 可能先后到来；
+   * - 这里按稳定 key 做覆盖式合并，避免出现重复条目。
+   * @param {any} existingRecords
+   * @param {any} incomingRecords
+   * @returns {Array<Object>}
+   */
+  function mergeResponsesToolCallRecordLists(existingRecords, incomingRecords) {
+    const merged = Array.isArray(existingRecords)
+      ? existingRecords
+        .map(record => compactResponsesMetaValue(record))
+        .filter(record => record && typeof record === 'object' && !Array.isArray(record))
+      : [];
+    const keyToIndex = new Map();
+    merged.forEach((record, index) => {
+      keyToIndex.set(getResponsesToolCallRecordKey(record, index), index);
+    });
+
+    (Array.isArray(incomingRecords) ? incomingRecords : []).forEach((record, index) => {
+      const normalized = compactResponsesMetaValue(record);
+      if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) return;
+      const key = getResponsesToolCallRecordKey(normalized, index);
+      if (keyToIndex.has(key)) {
+        const existingIndex = keyToIndex.get(key);
+        const previous = merged[existingIndex] || {};
+        merged[existingIndex] = compactResponsesMetaValue({
+          ...previous,
+          ...normalized,
+          sources: (Array.isArray(normalized.sources) && normalized.sources.length > 0)
+            ? normalized.sources
+            : previous.sources
+        });
+      } else {
+        keyToIndex.set(key, merged.length);
+        merged.push(normalized);
+      }
+    });
+
+    return merged;
+  }
+
   function extractOpenAIResponsesOutput(payload) {
     const answerParts = [];
-    const thoughtParts = [];
-    const toolCalls = [];
+    let reasoningSummary = '';
+    const responseToolCalls = [];
     const outputItems = Array.isArray(payload?.output) ? payload.output : [];
 
     const pushAnswer = (text) => {
       if (typeof text === 'string' && text) answerParts.push(text);
     };
-    const pushThought = (text) => {
-      if (typeof text === 'string' && text) thoughtParts.push(text);
+    const pushReasoningSummary = (text) => {
+      if (typeof text !== 'string' || !text.trim()) return;
+      reasoningSummary = mergeThoughts(reasoningSummary, text);
     };
 
     for (const item of outputItems) {
@@ -677,7 +859,7 @@ export function createMessageSender(appContext) {
           if (partType === 'refusal') continue;
           if (typeof part.text === 'string') {
             if (partType.includes('reasoning')) {
-              pushThought(part.text);
+              pushReasoningSummary(part.text);
             } else {
               pushAnswer(part.text);
             }
@@ -693,39 +875,27 @@ export function createMessageSender(appContext) {
       if (itemType.includes('reasoning')) {
         if (Array.isArray(item.summary)) {
           for (const section of item.summary) {
-            if (typeof section?.text === 'string') pushThought(section.text);
+            if (typeof section?.text === 'string') pushReasoningSummary(section.text);
           }
         }
-        if (typeof item.summary_text === 'string') pushThought(item.summary_text);
-        if (typeof item.text === 'string') pushThought(item.text);
+        if (typeof item.summary_text === 'string') pushReasoningSummary(item.summary_text);
+        if (typeof item.text === 'string') pushReasoningSummary(item.text);
         continue;
       }
 
-      if (itemType === 'function_call') {
-        const callId = (typeof item.call_id === 'string' && item.call_id)
-          || (typeof item.id === 'string' && item.id)
-          || '';
-        const fnName = (typeof item.name === 'string') ? item.name : '';
-        const fnArgs = (typeof item.arguments === 'string') ? item.arguments : '';
-        toolCalls.push({
-          id: callId,
-          type: 'function',
-          function: {
-            name: fnName,
-            arguments: fnArgs
-          }
-        });
+      const toolCallRecord = normalizeResponsesToolCallRecord(item);
+      if (toolCallRecord) {
+        responseToolCalls.push(toolCallRecord);
       }
     }
 
     const answerFromOutput = answerParts.join('');
     const answerFromField = readResponsesOutputTextField(payload);
     const answer = answerFromOutput || answerFromField || '';
-    const thoughts = thoughtParts.join('');
     return {
       answer,
-      thoughts,
-      toolCalls: toolCalls.length > 0 ? toolCalls : null
+      reasoningSummary,
+      responseToolCalls: responseToolCalls.length > 0 ? responseToolCalls : null
     };
   }
 
@@ -3436,7 +3606,8 @@ export function createMessageSender(appContext) {
    * - 当我们开始把新的生成结果写回到旧消息时，旧签名将不再匹配；
    * - 若本次响应未返回新签名，就必须保持为空，否则后续把历史回传给上游时会触发
    *   “signature required / invalid signature” 等校验错误；
-   * - 这里同时清理 OpenAI 兼容字段（reasoning_content/tool_calls），避免旧内容残留导致语义错配。
+   * - 这里同时清理 OpenAI 兼容字段（reasoning_content/tool_calls）以及 Responses 元信息
+   *   （response_reasoning_summary/response_tool_calls），避免旧内容残留导致语义错配。
    *
    * 注意：只在“原地替换的重新生成”场景触发；普通追加新消息不需要清理。
    *
@@ -3457,8 +3628,19 @@ export function createMessageSender(appContext) {
       node.thoughtSignatureSource = null;
       node.reasoning_content = null;
       node.tool_calls = null;
+      delete node.response_reasoning_summary;
+      delete node.response_tool_calls;
       // 原地替换时清空旧的 token 用量，避免本次请求未回传 usage 时显示陈旧数据。
       node.apiUsage = null;
+      const safeMessageId = escapeMessageIdForSelector(id);
+      const selector = safeMessageId ? `.message[data-message-id="${safeMessageId}"]` : '';
+      const element = selector
+        ? (chatContainer.querySelector(selector)
+          || (threadContext?.container ? threadContext.container.querySelector(selector) : null))
+        : null;
+      if (element) {
+        messageProcessor.syncAssistantMessageMetadata?.(id, node, { fallbackElement: element });
+      }
       return true;
     } catch (_) {
       return false;
@@ -5238,6 +5420,10 @@ export function createMessageSender(appContext) {
 	    let latestOpenAIReasoningContent = '';
 	    // OpenAI 兼容：累积 tool_calls（流式增量会把 function.arguments 分片输出）
 	    let latestOpenAIToolCalls = [];
+      // Responses API：推理摘要只用于展示/存档，不参与后续签名回传。
+      let latestResponsesReasoningSummary = '';
+      // Responses API：记录 output item 级别的工具调用（如 web_search_call / function_call）。
+      let latestResponsesToolCalls = [];
       // OpenAI 兼容：记录末尾 usage 分片（通常出现在 finish_reason=stop 的最后一个 chunk）。
       let latestOpenAIUsage = null;
 		    // 当前流对应的 AI 消息 ID：
@@ -5476,11 +5662,17 @@ export function createMessageSender(appContext) {
 
 	    // 流式响应结束后，将“签名/推理元信息”写入当前 AI 消息节点，并刷新 footer 标记
 		    // - Gemini：Thought Signature（part-level thought_signature）
-		    // - OpenAI 兼容：thoughtSignature（message-level thoughtSignature + reasoning_content/tool_calls）
+		    // - OpenAI Chat Completions 兼容：thoughtSignature（message-level thoughtSignature + reasoning_content/tool_calls）
+        // - Responses API：reasoning summary / output item 工具调用记录
       if (currentAiMessageId && latestOpenAIUsage) {
         applyUsageMetaToMessage(currentAiMessageId, latestOpenAIUsage);
       }
-		    if (currentAiMessageId && (latestGeminiThoughtSignature || latestOpenAIThoughtSignature || (Array.isArray(latestOpenAIToolCalls) && latestOpenAIToolCalls.length > 0))) {
+      const hasResponsesMetadata = isOpenAIResponsesStream
+        && (
+          (typeof latestResponsesReasoningSummary === 'string' && latestResponsesReasoningSummary)
+          || (Array.isArray(latestResponsesToolCalls) && latestResponsesToolCalls.length > 0)
+        );
+		    if (currentAiMessageId && (latestGeminiThoughtSignature || latestOpenAIThoughtSignature || (Array.isArray(latestOpenAIToolCalls) && latestOpenAIToolCalls.length > 0) || hasResponsesMetadata)) {
 		      try {
 	        const node = resolveAttemptAiNode(attemptState, currentAiMessageId);
           if (node) {
@@ -5494,37 +5686,52 @@ export function createMessageSender(appContext) {
 	          }
 
 	          if (!isGeminiApi) {
-	            // OpenAI 兼容：推理签名与推理原文、tool_calls 原样落库，供后续历史消息回传
-	            if (latestOpenAIThoughtSignature) {
-	              node.thoughtSignature = latestOpenAIThoughtSignature;
-	              node.thoughtSignatureSource = 'openai';
-	            } else if (Array.isArray(latestOpenAIToolCalls) && latestOpenAIToolCalls.length > 0) {
-	              // 仅有 tool_calls 签名/结构时，也标记来源，避免后续误发给 Gemini
-	              if (!node.thoughtSignatureSource) node.thoughtSignatureSource = 'openai';
-	            }
+              if (isOpenAIResponsesStream) {
+                if (typeof latestResponsesReasoningSummary === 'string' && latestResponsesReasoningSummary) {
+                  node.response_reasoning_summary = latestResponsesReasoningSummary;
+                } else {
+                  delete node.response_reasoning_summary;
+                }
 
-	            if (typeof latestOpenAIReasoningContent === 'string' && latestOpenAIReasoningContent) {
-	              // 与 OpenAI 兼容字段保持一致：使用 reasoning_content 命名，便于 buildRequest 直接透传
-	              node.reasoning_content = latestOpenAIReasoningContent;
-	            }
+                if (Array.isArray(latestResponsesToolCalls) && latestResponsesToolCalls.length > 0) {
+                  node.response_tool_calls = latestResponsesToolCalls;
+                } else {
+                  delete node.response_tool_calls;
+                }
+              } else {
+	              // OpenAI 兼容：推理签名与推理原文、tool_calls 原样落库，供后续历史消息回传
+	              if (latestOpenAIThoughtSignature) {
+	                node.thoughtSignature = latestOpenAIThoughtSignature;
+	                node.thoughtSignatureSource = 'openai';
+	              } else if (Array.isArray(latestOpenAIToolCalls) && latestOpenAIToolCalls.length > 0) {
+	                // 仅有 tool_calls 签名/结构时，也标记来源，避免后续误发给 Gemini
+	                if (!node.thoughtSignatureSource) node.thoughtSignatureSource = 'openai';
+	              }
 
-	            if (Array.isArray(latestOpenAIToolCalls) && latestOpenAIToolCalls.length > 0) {
-	              node.tool_calls = latestOpenAIToolCalls;
-	            }
+	              if (typeof latestOpenAIReasoningContent === 'string' && latestOpenAIReasoningContent) {
+	                // 与 OpenAI 兼容字段保持一致：使用 reasoning_content 命名，便于 buildRequest 直接透传
+	                node.reasoning_content = latestOpenAIReasoningContent;
+	              }
+
+	              if (Array.isArray(latestOpenAIToolCalls) && latestOpenAIToolCalls.length > 0) {
+	                node.tool_calls = latestOpenAIToolCalls;
+	              }
+              }
 	          }
 
           const safeMessageId = escapeMessageIdForSelector(currentAiMessageId);
           const selector = safeMessageId ? `.message[data-message-id="${safeMessageId}"]` : '';
           const el = selector
-            ? (chatContainer.querySelector(selector)
-              || (threadContext?.container ? threadContext.container.querySelector(selector) : null))
-            : null;
+	            ? (chatContainer.querySelector(selector)
+	              || (threadContext?.container ? threadContext.container.querySelector(selector) : null))
+	            : null;
 	          if (el) {
+                messageProcessor.syncAssistantMessageMetadata?.(currentAiMessageId, node, { fallbackElement: el });
 	            renderApiFooter(el, node);
 	          }
 	        }
 	      } catch (e) {
-	        console.warn('记录签名/推理元信息失败（流式）:', e);
+	        console.warn('记录 AI 元信息失败（流式）:', e);
 	      }
 	    }
 
@@ -5784,51 +5991,54 @@ export function createMessageSender(appContext) {
       const payload = (eventPayload && typeof eventPayload === 'object') ? eventPayload : {};
       const nextCalls = existing.map((call) => {
         if (!call || typeof call !== 'object') return call;
-        const cloned = { ...call };
-        if (call.function && typeof call.function === 'object') {
-          cloned.function = { ...call.function };
-        }
-        return cloned;
+        return { ...call };
       });
 
       const index = Number.isInteger(payload.output_index)
         ? payload.output_index
         : (Number.isInteger(payload.index) ? payload.index : nextCalls.length);
       while (nextCalls.length <= index) {
-        nextCalls.push({ id: '', type: 'function', function: { name: '', arguments: '' } });
+        nextCalls.push({ id: '', type: 'function_call', name: '', arguments: '' });
       }
 
       const current = nextCalls[index] && typeof nextCalls[index] === 'object' ? nextCalls[index] : {};
       const merged = { ...current };
-      const mergedFn = (merged.function && typeof merged.function === 'object')
-        ? { ...merged.function }
-        : {};
 
       const callId = (typeof payload.call_id === 'string' && payload.call_id)
         || (typeof payload.item_id === 'string' && payload.item_id)
         || (typeof payload.id === 'string' && payload.id)
         || '';
       if (callId) merged.id = callId;
-      if (typeof payload.type === 'string' && payload.type) merged.type = payload.type;
+      merged.type = 'function_call';
+      if (typeof payload.status === 'string' && payload.status) {
+        merged.status = payload.status;
+      }
 
       if (typeof payload.name === 'string' && payload.name) {
-        mergedFn.name = payload.name;
+        merged.name = payload.name;
       }
 
       const deltaArgs = (typeof payload.delta === 'string') ? payload.delta : '';
       if (deltaArgs) {
-        const prevArgs = (typeof mergedFn.arguments === 'string') ? mergedFn.arguments : '';
-        mergedFn.arguments = mergeStreamingThoughts(prevArgs, deltaArgs);
+        const prevArgs = (typeof merged.arguments === 'string') ? merged.arguments : '';
+        merged.arguments = mergeStreamingThoughts(prevArgs, deltaArgs);
       }
 
       const finalArgs = (typeof payload.arguments === 'string') ? payload.arguments : '';
       if (finalArgs) {
-        mergedFn.arguments = finalArgs;
+        merged.arguments = finalArgs;
       }
 
-      merged.function = mergedFn;
-      nextCalls[index] = merged;
-      return nextCalls;
+      nextCalls[index] = compactResponsesMetaValue(merged);
+      return nextCalls.filter((record) => {
+        if (!record || typeof record !== 'object') return false;
+        return !!(
+          (typeof record.id === 'string' && record.id)
+          || (typeof record.name === 'string' && record.name)
+          || (typeof record.arguments === 'string' && record.arguments)
+          || (typeof record.status === 'string' && record.status)
+        );
+      });
     }
 
     function handleOpenAIEvent(data) {
@@ -5878,8 +6088,24 @@ export function createMessageSender(appContext) {
           currentEventAnswerDelta = (typeof data?.delta === 'string') ? data.delta : '';
         } else if (eventType === 'response.reasoning_text.delta' || eventType === 'response.reasoning_summary_text.delta') {
           currentEventReasoningDelta = (typeof data?.delta === 'string') ? data.delta : '';
+        } else if (eventType === 'response.output_item.added' || eventType === 'response.output_item.done') {
+          const outputItem = (data?.item && typeof data.item === 'object') ? data.item : null;
+          if (outputItem) {
+            const extractedItem = extractOpenAIResponsesOutput({ output: [outputItem] });
+            if (!aiResponse && typeof extractedItem.answer === 'string' && extractedItem.answer) {
+              currentEventAnswerDelta = extractedItem.answer;
+            }
+            if (typeof extractedItem.reasoningSummary === 'string' && extractedItem.reasoningSummary) {
+              latestResponsesReasoningSummary = mergeThoughts(latestResponsesReasoningSummary, extractedItem.reasoningSummary);
+              currentEventReasoningDelta = extractedItem.reasoningSummary;
+            }
+            if (Array.isArray(extractedItem.responseToolCalls) && extractedItem.responseToolCalls.length > 0) {
+              latestResponsesToolCalls = mergeResponsesToolCallRecordLists(latestResponsesToolCalls, extractedItem.responseToolCalls);
+              hasToolCallsDelta = true;
+            }
+          }
         } else if (eventType === 'response.function_call_arguments.delta' || eventType === 'response.function_call_arguments.done') {
-          latestOpenAIToolCalls = mergeResponsesFunctionCallEvent(latestOpenAIToolCalls, data);
+          latestResponsesToolCalls = mergeResponsesFunctionCallEvent(latestResponsesToolCalls, data);
           hasToolCallsDelta = true;
         } else if (eventType === 'response.completed') {
           const completedPayload = (data?.response && typeof data.response === 'object') ? data.response : data;
@@ -5887,11 +6113,12 @@ export function createMessageSender(appContext) {
           if (!aiResponse && typeof extracted.answer === 'string' && extracted.answer) {
             currentEventAnswerDelta = extracted.answer;
           }
-          if (!latestOpenAIReasoningContent && typeof extracted.thoughts === 'string' && extracted.thoughts) {
-            currentEventReasoningDelta = extracted.thoughts;
+          if (typeof extracted.reasoningSummary === 'string' && extracted.reasoningSummary) {
+            latestResponsesReasoningSummary = mergeThoughts(latestResponsesReasoningSummary, extracted.reasoningSummary);
+            currentEventReasoningDelta = extracted.reasoningSummary;
           }
-          if (Array.isArray(extracted.toolCalls) && extracted.toolCalls.length > 0) {
-            latestOpenAIToolCalls = extracted.toolCalls;
+          if (Array.isArray(extracted.responseToolCalls) && extracted.responseToolCalls.length > 0) {
+            latestResponsesToolCalls = mergeResponsesToolCallRecordLists(latestResponsesToolCalls, extracted.responseToolCalls);
             hasToolCallsDelta = true;
           }
         } else if (!eventType && isOpenAIResponsesPayload(data)) {
@@ -5899,17 +6126,18 @@ export function createMessageSender(appContext) {
           if (!aiResponse && typeof extracted.answer === 'string' && extracted.answer) {
             currentEventAnswerDelta = extracted.answer;
           }
-          if (!latestOpenAIReasoningContent && typeof extracted.thoughts === 'string' && extracted.thoughts) {
-            currentEventReasoningDelta = extracted.thoughts;
+          if (typeof extracted.reasoningSummary === 'string' && extracted.reasoningSummary) {
+            latestResponsesReasoningSummary = mergeThoughts(latestResponsesReasoningSummary, extracted.reasoningSummary);
+            currentEventReasoningDelta = extracted.reasoningSummary;
           }
-          if (Array.isArray(extracted.toolCalls) && extracted.toolCalls.length > 0) {
-            latestOpenAIToolCalls = extracted.toolCalls;
+          if (Array.isArray(extracted.responseToolCalls) && extracted.responseToolCalls.length > 0) {
+            latestResponsesToolCalls = mergeResponsesToolCallRecordLists(latestResponsesToolCalls, extracted.responseToolCalls);
             hasToolCallsDelta = true;
           }
         }
 
         if (typeof currentEventReasoningDelta === 'string' && currentEventReasoningDelta) {
-          latestOpenAIReasoningContent = mergeStreamingThoughts(latestOpenAIReasoningContent, currentEventReasoningDelta);
+          latestResponsesReasoningSummary = mergeStreamingThoughts(latestResponsesReasoningSummary, currentEventReasoningDelta);
         }
 
         const hasAnyDelta = !!(currentEventAnswerDelta || currentEventReasoningDelta || hasToolCallsDelta);
@@ -6042,6 +6270,10 @@ export function createMessageSender(appContext) {
     let reasoningContentRaw = '';
     // OpenAI 兼容：工具调用（若存在则与 thoughtSignature 一并回传）
     let toolCalls = null;
+    // Responses API：reasoning summary 只用于界面展示与本地存档。
+    let responseReasoningSummary = '';
+    // Responses API：output item 级工具调用记录（如 web_search_call / function_call）。
+    let responseToolCalls = null;
     let json = null;
     try {
       json = await response.json();
@@ -6156,13 +6388,12 @@ export function createMessageSender(appContext) {
       if (typeof extracted.answer === 'string') {
         answer = extracted.answer;
       }
-      if (typeof extracted.thoughts === 'string' && extracted.thoughts) {
-        reasoningContentRaw = extracted.thoughts;
-        thoughts = extracted.thoughts;
+      if (typeof extracted.reasoningSummary === 'string' && extracted.reasoningSummary) {
+        responseReasoningSummary = extracted.reasoningSummary;
+        thoughts = extracted.reasoningSummary;
       }
-      if (Array.isArray(extracted.toolCalls) && extracted.toolCalls.length > 0) {
-        toolCalls = extracted.toolCalls;
-        thoughtSignatureSource = 'openai';
+      if (Array.isArray(extracted.responseToolCalls) && extracted.responseToolCalls.length > 0) {
+        responseToolCalls = extracted.responseToolCalls;
       }
     } else {
       // OpenAI Chat Completions 兼容 非流式
@@ -6243,8 +6474,24 @@ export function createMessageSender(appContext) {
               }
             }
 
+            if (!isGeminiApi && isResponsesApi) {
+              try {
+                if (typeof responseReasoningSummary === 'string' && responseReasoningSummary) {
+                  existingNode.response_reasoning_summary = responseReasoningSummary;
+                } else {
+                  delete existingNode.response_reasoning_summary;
+                }
+                if (Array.isArray(responseToolCalls) && responseToolCalls.length > 0) {
+                  existingNode.response_tool_calls = responseToolCalls;
+                } else {
+                  delete existingNode.response_tool_calls;
+                }
+                messageProcessor.syncAssistantMessageMetadata?.(existingMessageId, existingNode, { fallbackElement: existingEl });
+              } catch (e) {
+                console.warn('记录 Responses 元信息失败（非流式，原地替换）:', e);
+              }
             // OpenAI 兼容：保存 reasoning_content / tool_calls，供下次请求回传（避免签名校验失败）
-            if (!isGeminiApi) {
+            } else if (!isGeminiApi) {
               try {
                 if (typeof reasoningContentRaw === 'string' && reasoningContentRaw) {
                   existingNode.reasoning_content = reasoningContentRaw;
@@ -6287,7 +6534,19 @@ export function createMessageSender(appContext) {
           if (thoughtSignatureSource) node.thoughtSignatureSource = thoughtSignatureSource;
           renderApiFooter(loadingMessage, node);
         }
-        if (!isGeminiApi && node) {
+        if (!isGeminiApi && isResponsesApi && node) {
+          if (typeof responseReasoningSummary === 'string' && responseReasoningSummary) {
+            node.response_reasoning_summary = responseReasoningSummary;
+          } else {
+            delete node.response_reasoning_summary;
+          }
+          if (Array.isArray(responseToolCalls) && responseToolCalls.length > 0) {
+            node.response_tool_calls = responseToolCalls;
+          } else {
+            delete node.response_tool_calls;
+          }
+          messageProcessor.syncAssistantMessageMetadata?.(promotedId, node, { fallbackElement: loadingMessage });
+        } else if (!isGeminiApi && node) {
           if (typeof reasoningContentRaw === 'string' && reasoningContentRaw) {
             node.reasoning_content = reasoningContentRaw;
           }
@@ -6334,8 +6593,19 @@ export function createMessageSender(appContext) {
           }
         }
 
+        if (!isGeminiApi && isResponsesApi) {
+          try {
+            if (typeof responseReasoningSummary === 'string' && responseReasoningSummary) {
+              createdNode.response_reasoning_summary = responseReasoningSummary;
+            }
+            if (Array.isArray(responseToolCalls) && responseToolCalls.length > 0) {
+              createdNode.response_tool_calls = responseToolCalls;
+            }
+          } catch (e) {
+            console.warn('记录 Responses 元信息失败（非流式，后台线程）:', e);
+          }
         // OpenAI 兼容：保存 reasoning_content / tool_calls（仅在非 Gemini 场景）
-        if (!isGeminiApi) {
+        } else if (!isGeminiApi) {
           try {
             if (typeof reasoningContentRaw === 'string' && reasoningContentRaw) {
               createdNode.reasoning_content = reasoningContentRaw;
@@ -6392,8 +6662,23 @@ export function createMessageSender(appContext) {
         }
       }
 
+	      if (!isGeminiApi && isResponsesApi) {
+	        try {
+	          const node = resolveAttemptAiNode(attemptState, messageId);
+	          if (node) {
+                if (typeof responseReasoningSummary === 'string' && responseReasoningSummary) {
+                  node.response_reasoning_summary = responseReasoningSummary;
+                }
+                if (Array.isArray(responseToolCalls) && responseToolCalls.length > 0) {
+                  node.response_tool_calls = responseToolCalls;
+                }
+                messageProcessor.syncAssistantMessageMetadata?.(messageId, node, { fallbackElement: newAiMessageDiv });
+	          }
+	        } catch (e) {
+	          console.warn('记录 Responses 元信息失败（非流式）:', e);
+	        }
 	      // OpenAI 兼容：保存 reasoning_content / tool_calls（仅在非 Gemini 场景）
-	      if (!isGeminiApi) {
+	      } else if (!isGeminiApi) {
 	        try {
 	          const node = resolveAttemptAiNode(attemptState, messageId);
 	          if (node) {

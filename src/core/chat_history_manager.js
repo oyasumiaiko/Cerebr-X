@@ -18,6 +18,8 @@
  * @property {string|null} [thoughtSignatureSource] - 签名来源（'gemini' | 'openai'，可选），用于避免跨 API 误回传导致上游报错
  * @property {string|null} [reasoning_content] - OpenAI 兼容：需要原样回传的推理原文（与 thoughtSignature 配对，可选）
  * @property {Array<any>|null} [tool_calls] - OpenAI 兼容：assistant.tool_calls（可能包含 thoughtSignature，可选）
+ * @property {string|null} [response_reasoning_summary] - Responses API：reasoning summary 文本（仅用于展示/存档，可选）
+ * @property {Array<any>|null} [response_tool_calls] - Responses API：output item 级工具调用记录（如 web_search_call，可选）
  * @property {string|null} [apiUuid] - 使用的 API 配置 UUID（配置的 id），用于回溯显示 (可选)
  * @property {string} [apiDisplayName] - 创建消息时记录的 API 显示名称快照 (可选)
  * @property {string} [apiModelId] - 创建消息时记录的模型名（modelName）快照 (可选)

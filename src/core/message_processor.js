@@ -1056,6 +1056,7 @@ export function createMessageProcessor(appContext) {
     textContentDiv.innerHTML = processMathAndMarkdown(safeAnswerContent);
 
     enhanceMarkdownContent(messageDiv);
+    setupResponseToolCallsDisplay(messageDiv, node.response_tool_calls || null);
 
     try {
       services.selectionThreadManager?.decorateMessageElement?.(messageDiv, node);
@@ -1088,6 +1089,201 @@ export function createMessageProcessor(appContext) {
         payload?.resolvedThoughts
       );
     }
+  }
+
+  function formatResponseToolCallArguments(rawArguments) {
+    const text = (typeof rawArguments === 'string') ? rawArguments.trim() : '';
+    if (!text) return '';
+    try {
+      return JSON.stringify(JSON.parse(text), null, 2);
+    } catch (_) {
+      return text;
+    }
+  }
+
+  function getResponseToolCallTypeLabel(record) {
+    const type = String(record?.type || '').toLowerCase();
+    if (type === 'web_search_call') return 'web_search';
+    if (type === 'function_call') return 'function';
+    return type || 'tool';
+  }
+
+  function getResponseToolCallActionLabel(actionType) {
+    const normalized = String(actionType || '').toLowerCase();
+    if (normalized === 'search') return '搜索';
+    if (normalized === 'open_page') return '打开网页';
+    if (normalized === 'find_in_page') return '页内查找';
+    return normalized || '调用';
+  }
+
+  function buildResponseToolCallPrimaryText(record) {
+    if (!record || typeof record !== 'object') return '工具调用';
+    const type = String(record.type || '').toLowerCase();
+    if (type === 'web_search_call') {
+      const actionLabel = getResponseToolCallActionLabel(record.action_type);
+      const query = (typeof record.query === 'string' && record.query.trim()) ? record.query.trim() : '';
+      const title = (typeof record.title === 'string' && record.title.trim()) ? record.title.trim() : '';
+      const url = (typeof record.url === 'string' && record.url.trim()) ? record.url.trim() : '';
+      const pattern = (typeof record.pattern === 'string' && record.pattern.trim()) ? record.pattern.trim() : '';
+      const subject = query || title || pattern || url;
+      return subject ? `${actionLabel}：${subject}` : actionLabel;
+    }
+    if (type === 'function_call') {
+      const name = (typeof record.name === 'string' && record.name.trim()) ? record.name.trim() : '匿名函数';
+      return `调用函数：${name}`;
+    }
+    return getResponseToolCallTypeLabel(record);
+  }
+
+  /**
+   * 同步 assistant 消息的附加元信息展示。
+   * 当前先覆盖 Responses API 的工具调用记录；推理摘要继续复用现有 thoughts 区块显示。
+   * @param {HTMLElement} messageWrapperDiv
+   * @param {Array<any>|null|undefined} rawToolCalls
+   */
+  function setupResponseToolCallsDisplay(messageWrapperDiv, rawToolCalls) {
+    if (!messageWrapperDiv) return;
+    let toolCallsRoot = messageWrapperDiv.querySelector('.response-tool-calls');
+    const toolCalls = Array.isArray(rawToolCalls)
+      ? rawToolCalls.filter(item => item && typeof item === 'object')
+      : [];
+
+    if (toolCalls.length === 0) {
+      if (toolCallsRoot) toolCallsRoot.remove();
+      return;
+    }
+
+    const previousOpen = !!toolCallsRoot?.open;
+    if (!toolCallsRoot) {
+      toolCallsRoot = document.createElement('details');
+      toolCallsRoot.className = 'response-tool-calls';
+      const footer = messageWrapperDiv.querySelector('.api-footer');
+      if (footer) {
+        messageWrapperDiv.insertBefore(toolCallsRoot, footer);
+      } else {
+        messageWrapperDiv.appendChild(toolCallsRoot);
+      }
+    }
+
+    let summary = toolCallsRoot.querySelector('summary');
+    if (!summary) {
+      summary = document.createElement('summary');
+      toolCallsRoot.appendChild(summary);
+    }
+    summary.textContent = `工具调用 ${toolCalls.length}`;
+
+    let list = toolCallsRoot.querySelector('.response-tool-call-list');
+    if (!list) {
+      list = document.createElement('div');
+      list.className = 'response-tool-call-list';
+      toolCallsRoot.appendChild(list);
+    }
+    list.innerHTML = '';
+
+    toolCalls.forEach((record) => {
+      const item = document.createElement('div');
+      item.className = 'response-tool-call-item';
+
+      const header = document.createElement('div');
+      header.className = 'response-tool-call-header';
+
+      const badge = document.createElement('span');
+      badge.className = 'response-tool-call-badge';
+      badge.textContent = getResponseToolCallTypeLabel(record);
+      header.appendChild(badge);
+
+      const primary = document.createElement('span');
+      primary.className = 'response-tool-call-primary';
+      primary.textContent = buildResponseToolCallPrimaryText(record);
+      header.appendChild(primary);
+
+      if (typeof record.status === 'string' && record.status.trim()) {
+        const status = document.createElement('span');
+        status.className = 'response-tool-call-status';
+        status.textContent = record.status.trim();
+        header.appendChild(status);
+      }
+
+      item.appendChild(header);
+
+      if (Array.isArray(record.queries) && record.queries.length > 1) {
+        const queries = document.createElement('div');
+        queries.className = 'response-tool-call-secondary';
+        queries.textContent = `查询：${record.queries.join(' | ')}`;
+        item.appendChild(queries);
+      } else if (typeof record.url === 'string' && record.url.trim() && String(record.type || '').toLowerCase() !== 'web_search_call') {
+        const urlLine = document.createElement('div');
+        urlLine.className = 'response-tool-call-secondary';
+        urlLine.textContent = record.url.trim();
+        item.appendChild(urlLine);
+      }
+
+      if (typeof record.arguments === 'string' && record.arguments.trim()) {
+        const pre = document.createElement('pre');
+        pre.className = 'response-tool-call-arguments';
+        pre.textContent = formatResponseToolCallArguments(record.arguments);
+        item.appendChild(pre);
+      }
+
+      if (Array.isArray(record.sources) && record.sources.length > 0) {
+        const sources = document.createElement('div');
+        sources.className = 'response-tool-call-sources';
+        const sourceTitle = document.createElement('div');
+        sourceTitle.className = 'response-tool-call-source-title';
+        sourceTitle.textContent = `来源 ${record.sources.length}`;
+        sources.appendChild(sourceTitle);
+
+        const sourceList = document.createElement('div');
+        sourceList.className = 'response-tool-call-source-list';
+        record.sources.forEach((source) => {
+          const label = source.title || source.domain || source.url || '未命名来源';
+          if (source.url) {
+            const link = document.createElement('a');
+            link.className = 'response-tool-call-source-link';
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.href = source.url;
+            link.textContent = label;
+            sourceList.appendChild(link);
+          } else {
+            const text = document.createElement('span');
+            text.className = 'response-tool-call-source-link';
+            text.textContent = label;
+            sourceList.appendChild(text);
+          }
+        });
+        sources.appendChild(sourceList);
+        item.appendChild(sources);
+      }
+
+      list.appendChild(item);
+    });
+
+    toolCallsRoot.open = previousOpen;
+  }
+
+  /**
+   * 根据历史节点把 assistant 消息的附加元数据显示到 DOM。
+   * @param {string|null} messageId
+   * @param {Object|null} nodeLike
+   * @param {{fallbackElement?: HTMLElement|null}} [options]
+   * @returns {boolean}
+   */
+  function syncAssistantMessageMetadata(messageId, nodeLike, options = {}) {
+    const messageWrapperDiv = options?.fallbackElement || resolveMessageElement(messageId);
+    const node = (nodeLike && typeof nodeLike === 'object')
+      ? nodeLike
+      : (messageId ? chatHistoryManager.chatHistory.messages.find(msg => msg.id === messageId) : null);
+    if (!messageWrapperDiv || !node) return false;
+    const role = String(node.role || '').toLowerCase();
+    if (role !== 'assistant' && role !== 'ai') return false;
+
+    const responseThoughts = node.thoughtsRaw || node.response_reasoning_summary || null;
+    setupThoughtsDisplay(messageWrapperDiv, responseThoughts, processMathAndMarkdown);
+    setupResponseToolCallsDisplay(messageWrapperDiv, node.response_tool_calls || null);
+    enhanceMarkdownContent(messageWrapperDiv);
+    messageVirtualizer.scheduleUpdate(resolveMessageListContainer(messageWrapperDiv));
+    return true;
   }
 
   function scheduleFlushDeferredAiRenders() {
@@ -1475,6 +1671,7 @@ export function createMessageProcessor(appContext) {
   return {
     appendMessage,
     updateAIMessage,
+    syncAssistantMessageMetadata,
     processMathAndMarkdown,
     enhanceMarkdownContent,
     decorateMarkdownLinks,

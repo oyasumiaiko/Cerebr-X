@@ -3540,6 +3540,9 @@ export function createChatHistoryUI(appContext) {
         }
       }
       messageElem.setAttribute('data-message-id', msg.id);
+      try {
+        services.messageProcessor?.syncAssistantMessageMetadata?.(msg.id, msg, { fallbackElement: messageElem });
+      } catch (_) {}
       // 渲染 API footer（可由用户模板控制展示内容）
       try {
         renderApiFooterForMessageElement(messageElem, msg, {
@@ -10923,7 +10926,9 @@ export function createChatHistoryUI(appContext) {
     'thoughtSignature',
     'thoughtSignatureSource',
     'reasoning_content',
+    'response_reasoning_summary',
     'tool_calls',
+    'response_tool_calls',
     'groundingMetadata',
     'preprocessOriginalText',
     'preprocessRenderedText'
@@ -11824,12 +11829,14 @@ export function createChatHistoryUI(appContext) {
     'thoughtSignature',
     'thoughtSignatureSource',
     'reasoning_content',
+    'response_reasoning_summary',
     'preprocessOriginalText',
     'preprocessRenderedText',
     'threadSelectionText'
   ];
   const META_JSON_FIELDS = [
     'tool_calls',
+    'response_tool_calls',
     'promptMeta',
     'pageMeta'
   ];
