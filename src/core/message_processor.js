@@ -1408,29 +1408,6 @@ export function createMessageProcessor(appContext) {
         const item = document.createElement('div');
         item.className = 'response-activity-entry response-activity-entry--reasoning';
 
-        const header = document.createElement('div');
-        header.className = 'response-activity-entry-summary';
-
-        const label = document.createElement('span');
-        label.className = 'response-activity-entry-label';
-        label.textContent = '摘要';
-        header.appendChild(label);
-
-        const title = document.createElement('span');
-        title.className = 'response-activity-entry-title';
-        title.textContent = '思考摘要';
-        header.appendChild(title);
-
-        const statusLabel = getResponseActivityStatusLabel(entry.status);
-        if (statusLabel) {
-          const status = document.createElement('span');
-          status.className = 'response-activity-entry-status';
-          status.textContent = statusLabel;
-          header.appendChild(status);
-        }
-
-        item.appendChild(header);
-
         const content = document.createElement('div');
         content.className = 'response-activity-content response-activity-content--reasoning';
         content.innerHTML = processMathAndMarkdownFn(normalizeResponsesReasoningText(typeof entry.text === 'string' ? entry.text : ''));
