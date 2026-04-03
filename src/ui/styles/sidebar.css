@@ -8571,6 +8571,21 @@ body.chat-empty .empty-state-content {
     white-space: nowrap;
 }
 
+.message .response-activity-tool-summary--query-row {
+    align-items: flex-start;
+}
+
+.message .response-activity-tool-summary--query-row .response-activity-tool-primary {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.message .response-activity-tool-kind--ghost {
+    visibility: hidden;
+}
+
 .message .response-activity-entry-status,
 .message .response-activity-tool-status,
 .message .response-activity-tool-secondary,
@@ -8689,18 +8704,17 @@ body.chat-empty .empty-state-content {
     display: none;
 }
 
-.message .response-activity-tool-sources > summary::after {
-    content: '›';
+.message .response-activity-tool-sources[open] > summary {
+    border-bottom: 1px solid color-mix(in srgb, var(--cerebr-border-color) 18%, transparent);
+}
+
+.message .response-activity-tool-source-chevron {
     color: color-mix(in srgb, var(--cerebr-text-color) 44%, transparent);
     transform: rotate(0deg);
     transition: transform 180ms ease;
 }
 
-.message .response-activity-tool-sources[open] > summary {
-    border-bottom: 1px solid color-mix(in srgb, var(--cerebr-border-color) 18%, transparent);
-}
-
-.message .response-activity-tool-sources[open] > summary::after {
+.message .response-activity-tool-sources[open] .response-activity-tool-source-chevron {
     transform: rotate(90deg);
 }
 

@@ -1134,6 +1134,9 @@ export function createMessageProcessor(appContext) {
       const title = (typeof record.title === 'string' && record.title.trim()) ? record.title.trim() : '';
       const url = (typeof record.url === 'string' && record.url.trim()) ? record.url.trim() : '';
       const pattern = (typeof record.pattern === 'string' && record.pattern.trim()) ? record.pattern.trim() : '';
+      if (String(record.action_type || '').toLowerCase() === 'search') {
+        return query || title || pattern || url || actionLabel;
+      }
       if (String(record.action_type || '').toLowerCase() === 'find_in_page') {
         const subject = pattern || query || '查找内容';
         const pageLabel = title || url;
@@ -1304,11 +1307,29 @@ export function createMessageProcessor(appContext) {
   function getResponseActivityToolQueryLines(entry) {
     const actionType = String(entry?.action_type || '').toLowerCase();
     if (actionType === 'find_in_page') return [];
-    const queries = Array.isArray(entry?.queries)
-      ? entry.queries.filter(query => typeof query === 'string' && query.trim()).map(query => query.trim())
-      : [];
-    if (queries.length <= 1) return [];
-    return queries.map((query, index) => `查询 ${index + 1}：${query}`);
+    const queries = [];
+    const seen = new Set();
+    const primaryQuery = (typeof entry?.query === 'string' && entry.query.trim()) ? entry.query.trim() : '';
+    if (primaryQuery) {
+      seen.add(primaryQuery);
+      queries.push(primaryQuery);
+    }
+    if (Array.isArray(entry?.queries)) {
+      entry.queries.forEach((query) => {
+        if (typeof query !== 'string') return;
+        const normalized = query.trim();
+        if (!normalized || seen.has(normalized)) return;
+        seen.add(normalized);
+        queries.push(normalized);
+      });
+    }
+    return queries;
+  }
+
+  function shouldRenderResponseActivitySearchQueriesInline(entry) {
+    return String(entry?.type || '').toLowerCase() === 'web_search_call'
+      && String(entry?.action_type || '').toLowerCase() === 'search'
+      && getResponseActivityToolQueryLines(entry).length > 0;
   }
 
   function hasResponseActivityToolDetails(entry) {
@@ -1316,7 +1337,7 @@ export function createMessageProcessor(appContext) {
     if (String(entry?.action_type || '').toLowerCase() === 'find_in_page') {
       return false;
     }
-    if (getResponseActivityToolQueryLines(entry).length > 0) return true;
+    if (shouldRenderResponseActivitySearchQueriesInline(entry)) return false;
     if (getResponseActivityToolSecondaryLines(entry).length > 0) return true;
     if (typeof entry.arguments === 'string' && entry.arguments.trim()) return true;
     if (Array.isArray(entry.sources) && entry.sources.length > 0) return true;
@@ -1389,9 +1410,8 @@ export function createMessageProcessor(appContext) {
 
     panelToggle.appendChild(panelCopy);
 
-    const panelChevron = document.createElement('span');
-    panelChevron.className = 'response-activity-panel-chevron';
-    panelChevron.textContent = '›';
+    const panelChevron = document.createElement('i');
+    panelChevron.className = 'fa-solid fa-chevron-right response-activity-panel-chevron';
     panelToggle.appendChild(panelChevron);
 
     panelToggle.addEventListener('click', () => {
@@ -1428,9 +1448,71 @@ export function createMessageProcessor(appContext) {
       item.className = 'response-activity-entry response-activity-entry--tool';
 
       const toolKey = getResponseActivityToolEntryKey(entry, index);
+      const renderSearchQueriesInline = shouldRenderResponseActivitySearchQueriesInline(entry);
+      const searchQueryLines = renderSearchQueriesInline ? getResponseActivityToolQueryLines(entry) : [];
       const hasDetails = hasResponseActivityToolDetails(entry);
       const isExpanded = hasDetails && expandedToolKeys.has(toolKey);
       item.classList.toggle('is-expanded', isExpanded);
+
+      if (renderSearchQueriesInline) {
+        item.classList.add('response-activity-entry--tool-inline');
+        searchQueryLines.forEach((query, queryIndex) => {
+          const queryRow = document.createElement('div');
+          queryRow.className = 'response-activity-tool-summary response-activity-tool-summary--static response-activity-tool-summary--query-row';
+
+          const kind = document.createElement('span');
+          kind.className = `response-activity-tool-kind${queryIndex === 0 ? '' : ' response-activity-tool-kind--ghost'}`;
+          kind.textContent = '搜索';
+          queryRow.appendChild(kind);
+
+          const primary = document.createElement('span');
+          primary.className = 'response-activity-tool-primary';
+          primary.textContent = query;
+          queryRow.appendChild(primary);
+
+          item.appendChild(queryRow);
+        });
+
+        if (Array.isArray(entry.sources) && entry.sources.length > 0) {
+          const sources = document.createElement('details');
+          sources.className = 'response-activity-tool-sources';
+          const sourceSummary = document.createElement('summary');
+          sourceSummary.className = 'response-activity-tool-source-title';
+          const sourceText = document.createElement('span');
+          sourceText.className = 'response-activity-tool-source-title-text';
+          sourceText.textContent = `来源 ${entry.sources.length}`;
+          sourceSummary.appendChild(sourceText);
+          const sourceChevron = document.createElement('i');
+          sourceChevron.className = 'fa-solid fa-chevron-right response-activity-tool-source-chevron';
+          sourceSummary.appendChild(sourceChevron);
+          sources.appendChild(sourceSummary);
+
+          const sourceList = document.createElement('div');
+          sourceList.className = 'response-activity-tool-source-list';
+          entry.sources.forEach((source) => {
+            const label = source.title || source.domain || source.url || '未命名来源';
+            if (source.url) {
+              const link = document.createElement('a');
+              link.className = 'response-activity-tool-source-link';
+              link.target = '_blank';
+              link.rel = 'noopener noreferrer';
+              link.href = source.url;
+              link.textContent = label;
+              sourceList.appendChild(link);
+            } else {
+              const text = document.createElement('span');
+              text.className = 'response-activity-tool-source-link';
+              text.textContent = label;
+              sourceList.appendChild(text);
+            }
+          });
+          sources.appendChild(sourceList);
+          item.appendChild(sources);
+        }
+
+        panelBodyInner.appendChild(item);
+        return;
+      }
 
       const summaryTag = hasDetails ? 'button' : 'div';
       const summary = document.createElement(summaryTag);
@@ -1450,18 +1532,9 @@ export function createMessageProcessor(appContext) {
       primary.textContent = buildResponseToolCallPrimaryText(entry);
       summary.appendChild(primary);
 
-      const statusLabel = getResponseActivityStatusLabel(entry.status);
-      if (statusLabel) {
-        const status = document.createElement('span');
-        status.className = 'response-activity-tool-status';
-        status.textContent = statusLabel;
-        summary.appendChild(status);
-      }
-
       if (hasDetails) {
-        const chevron = document.createElement('span');
-        chevron.className = 'response-activity-tool-chevron';
-        chevron.textContent = '›';
+        const chevron = document.createElement('i');
+        chevron.className = 'fa-solid fa-chevron-right response-activity-tool-chevron';
         summary.appendChild(chevron);
         summary.addEventListener('click', () => {
           const nextExpandedKeys = readExpandedResponseActivityToolKeys(timelineRoot);
@@ -1511,7 +1584,13 @@ export function createMessageProcessor(appContext) {
           sources.className = 'response-activity-tool-sources';
           const sourceSummary = document.createElement('summary');
           sourceSummary.className = 'response-activity-tool-source-title';
-          sourceSummary.textContent = `来源 ${entry.sources.length}`;
+          const sourceText = document.createElement('span');
+          sourceText.className = 'response-activity-tool-source-title-text';
+          sourceText.textContent = `来源 ${entry.sources.length}`;
+          sourceSummary.appendChild(sourceText);
+          const sourceChevron = document.createElement('i');
+          sourceChevron.className = 'fa-solid fa-chevron-right response-activity-tool-source-chevron';
+          sourceSummary.appendChild(sourceChevron);
           sources.appendChild(sourceSummary);
 
           const sourceList = document.createElement('div');
