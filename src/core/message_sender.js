@@ -963,6 +963,15 @@ export function createMessageSender(appContext) {
       .trim();
   }
 
+  function isResponsesActivityEntryInProgress(entry) {
+    const status = String(entry?.status || '').trim().toLowerCase();
+    return status === 'streaming' || status === 'in_progress';
+  }
+
+  function isResponsesActivityTimelineInProgress(timeline) {
+    return Array.isArray(timeline) && timeline.some((entry) => isResponsesActivityEntryInProgress(entry));
+  }
+
   function getResponsesToolCallsFromTimeline(timeline) {
     if (!Array.isArray(timeline) || timeline.length === 0) return null;
     const toolCalls = timeline
@@ -2722,6 +2731,7 @@ export function createMessageSender(appContext) {
       reasoning_content: null,
       tool_calls: null,
       response_activity_timeline: null,
+      response_activity_duration_ms: null,
       apiUuid: null,
       apiDisplayName: '',
       apiModelId: '',
@@ -2781,6 +2791,7 @@ export function createMessageSender(appContext) {
       reasoning_content: null,
       tool_calls: null,
       response_activity_timeline: null,
+      response_activity_duration_ms: null,
       apiUuid: null,
       apiDisplayName: '',
       apiModelId: '',
@@ -3826,13 +3837,31 @@ export function createMessageSender(appContext) {
     }
   }
 
+  function resetResponsesActivityToggleStateForRegenerate(targetElement) {
+    if (!targetElement) return;
+    const timelineRoot = targetElement.querySelector('.response-activity-timeline');
+    if (!timelineRoot || !timelineRoot.dataset) return;
+    delete timelineRoot.dataset.panelUserToggled;
+    delete timelineRoot.dataset.panelExpanded;
+    delete timelineRoot.dataset.expandedToolKeys;
+  }
+
   function applyResponsesActivityTimelineToNode(node, timeline) {
     if (!node || typeof node !== 'object') return false;
     const normalizedTimeline = mergeResponsesActivityTimeline([], timeline);
     if (normalizedTimeline.length > 0) {
       node.response_activity_timeline = cloneResponsesActivityTimeline(normalizedTimeline);
+      if (!isResponsesActivityTimelineInProgress(normalizedTimeline)) {
+        const startedAt = Number(node.timestamp) || 0;
+        if (startedAt > 0) {
+          node.response_activity_duration_ms = Math.max(0, Date.now() - startedAt);
+        }
+      } else {
+        delete node.response_activity_duration_ms;
+      }
     } else {
       delete node.response_activity_timeline;
+      delete node.response_activity_duration_ms;
     }
     delete node.response_reasoning_summary;
     delete node.response_tool_calls;
@@ -3871,6 +3900,7 @@ export function createMessageSender(appContext) {
       node.reasoning_content = null;
       node.tool_calls = null;
       delete node.response_activity_timeline;
+      delete node.response_activity_duration_ms;
       delete node.response_reasoning_summary;
       delete node.response_tool_calls;
       // 原地替换时清空旧的 token 用量，避免本次请求未回传 usage 时显示陈旧数据。
@@ -3940,6 +3970,9 @@ export function createMessageSender(appContext) {
       if (normalizedOptions.clearThoughts) {
         try {
           element.querySelectorAll('.thoughts-content').forEach((thoughtsEl) => thoughtsEl.remove());
+        } catch (_) {}
+        try {
+          element.querySelectorAll('.response-activity-timeline, .response-tool-calls').forEach((panelEl) => panelEl.remove());
         } catch (_) {}
       }
 
@@ -4670,6 +4703,7 @@ export function createMessageSender(appContext) {
                 el.querySelectorAll('.error-retry-actions').forEach((actionEl) => actionEl.remove());
               } catch (_) {}
               resetThoughtsToggleStateForRegenerate(el);
+              resetResponsesActivityToggleStateForRegenerate(el);
               try {
                 el.classList.add('updating');
                 el.classList.add('regenerating');
@@ -5098,6 +5132,9 @@ export function createMessageSender(appContext) {
         } catch (_) {}
         try {
           messageElement.querySelectorAll('.thoughts-content').forEach((thoughtsEl) => thoughtsEl.remove());
+        } catch (_) {}
+        try {
+          messageElement.querySelectorAll('.response-activity-timeline, .response-tool-calls').forEach((panelEl) => panelEl.remove());
         } catch (_) {}
         let textContentDiv = messageElement.querySelector('.text-content');
         if (!textContentDiv) {
