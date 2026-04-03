@@ -12,6 +12,7 @@
  * @returns {Object} 消息处理API
  */
 import { renderMarkdownSafe } from '../utils/markdown_renderer.js';
+import { enhanceMermaidDiagrams } from '../utils/mermaid_renderer.js';
 import { extractThinkingFromText, mergeThoughts } from '../utils/thoughts_parser.js';
 
 /**
@@ -181,6 +182,9 @@ export function createMessageProcessor(appContext) {
     rootElement.querySelectorAll('.text-content, .thoughts-content').forEach((node) => containers.push(node));
 
     const uniqueContainers = Array.from(new Set(containers));
+    if (!uniqueContainers.length) {
+      uniqueContainers.push(rootElement);
+    }
     uniqueContainers.forEach((container) => {
       container.querySelectorAll('a').forEach((link) => {
         const rawHref = link.getAttribute('href') || '';
@@ -871,13 +875,7 @@ export function createMessageProcessor(appContext) {
         textContentDiv.innerText = messageText;
       }
       
-      decorateMarkdownLinks(messageDiv);
-
-      messageDiv.querySelectorAll('pre code').forEach(block => {
-        hljs.highlightElement(block);
-      });
-
-      bindInlineImagePreviews(messageDiv);
+      enhanceMarkdownContent(messageDiv);
 
       // 数学公式已在渲染阶段通过 KaTeX 输出，无需二次 auto-render
 
@@ -1057,13 +1055,7 @@ export function createMessageProcessor(appContext) {
 
     textContentDiv.innerHTML = processMathAndMarkdown(safeAnswerContent);
 
-    decorateMarkdownLinks(messageDiv);
-
-    textContentDiv.querySelectorAll('pre code').forEach(block => {
-      hljs.highlightElement(block);
-    });
-
-    bindInlineImagePreviews(messageDiv);
+    enhanceMarkdownContent(messageDiv);
 
     try {
       services.selectionThreadManager?.decorateMessageElement?.(messageDiv, node);
@@ -1214,6 +1206,80 @@ export function createMessageProcessor(appContext) {
     }
   }
 
+  function isScrollContainerNearBottom(container, threshold = 72) {
+    if (!container) return false;
+    const distance = (container.scrollHeight || 0) - (container.scrollTop || 0) - (container.clientHeight || 0);
+    return distance <= threshold;
+  }
+
+  /**
+   * 对已经写入 DOM 的 Markdown 内容做统一增强。
+   * 这里集中处理所有“必须依赖真实 DOM 才能完成”的步骤：
+   * - 链接跳转策略修正；
+   * - 代码高亮；
+   * - 图片预览绑定；
+   * - Mermaid 异步 SVG 渲染；
+   *
+   * 这样可以确保主消息区、编辑后回写、线程预览等多条渲染路径行为一致。
+   *
+   * @param {HTMLElement} rootElement
+   * @param {{ forceMermaid?: boolean, updateLayout?: boolean, onAsyncRenderComplete?: Function }} [options]
+   */
+  function enhanceMarkdownContent(rootElement, options = {}) {
+    if (!rootElement) return;
+
+    decorateMarkdownLinks(rootElement);
+
+    rootElement.querySelectorAll('pre code').forEach((block) => {
+      if (block.closest('.mermaid-diagram__source')) return;
+      try {
+        hljs.highlightElement(block);
+      } catch (_) {}
+    });
+
+    bindInlineImagePreviews(rootElement);
+
+    enhanceMermaidDiagrams(rootElement, {
+      force: !!options.forceMermaid,
+      onRenderComplete(block, state) {
+        if (options.updateLayout !== false && block?.isConnected) {
+          const ownerMessage = block.closest?.('.message');
+          if (ownerMessage) {
+            const listContainer = resolveMessageListContainer(ownerMessage);
+            if (listContainer) {
+              messageVirtualizer.scheduleUpdate(listContainer);
+            }
+
+            const scrollContainer = resolveScrollContainerForMessage(ownerMessage);
+            if (ownerMessage.classList.contains('updating') || isScrollContainerNearBottom(scrollContainer)) {
+              scrollToBottom(scrollContainer);
+            }
+          }
+        }
+
+        if (typeof options.onAsyncRenderComplete === 'function') {
+          options.onAsyncRenderComplete(block, state);
+        }
+      }
+    });
+  }
+
+  let mermaidThemeRerenderRafId = null;
+
+  function scheduleRerenderAllMermaidDiagrams() {
+    if (mermaidThemeRerenderRafId != null) return;
+    if (!document.querySelector('.mermaid-diagram')) return;
+
+    const schedule = (typeof requestAnimationFrame === 'function')
+      ? requestAnimationFrame
+      : (cb) => setTimeout(cb, 16);
+
+    mermaidThemeRerenderRafId = schedule(() => {
+      mermaidThemeRerenderRafId = null;
+      enhanceMarkdownContent(document.body, { forceMermaid: true });
+    });
+  }
+
   /**
    * 切换美元符号数学渲染时，重新处理当前所有 AI 消息
    */
@@ -1329,6 +1395,24 @@ export function createMessageProcessor(appContext) {
     console.warn('绑定 selectionchange 监听失败，选区保护将退化为仅本次渲染有效:', error);
   }
 
+  try {
+    const rootAttrObserver = new MutationObserver((mutations) => {
+      const shouldRerenderMermaid = mutations.some((mutation) => (
+        mutation.type === 'attributes'
+        && ['class', 'data-theme', 'style'].includes(mutation.attributeName || '')
+      ));
+      if (shouldRerenderMermaid) {
+        scheduleRerenderAllMermaidDiagrams();
+      }
+    });
+    rootAttrObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'data-theme', 'style']
+    });
+  } catch (error) {
+    console.warn('监听主题变化以重渲染 Mermaid 失败:', error);
+  }
+
   // 在创建消息处理器时安装一次全局链接拦截器
   installMarkdownLinkInterceptor();
   messageVirtualizer.init();
@@ -1392,6 +1476,7 @@ export function createMessageProcessor(appContext) {
     appendMessage,
     updateAIMessage,
     processMathAndMarkdown,
+    enhanceMarkdownContent,
     decorateMarkdownLinks,
     getPromptTypeFromContent,
     extractSystemContent

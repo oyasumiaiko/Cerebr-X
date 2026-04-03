@@ -21,6 +21,9 @@ Thumbs.db
 .cache/
 *.sublime-workspace
 
+# 本地临时引入的第三方库文件
+lib/mermaid.min.js
+
 # 注意：不要忽略 fontawesome 子模块目录，因为它在 .gitmodules 中记录
 sse.txt
 sse2.txt

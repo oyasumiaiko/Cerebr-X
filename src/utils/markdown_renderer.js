@@ -4,6 +4,7 @@
  * 目标：
  * - 禁止原始 HTML 在 Markdown 中直接生效（例如 <script>、<iframe> 等）
  * - 支持 KaTeX 数学公式（$...$ / $$...$$ / \(...\) / \[...\]）
+ * - 支持 Mermaid fenced code block，占位输出后在 DOM 挂载阶段异步渲染
  * - 支持 GFM 与换行、代码高亮、表格样式
  * - 使用 DOMPurify 进行严格白名单清洗
  * - 尽量保持纯函数式：输入字符串 → 输出安全 HTML 字符串
@@ -18,6 +19,8 @@
  */
 
 /* global marked, hljs, katex, DOMPurify */
+
+import { createMermaidBlockHtml, isMermaidLanguage } from './mermaid_renderer.js';
 
 /**
  * 简单 HTML 转义（用于极小范围需要时）。
@@ -322,8 +325,15 @@ const DEFAULT_PURIFY_CONFIG = {
  */
 function createSafeMarkedRenderer() {
   const renderer = new marked.Renderer();
+  const defaultCodeRenderer = renderer.code.bind(renderer);
   renderer.table = function(header, body) {
     return `<table class="markdown-table">\n<thead>\n${header}</thead>\n<tbody>\n${body}</tbody>\n</table>\n`;
+  };
+  renderer.code = function(code, infostring, escaped) {
+    if (isMermaidLanguage(infostring)) {
+      return createMermaidBlockHtml(code);
+    }
+    return defaultCodeRenderer(code, infostring, escaped);
   };
   renderer.html = function(html) {
     // 直接透传，后续交由 DOMPurify 严格清洗

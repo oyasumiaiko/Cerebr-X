@@ -841,6 +841,7 @@ export function createSelectionThreadManager(appContext) {
     const content = typeof text === 'string' ? text : '';
     if (messageProcessor?.processMathAndMarkdown) {
       target.innerHTML = messageProcessor.processMathAndMarkdown(content);
+      messageProcessor.enhanceMarkdownContent?.(target, { forceMermaid: true, updateLayout: false });
     } else {
       target.textContent = content;
     }

@@ -2137,13 +2137,8 @@ export function createContextMenuManager(appContext) {
           // AI 消息：使用与初始渲染相同的 Markdown + 数学渲染管线（包含 $/$ 过滤逻辑）
           const processed = appContext.services.messageProcessor.processMathAndMarkdown(newText);
           textDiv.innerHTML = processed;
-          // 复用 appendMessage 中的后处理逻辑：链接与代码高亮
-          appContext.services.messageProcessor.decorateMarkdownLinks?.(textDiv);
-          textDiv
-            .querySelectorAll('pre code')
-            .forEach(block => {
-              try { hljs.highlightElement(block); } catch (_) {}
-            });
+          // 复用统一的 DOM 挂载后增强链路，确保 Mermaid、链接和代码高亮行为一致。
+          appContext.services.messageProcessor.enhanceMarkdownContent?.(textDiv, { forceMermaid: true });
         }
       }
       // 存储原始文本以便复制功能
