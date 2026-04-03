@@ -1288,9 +1288,6 @@ export function createMessageProcessor(appContext) {
   function getResponseActivityToolSecondaryLines(entry) {
     const lines = [];
     const actionType = String(entry?.action_type || '').toLowerCase();
-    if (Array.isArray(entry?.queries) && entry.queries.length > 1 && actionType !== 'find_in_page') {
-      lines.push(`查询：${entry.queries.join(' · ')}`);
-    }
     const type = String(entry?.type || '').toLowerCase();
     const url = (typeof entry?.url === 'string' && entry.url.trim()) ? entry.url.trim() : '';
     if (url && type !== 'web_search_call') {
@@ -1304,11 +1301,22 @@ export function createMessageProcessor(appContext) {
     return lines;
   }
 
+  function getResponseActivityToolQueryLines(entry) {
+    const actionType = String(entry?.action_type || '').toLowerCase();
+    if (actionType === 'find_in_page') return [];
+    const queries = Array.isArray(entry?.queries)
+      ? entry.queries.filter(query => typeof query === 'string' && query.trim()).map(query => query.trim())
+      : [];
+    if (queries.length <= 1) return [];
+    return queries.map((query, index) => `查询 ${index + 1}：${query}`);
+  }
+
   function hasResponseActivityToolDetails(entry) {
     if (!entry || typeof entry !== 'object') return false;
     if (String(entry?.action_type || '').toLowerCase() === 'find_in_page') {
       return false;
     }
+    if (getResponseActivityToolQueryLines(entry).length > 0) return true;
     if (getResponseActivityToolSecondaryLines(entry).length > 0) return true;
     if (typeof entry.arguments === 'string' && entry.arguments.trim()) return true;
     if (Array.isArray(entry.sources) && entry.sources.length > 0) return true;
@@ -1476,6 +1484,13 @@ export function createMessageProcessor(appContext) {
         toolBody.className = 'response-activity-tool-body';
         const toolBodyInner = document.createElement('div');
         toolBodyInner.className = 'response-activity-tool-body-inner';
+
+        getResponseActivityToolQueryLines(entry).forEach((line) => {
+          const secondary = document.createElement('div');
+          secondary.className = 'response-activity-tool-secondary';
+          secondary.textContent = line;
+          toolBodyInner.appendChild(secondary);
+        });
 
         getResponseActivityToolSecondaryLines(entry).forEach((line) => {
           const secondary = document.createElement('div');
