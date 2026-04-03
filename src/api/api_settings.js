@@ -50,6 +50,494 @@ const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_RESPONSES_DEFAULT_BASE_URL = 'https://api.openai.com/v1/responses';
 const GEMINI_DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com';
 const CONNECTION_SOURCE_DEFAULT_NAME_PREFIX = '连接源';
+const RESPONSES_REASONING_EFFORT_OPTIONS = Object.freeze(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+const RESPONSES_REASONING_SUMMARY_OPTIONS = Object.freeze(['auto', 'concise', 'detailed']);
+const RESPONSES_PROMPT_CACHE_RETENTION_OPTIONS = Object.freeze(['in-memory', '24h']);
+const RESPONSES_SERVICE_TIER_OPTIONS = Object.freeze(['auto', 'default', 'flex', 'scale', 'priority']);
+const RESPONSES_TRUNCATION_OPTIONS = Object.freeze(['auto', 'disabled']);
+const RESPONSES_TEXT_VERBOSITY_OPTIONS = Object.freeze(['low', 'medium', 'high']);
+const RESPONSES_MAIN_FIELD_SPECS = Object.freeze([
+  {
+    path: ['reasoning', 'effort'],
+    key: 'reasoning.effort',
+    label: '思考强度',
+    kind: 'select',
+    defaultValue: 'medium',
+    options: RESPONSES_REASONING_EFFORT_OPTIONS,
+    help: 'gpt-5 / o 系列模型可用；未启用时不附加 reasoning.effort。'
+  },
+  {
+    path: ['text', 'verbosity'],
+    key: 'text.verbosity',
+    label: '回答详细度',
+    kind: 'select',
+    defaultValue: 'medium',
+    options: RESPONSES_TEXT_VERBOSITY_OPTIONS,
+    help: '约束输出文本的详细程度。'
+  },
+  {
+    path: ['max_output_tokens'],
+    key: 'max_output_tokens',
+    label: '最大输出 Token',
+    kind: 'number',
+    min: 1,
+    step: 1,
+    placeholder: '例如 4096',
+    help: '限制本次 Responses API 的输出上限。'
+  },
+  {
+    path: ['top_p'],
+    key: 'top_p',
+    label: 'Top P',
+    kind: 'range',
+    defaultValue: 1,
+    min: 0,
+    max: 1,
+    step: 0.05,
+    help: '与 Temperature 二选一优先调一个；未启用时不发送 top_p。'
+  },
+  {
+    path: ['truncation'],
+    key: 'truncation',
+    label: '截断策略',
+    kind: 'select',
+    defaultValue: 'auto',
+    options: RESPONSES_TRUNCATION_OPTIONS,
+    help: '控制超出上下文窗口时的处理方式。'
+  },
+  {
+    path: ['service_tier'],
+    key: 'service_tier',
+    label: '服务层级',
+    kind: 'select',
+    defaultValue: 'auto',
+    options: RESPONSES_SERVICE_TIER_OPTIONS,
+    help: '未启用时由 OpenAI 项目默认策略决定。'
+  },
+  {
+    path: ['parallel_tool_calls'],
+    key: 'parallel_tool_calls',
+    label: '并行工具调用',
+    kind: 'boolean',
+    help: '显式控制模型是否允许并行调用工具。'
+  },
+  {
+    path: ['store'],
+    key: 'store',
+    label: '存储响应',
+    kind: 'boolean',
+    help: '显式控制是否将响应保存到 OpenAI。'
+  }
+]);
+const RESPONSES_ADVANCED_FIELD_SPECS = Object.freeze([
+  {
+    path: ['background'],
+    key: 'background',
+    label: '后台执行',
+    kind: 'boolean',
+    help: '启用后将响应任务放到后台执行。'
+  },
+  {
+    path: ['instructions'],
+    key: 'instructions',
+    label: 'Instructions',
+    kind: 'textarea',
+    rows: 4,
+    placeholder: '额外插入到 Responses API 上下文里的 system/developer 指令',
+    help: '与现有系统提示词并存；为空时不附加。'
+  },
+  {
+    path: ['conversation'],
+    key: 'conversation',
+    label: 'Conversation ID',
+    kind: 'text',
+    placeholder: '例如 conv_...',
+    help: '与 previous_response_id 互斥。'
+  },
+  {
+    path: ['previous_response_id'],
+    key: 'previous_response_id',
+    label: 'Previous Response ID',
+    kind: 'text',
+    placeholder: '例如 resp_...',
+    help: '与 conversation 互斥。'
+  },
+  {
+    path: ['max_tool_calls'],
+    key: 'max_tool_calls',
+    label: '最大工具调用次数',
+    kind: 'number',
+    min: 1,
+    step: 1,
+    placeholder: '例如 4'
+  },
+  {
+    path: ['top_logprobs'],
+    key: 'top_logprobs',
+    label: 'Top Logprobs',
+    kind: 'number',
+    min: 0,
+    max: 20,
+    step: 1,
+    placeholder: '0 - 20'
+  },
+  {
+    path: ['prompt_cache_key'],
+    key: 'prompt_cache_key',
+    label: 'Prompt Cache Key',
+    kind: 'text',
+    placeholder: '例如 user-cache-key'
+  },
+  {
+    path: ['prompt_cache_retention'],
+    key: 'prompt_cache_retention',
+    label: 'Prompt Cache Retention',
+    kind: 'select',
+    defaultValue: 'in-memory',
+    options: RESPONSES_PROMPT_CACHE_RETENTION_OPTIONS
+  },
+  {
+    path: ['safety_identifier'],
+    key: 'safety_identifier',
+    label: 'Safety Identifier',
+    kind: 'text',
+    maxLength: 64,
+    placeholder: '建议放哈希后的稳定用户标识'
+  },
+  {
+    path: ['user'],
+    key: 'user',
+    label: 'User（已废弃）',
+    kind: 'text',
+    placeholder: '旧字段，优先改用 safety_identifier / prompt_cache_key'
+  },
+  {
+    path: ['reasoning', 'generate_summary'],
+    key: 'reasoning.generate_summary',
+    label: '推理摘要生成',
+    kind: 'select',
+    defaultValue: 'auto',
+    options: RESPONSES_REASONING_SUMMARY_OPTIONS
+  },
+  {
+    path: ['reasoning', 'summary'],
+    key: 'reasoning.summary',
+    label: '推理摘要详略',
+    kind: 'select',
+    defaultValue: 'auto',
+    options: RESPONSES_REASONING_SUMMARY_OPTIONS
+  },
+  {
+    path: ['stream_options', 'include_obfuscation'],
+    key: 'stream_options.include_obfuscation',
+    label: '流式混淆填充',
+    kind: 'boolean',
+    help: '仅在当前 API 卡片开启流式输出时才会真正发送。'
+  },
+  {
+    path: ['include'],
+    key: 'include',
+    label: 'Include',
+    kind: 'json',
+    jsonMode: 'array',
+    rows: 4,
+    placeholder: '[\n  \"reasoning.encrypted_content\"\n]',
+    help: '填写 JSON 数组。'
+  },
+  {
+    path: ['metadata'],
+    key: 'metadata',
+    label: 'Metadata',
+    kind: 'json',
+    jsonMode: 'object',
+    rows: 4,
+    placeholder: '{\n  \"scene\": \"research\"\n}',
+    help: '填写 JSON 对象。'
+  },
+  {
+    path: ['prompt'],
+    key: 'prompt',
+    label: 'Prompt',
+    kind: 'json',
+    jsonMode: 'object',
+    rows: 5,
+    placeholder: '{\n  \"id\": \"pmpt_...\",\n  \"version\": \"1\",\n  \"variables\": { \"foo\": \"bar\" }\n}',
+    help: '填写 prompt 模板对象。'
+  },
+  {
+    path: ['context_management'],
+    key: 'context_management',
+    label: 'Context Management',
+    kind: 'json',
+    jsonMode: 'array',
+    rows: 5,
+    placeholder: '[\n  { \"type\": \"compaction\", \"compact_threshold\": 120000 }\n]',
+    help: '填写 JSON 数组。'
+  },
+  {
+    path: ['text', 'format'],
+    key: 'text.format',
+    label: 'Text Format',
+    kind: 'json',
+    jsonMode: 'object',
+    rows: 5,
+    placeholder: '{\n  \"type\": \"json_schema\",\n  \"name\": \"output\",\n  \"schema\": {}\n}',
+    help: '填写 Responses API text.format 对象。'
+  },
+  {
+    path: ['tool_choice'],
+    key: 'tool_choice',
+    label: 'Tool Choice',
+    kind: 'json_or_string',
+    rows: 4,
+    placeholder: 'auto\n或\n{\n  \"type\": \"allowed_tools\",\n  \"mode\": \"required\",\n  \"tools\": [\"web_search_preview\"]\n}',
+    help: '可填写 none/auto/required，也可填写 JSON 对象。'
+  },
+  {
+    path: ['tools'],
+    key: 'tools',
+    label: 'Tools',
+    kind: 'json',
+    jsonMode: 'array',
+    rows: 6,
+    placeholder: '[\n  { \"type\": \"web_search_preview\" }\n]',
+    help: '填写 JSON 数组。'
+  }
+]);
+const GEMINI_THINKING_LEVEL_OPTIONS = Object.freeze(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH']);
+const GEMINI_RESPONSE_MIME_TYPE_OPTIONS = Object.freeze(['text/plain', 'application/json']);
+const GEMINI_MEDIA_RESOLUTION_OPTIONS = Object.freeze([
+  'MEDIA_RESOLUTION_LOW',
+  'MEDIA_RESOLUTION_MEDIUM',
+  'MEDIA_RESOLUTION_HIGH'
+]);
+const GEMINI_MAIN_FIELD_SPECS = Object.freeze([
+  {
+    path: ['generationConfig', 'topP'],
+    key: 'generationConfig.topP',
+    label: 'Top P',
+    kind: 'range',
+    defaultValue: 0.95,
+    min: 0,
+    max: 1,
+    step: 0.05,
+    help: 'Gemini 使用 nucleus sampling；仅启用后才附加 topP。'
+  },
+  {
+    path: ['generationConfig', 'topK'],
+    key: 'generationConfig.topK',
+    label: 'Top K',
+    kind: 'number',
+    min: 1,
+    step: 1,
+    placeholder: '例如 40',
+    help: '部分仅支持 nucleus sampling 的模型不允许设置 topK。'
+  },
+  {
+    path: ['generationConfig', 'maxOutputTokens'],
+    key: 'generationConfig.maxOutputTokens',
+    label: '最大输出 Token',
+    kind: 'number',
+    min: 1,
+    step: 1,
+    placeholder: '例如 8192'
+  },
+  {
+    path: ['generationConfig', 'candidateCount'],
+    key: 'generationConfig.candidateCount',
+    label: '候选数',
+    kind: 'number',
+    min: 1,
+    step: 1,
+    placeholder: '默认 1'
+  },
+  {
+    path: ['generationConfig', 'responseMimeType'],
+    key: 'generationConfig.responseMimeType',
+    label: '响应 MIME',
+    kind: 'select',
+    defaultValue: 'text/plain',
+    options: GEMINI_RESPONSE_MIME_TYPE_OPTIONS,
+    help: '若要结构化 JSON，请配合 responseSchema / responseJsonSchema。'
+  },
+  {
+    path: ['generationConfig', 'thinkingConfig', 'thinkingLevel'],
+    key: 'generationConfig.thinkingConfig.thinkingLevel',
+    label: '思考层级',
+    kind: 'select',
+    defaultValue: 'HIGH',
+    options: GEMINI_THINKING_LEVEL_OPTIONS,
+    help: '推荐 Gemini 3 及以后模型使用。'
+  },
+  {
+    path: ['generationConfig', 'thinkingConfig', 'thinkingBudget'],
+    key: 'generationConfig.thinkingConfig.thinkingBudget',
+    label: '思考预算',
+    kind: 'number',
+    min: 0,
+    step: 1,
+    placeholder: '例如 1024',
+    help: '推荐较早支持 thinking 的模型使用；与 thinkingLevel 视为二选一。'
+  },
+  {
+    path: ['generationConfig', 'thinkingConfig', 'includeThoughts'],
+    key: 'generationConfig.thinkingConfig.includeThoughts',
+    label: '返回 Thoughts',
+    kind: 'boolean',
+    help: '启用后在模型支持时返回 thoughts。'
+  }
+]);
+const GEMINI_ADVANCED_FIELD_SPECS = Object.freeze([
+  {
+    path: ['store'],
+    key: 'store',
+    label: '请求日志存储',
+    kind: 'boolean',
+    help: '覆盖项目级 logging 配置。'
+  },
+  {
+    path: ['cachedContent'],
+    key: 'cachedContent',
+    label: 'Cached Content',
+    kind: 'text',
+    placeholder: 'cachedContents/...'
+  },
+  {
+    path: ['generationConfig', 'stopSequences'],
+    key: 'generationConfig.stopSequences',
+    label: 'Stop Sequences',
+    kind: 'json',
+    jsonMode: 'array',
+    rows: 4,
+    placeholder: '[\n  \"\\nUser:\"\n]'
+  },
+  {
+    path: ['generationConfig', 'seed'],
+    key: 'generationConfig.seed',
+    label: 'Seed',
+    kind: 'number',
+    step: 1,
+    placeholder: '固定随机种子'
+  },
+  {
+    path: ['generationConfig', 'presencePenalty'],
+    key: 'generationConfig.presencePenalty',
+    label: 'Presence Penalty',
+    kind: 'number',
+    step: 0.1,
+    placeholder: '例如 0.5 或 -0.5'
+  },
+  {
+    path: ['generationConfig', 'frequencyPenalty'],
+    key: 'generationConfig.frequencyPenalty',
+    label: 'Frequency Penalty',
+    kind: 'number',
+    step: 0.1,
+    placeholder: '例如 0.5 或 -0.5'
+  },
+  {
+    path: ['generationConfig', 'responseLogprobs'],
+    key: 'generationConfig.responseLogprobs',
+    label: '导出 Logprobs',
+    kind: 'boolean'
+  },
+  {
+    path: ['generationConfig', 'logprobs'],
+    key: 'generationConfig.logprobs',
+    label: 'Top Logprobs',
+    kind: 'number',
+    min: 0,
+    max: 20,
+    step: 1,
+    placeholder: '0 - 20'
+  },
+  {
+    path: ['generationConfig', 'enableEnhancedCivicAnswers'],
+    key: 'generationConfig.enableEnhancedCivicAnswers',
+    label: '增强 Civic Answers',
+    kind: 'boolean'
+  },
+  {
+    path: ['generationConfig', 'mediaResolution'],
+    key: 'generationConfig.mediaResolution',
+    label: '媒体分辨率',
+    kind: 'select',
+    defaultValue: 'MEDIA_RESOLUTION_MEDIUM',
+    options: GEMINI_MEDIA_RESOLUTION_OPTIONS
+  },
+  {
+    path: ['generationConfig', 'responseSchema'],
+    key: 'generationConfig.responseSchema',
+    label: 'Response Schema',
+    kind: 'json',
+    jsonMode: 'object',
+    rows: 5,
+    placeholder: '{\n  \"type\": \"object\",\n  \"properties\": {}\n}'
+  },
+  {
+    path: ['generationConfig', 'responseJsonSchema'],
+    key: 'generationConfig.responseJsonSchema',
+    label: 'Response JSON Schema',
+    kind: 'json',
+    jsonMode: 'object',
+    rows: 6,
+    placeholder: '{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"type\": \"object\"\n}'
+  },
+  {
+    path: ['generationConfig', 'responseModalities'],
+    key: 'generationConfig.responseModalities',
+    label: 'Response Modalities',
+    kind: 'json',
+    jsonMode: 'array',
+    rows: 4,
+    placeholder: '[\n  \"TEXT\"\n]'
+  },
+  {
+    path: ['generationConfig', 'speechConfig'],
+    key: 'generationConfig.speechConfig',
+    label: 'Speech Config',
+    kind: 'json',
+    jsonMode: 'object',
+    rows: 5,
+    placeholder: '{\n  \"voiceConfig\": {}\n}'
+  },
+  {
+    path: ['generationConfig', 'imageConfig'],
+    key: 'generationConfig.imageConfig',
+    label: 'Image Config',
+    kind: 'json',
+    jsonMode: 'object',
+    rows: 5,
+    placeholder: '{\n  \"aspectRatio\": \"16:9\",\n  \"imageSize\": \"1K\"\n}'
+  },
+  {
+    path: ['tools'],
+    key: 'tools',
+    label: 'Tools',
+    kind: 'json',
+    jsonMode: 'array',
+    rows: 6,
+    placeholder: '[\n  { \"functionDeclarations\": [] }\n]'
+  },
+  {
+    path: ['toolConfig'],
+    key: 'toolConfig',
+    label: 'Tool Config',
+    kind: 'json',
+    jsonMode: 'object',
+    rows: 5,
+    placeholder: '{\n  \"functionCallingConfig\": { \"mode\": \"ANY\" }\n}'
+  },
+  {
+    path: ['safetySettings'],
+    key: 'safetySettings',
+    label: 'Safety Settings',
+    kind: 'json',
+    jsonMode: 'array',
+    rows: 6,
+    placeholder: '[\n  { \"category\": \"HARM_CATEGORY_HARASSMENT\", \"threshold\": \"BLOCK_ONLY_HIGH\" }\n]'
+  }
+]);
 
 export function createApiManager(appContext) {
   // 私有状态
@@ -114,6 +602,164 @@ export function createApiManager(appContext) {
       return JSON.stringify(parsed);
     } catch (_) {
       return input.trim();
+    }
+  }
+
+  /**
+   * 深拷贝仅包含 JSON 兼容值的数据结构。
+   * Responses API 设置最终需要落到 chrome.storage，因此这里明确限制为可序列化数据。
+   * @param {any} value
+   * @returns {any}
+   */
+  function cloneJsonCompatible(value) {
+    if (typeof value === 'undefined') return undefined;
+    try {
+      if (typeof structuredClone === 'function') {
+        return structuredClone(value);
+      }
+    } catch (_) {}
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  /**
+   * 递归裁剪 Responses API 设置中的空值，只保留真正会写入请求体的字段。
+   * 说明：
+   * - false / 0 这类显式值必须保留；
+   * - 空字符串、空数组、空对象一律删除，避免 sync storage 被无意义字段撑爆；
+   * - 字符串统一 trim，减少存储噪音。
+   * @param {any} value
+   * @returns {any}
+   */
+  function compactResponsesApiSettingValue(value) {
+    if (value == null) return undefined;
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed ? trimmed : undefined;
+    }
+
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : undefined;
+    }
+
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      const compactedItems = value
+        .map(item => compactResponsesApiSettingValue(item))
+        .filter(item => typeof item !== 'undefined');
+      return compactedItems.length > 0 ? compactedItems : undefined;
+    }
+
+    if (typeof value === 'object') {
+      const compactedObject = {};
+      Object.entries(value).forEach(([key, childValue]) => {
+        const compactedChild = compactResponsesApiSettingValue(childValue);
+        if (typeof compactedChild !== 'undefined') {
+          compactedObject[key] = compactedChild;
+        }
+      });
+      return Object.keys(compactedObject).length > 0 ? compactedObject : undefined;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * 规范化并裁剪 Responses API 设置对象。
+   * @param {any} settings
+   * @returns {Object|undefined}
+   */
+  function normalizeResponsesApiSettings(settings) {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      return undefined;
+    }
+    const compacted = compactResponsesApiSettingValue(settings);
+    if (!compacted || typeof compacted !== 'object' || Array.isArray(compacted)) {
+      return undefined;
+    }
+    return compacted;
+  }
+
+  /**
+   * Gemini 配置同样使用稀疏对象持久化，仅保留启用字段。
+   * @param {any} settings
+   * @returns {Object|undefined}
+   */
+  function normalizeGeminiApiSettings(settings) {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      return undefined;
+    }
+    const compacted = compactResponsesApiSettingValue(settings);
+    if (!compacted || typeof compacted !== 'object' || Array.isArray(compacted)) {
+      return undefined;
+    }
+    return compacted;
+  }
+
+  /**
+   * 读取深层路径值。
+   * @param {Object|undefined|null} root
+   * @param {string[]} path
+   * @returns {any}
+   */
+  function getNestedValue(root, path) {
+    if (!root || typeof root !== 'object' || !Array.isArray(path) || path.length <= 0) return undefined;
+    let current = root;
+    for (const segment of path) {
+      if (!current || typeof current !== 'object' || !(segment in current)) return undefined;
+      current = current[segment];
+    }
+    return current;
+  }
+
+  /**
+   * 写入深层路径值，不存在的父节点会自动创建。
+   * @param {Object} root
+   * @param {string[]} path
+   * @param {any} value
+   */
+  function setNestedValue(root, path, value) {
+    if (!root || typeof root !== 'object' || !Array.isArray(path) || path.length <= 0) return;
+    let current = root;
+    for (let i = 0; i < path.length - 1; i += 1) {
+      const segment = path[i];
+      if (!current[segment] || typeof current[segment] !== 'object' || Array.isArray(current[segment])) {
+        current[segment] = {};
+      }
+      current = current[segment];
+    }
+    current[path[path.length - 1]] = value;
+  }
+
+  /**
+   * 删除深层路径值，并回收因此变为空壳的父对象。
+   * @param {Object} root
+   * @param {string[]} path
+   */
+  function deleteNestedValue(root, path) {
+    if (!root || typeof root !== 'object' || !Array.isArray(path) || path.length <= 0) return;
+
+    const stack = [];
+    let current = root;
+    for (let i = 0; i < path.length - 1; i += 1) {
+      const segment = path[i];
+      if (!current || typeof current !== 'object' || !(segment in current)) return;
+      stack.push([current, segment]);
+      current = current[segment];
+    }
+
+    if (!current || typeof current !== 'object') return;
+    delete current[path[path.length - 1]];
+
+    for (let i = stack.length - 1; i >= 0; i -= 1) {
+      const [parent, segment] = stack[i];
+      const candidate = parent?.[segment];
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) break;
+      if (Object.keys(candidate).length > 0) break;
+      delete parent[segment];
     }
   }
 
@@ -357,7 +1003,7 @@ export function createApiManager(appContext) {
 
   function compactConfigsForSync(configs) {
     return configs.map((c) => {
-      return {
+      const compacted = {
         id: c.id,
         connectionSourceId: (typeof c.connectionSourceId === 'string') ? c.connectionSourceId.trim() : '',
         modelName: c.modelName,
@@ -375,6 +1021,15 @@ export function createApiManager(appContext) {
         userMessagePreprocessorTemplate: (typeof c.userMessagePreprocessorTemplate === 'string') ? c.userMessagePreprocessorTemplate : '',
         userMessagePreprocessorIncludeInHistory: !!c.userMessagePreprocessorIncludeInHistory
       };
+      const compactedResponsesSettings = normalizeResponsesApiSettings(c.responsesApiSettings);
+      if (compactedResponsesSettings) {
+        compacted.responsesApiSettings = compactedResponsesSettings;
+      }
+      const compactedGeminiSettings = normalizeGeminiApiSettings(c.geminiApiSettings);
+      if (compactedGeminiSettings) {
+        compacted.geminiApiSettings = compactedGeminiSettings;
+      }
+      return compacted;
     });
   }
 
@@ -1091,6 +1746,18 @@ export function createApiManager(appContext) {
         ? config.userMessagePreprocessorTemplate
         : '';
       config.userMessagePreprocessorIncludeInHistory = !!config.userMessagePreprocessorIncludeInHistory;
+      const normalizedResponsesApiSettings = normalizeResponsesApiSettings(config.responsesApiSettings);
+      if (normalizedResponsesApiSettings) {
+        config.responsesApiSettings = normalizedResponsesApiSettings;
+      } else {
+        delete config.responsesApiSettings;
+      }
+      const normalizedGeminiApiSettings = normalizeGeminiApiSettings(config.geminiApiSettings);
+      if (normalizedGeminiApiSettings) {
+        config.geminiApiSettings = normalizedGeminiApiSettings;
+      } else {
+        delete config.geminiApiSettings;
+      }
       delete config.connectionType;
       delete config.baseUrl;
       delete config.apiKey;
@@ -2331,6 +2998,470 @@ export function createApiManager(appContext) {
       return true;
     };
 
+    const apiFormGrid = apiForm.querySelector('.api-form-grid');
+    const getSelectedConnectionTypeForCard = () => {
+      const selectedSourceId = (typeof connectionSourceSelect?.value === 'string')
+        ? connectionSourceSelect.value.trim()
+        : '';
+      const selectedSource = getConnectionSourceById(selectedSourceId);
+      if (!selectedSource) return '';
+      return normalizeConnectionType(selectedSource.connectionType) || inferConnectionTypeByBaseUrl(selectedSource.baseUrl);
+    };
+    const isResponsesConnectionSelected = () => getSelectedConnectionTypeForCard() === CONNECTION_TYPE_OPENAI_RESPONSES;
+    const isGeminiConnectionSelected = () => getSelectedConnectionTypeForCard() === CONNECTION_TYPE_GEMINI;
+    const getResponsesSettingsSnapshot = () => normalizeResponsesApiSettings(apiConfigs[index]?.responsesApiSettings) || {};
+    const setResponsesSettingsSnapshot = (nextSettings, { persist = true } = {}) => {
+      const normalized = normalizeResponsesApiSettings(nextSettings);
+      if (normalized) {
+        apiConfigs[index].responsesApiSettings = normalized;
+      } else {
+        delete apiConfigs[index].responsesApiSettings;
+      }
+      if (persist) saveAPIConfigs();
+    };
+    const updateResponsesSettingAtPath = (path, value, { persist = true } = {}) => {
+      const draft = cloneJsonCompatible(apiConfigs[index]?.responsesApiSettings || {}) || {};
+      if (typeof value === 'undefined') {
+        deleteNestedValue(draft, path);
+      } else {
+        setNestedValue(draft, path, value);
+      }
+      setResponsesSettingsSnapshot(draft, { persist });
+    };
+    const getGeminiSettingsSnapshot = () => normalizeGeminiApiSettings(apiConfigs[index]?.geminiApiSettings) || {};
+    const setGeminiSettingsSnapshot = (nextSettings, { persist = true } = {}) => {
+      const normalized = normalizeGeminiApiSettings(nextSettings);
+      if (normalized) {
+        apiConfigs[index].geminiApiSettings = normalized;
+      } else {
+        delete apiConfigs[index].geminiApiSettings;
+      }
+      if (persist) saveAPIConfigs();
+    };
+    const updateGeminiSettingAtPath = (path, value, { persist = true } = {}) => {
+      const draft = cloneJsonCompatible(apiConfigs[index]?.geminiApiSettings || {}) || {};
+      if (typeof value === 'undefined') {
+        deleteNestedValue(draft, path);
+      } else {
+        setNestedValue(draft, path, value);
+      }
+      setGeminiSettingsSnapshot(draft, { persist });
+    };
+    const parseNumberFieldValue = (rawValue, spec) => {
+      const trimmed = (typeof rawValue === 'string') ? rawValue.trim() : '';
+      if (!trimmed) return { ok: true, value: undefined };
+      const parsed = Number(trimmed);
+      if (!Number.isFinite(parsed)) {
+        return { ok: false, message: '请输入有效数字' };
+      }
+      if (Number.isFinite(spec.min) && parsed < spec.min) {
+        return { ok: false, message: `最小值为 ${spec.min}` };
+      }
+      if (Number.isFinite(spec.max) && parsed > spec.max) {
+        return { ok: false, message: `最大值为 ${spec.max}` };
+      }
+      if (spec.step === 1 && !Number.isInteger(parsed)) {
+        return { ok: false, message: '该字段只接受整数' };
+      }
+      return { ok: true, value: parsed };
+    };
+    const parseJsonFieldValue = (rawValue, spec) => {
+      const trimmed = (typeof rawValue === 'string') ? rawValue.trim() : '';
+      if (!trimmed) return { ok: true, value: undefined, formatted: '' };
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (spec.jsonMode === 'array' && !Array.isArray(parsed)) {
+          return { ok: false, message: '需要填写 JSON 数组' };
+        }
+        if (spec.jsonMode === 'object' && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) {
+          return { ok: false, message: '需要填写 JSON 对象' };
+        }
+        const compacted = compactResponsesApiSettingValue(parsed);
+        if (typeof compacted === 'undefined') {
+          return { ok: true, value: undefined, formatted: '' };
+        }
+        return { ok: true, value: compacted, formatted: JSON.stringify(compacted, null, 2) };
+      } catch (_) {
+        return { ok: false, message: 'JSON 格式无效' };
+      }
+    };
+    const parseJsonOrStringFieldValue = (rawValue) => {
+      const trimmed = (typeof rawValue === 'string') ? rawValue.trim() : '';
+      if (!trimmed) return { ok: true, value: undefined, formatted: '' };
+      if (/^[A-Za-z0-9_.:-]+$/.test(trimmed)) {
+        return { ok: true, value: trimmed, formatted: trimmed };
+      }
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (typeof parsed === 'string') {
+          const compactedString = compactResponsesApiSettingValue(parsed);
+          return {
+            ok: true,
+            value: compactedString,
+            formatted: compactedString || ''
+          };
+        }
+        const compacted = compactResponsesApiSettingValue(parsed);
+        if (typeof compacted === 'undefined') {
+          return { ok: true, value: undefined, formatted: '' };
+        }
+        return { ok: true, value: compacted, formatted: JSON.stringify(compacted, null, 2) };
+      } catch (_) {
+        return { ok: false, message: '请输入简单字符串或合法 JSON' };
+      }
+    };
+    const createApiFieldSettingsSection = ({
+      title: sectionTitle,
+      description,
+      mainSpecs,
+      advancedSpecs,
+      getSettingsSnapshot,
+      updateSettingAtPath
+    }) => {
+      const section = document.createElement('section');
+      section.className = 'responses-settings-panel';
+
+      const title = document.createElement('div');
+      title.className = 'responses-settings-title';
+      title.textContent = sectionTitle;
+      section.appendChild(title);
+
+      const desc = document.createElement('div');
+      desc.className = 'responses-settings-description';
+      desc.textContent = description;
+      section.appendChild(desc);
+
+      const mainGrid = document.createElement('div');
+      mainGrid.className = 'responses-settings-grid responses-settings-grid--main';
+      section.appendChild(mainGrid);
+
+      const advancedDetails = document.createElement('details');
+      advancedDetails.className = 'responses-advanced-settings';
+      const advancedSummary = document.createElement('summary');
+      advancedSummary.textContent = '高级字段';
+      advancedDetails.appendChild(advancedSummary);
+      const advancedGrid = document.createElement('div');
+      advancedGrid.className = 'responses-settings-grid responses-settings-grid--advanced';
+      advancedDetails.appendChild(advancedGrid);
+      section.appendChild(advancedDetails);
+      const transientFieldKeys = new Set();
+
+      const createField = (spec) => {
+        const field = document.createElement('div');
+        field.className = 'responses-setting-field';
+        field.dataset.fieldKey = spec.key;
+
+        const header = document.createElement('div');
+        header.className = 'responses-setting-row';
+        const label = document.createElement('span');
+        label.className = 'responses-setting-label';
+        label.textContent = spec.label;
+        if (spec.help) {
+          label.title = spec.help;
+        }
+
+        const enableLabel = document.createElement('label');
+        enableLabel.className = 'responses-setting-enable';
+        const enableToggle = document.createElement('input');
+        enableToggle.type = 'checkbox';
+        enableToggle.className = 'responses-setting-enable-checkbox';
+        enableLabel.appendChild(enableToggle);
+        header.appendChild(enableLabel);
+        header.appendChild(label);
+        field.appendChild(header);
+
+        const error = document.createElement('div');
+        error.className = 'responses-setting-error';
+        const clearError = () => {
+          error.textContent = '';
+          error.hidden = true;
+        };
+        const showError = (message) => {
+          error.textContent = message;
+          error.hidden = !message;
+        };
+
+        const controlWrap = document.createElement('div');
+        controlWrap.className = 'responses-setting-control';
+        header.appendChild(controlWrap);
+        clearError();
+
+        let lastJsonFormattedValue = '';
+        let jsonValueBeforeEdit = '';
+        const isEditorField = spec.kind === 'textarea' || spec.kind === 'json' || spec.kind === 'json_or_string';
+        let editorWrap = null;
+        let editorToggle = null;
+        const getStoredValue = () => getNestedValue(getSettingsSnapshot(), spec.path);
+        const isEnabled = () => transientFieldKeys.has(spec.key) || typeof getStoredValue() !== 'undefined';
+        const resolveFallbackValue = () => {
+          if (typeof spec.defaultValue !== 'undefined') return spec.defaultValue;
+          if (spec.kind === 'boolean') return true;
+          if (spec.kind === 'select' && Array.isArray(spec.options) && spec.options.length > 0) return spec.options[0];
+          if (spec.kind === 'range') return Number.isFinite(spec.max) ? spec.max : 1;
+          return '';
+        };
+        const syncControlVisibility = () => {
+          controlWrap.hidden = !isEnabled();
+          enableToggle.checked = isEnabled();
+          if (editorWrap) {
+            editorWrap.hidden = !isEnabled() || !field.classList.contains('is-editor-open');
+          }
+        };
+
+        let control = null;
+        let controlValueLabel = null;
+        if (spec.kind === 'boolean') {
+          const boolLabel = document.createElement('label');
+          boolLabel.className = 'switch responses-setting-bool-switch';
+          control = document.createElement('input');
+          control.type = 'checkbox';
+          const boolSlider = document.createElement('span');
+          boolSlider.className = 'slider';
+          boolLabel.appendChild(control);
+          boolLabel.appendChild(boolSlider);
+          control.addEventListener('change', () => {
+            clearError();
+            updateSettingAtPath(spec.path, !!control.checked);
+          });
+          controlWrap.appendChild(boolLabel);
+        } else if (spec.kind === 'select') {
+          control = document.createElement('select');
+          control.className = 'responses-setting-select';
+          (spec.options || []).forEach((optionValue) => {
+            const optionEl = document.createElement('option');
+            optionEl.value = optionValue;
+            optionEl.textContent = optionValue;
+            control.appendChild(optionEl);
+          });
+          control.addEventListener('change', () => {
+            clearError();
+            updateSettingAtPath(spec.path, control.value || undefined);
+          });
+          controlWrap.appendChild(control);
+        } else if (spec.kind === 'range') {
+          const rangeValue = document.createElement('span');
+          rangeValue.className = 'responses-setting-inline-value';
+          controlValueLabel = rangeValue;
+          controlWrap.appendChild(rangeValue);
+
+          control = document.createElement('input');
+          control.type = 'range';
+          control.className = 'responses-setting-range temperature';
+          control.min = String(spec.min ?? 0);
+          control.max = String(spec.max ?? 1);
+          control.step = String(spec.step ?? 0.1);
+          control.addEventListener('input', () => {
+            if (controlValueLabel) {
+              controlValueLabel.textContent = Number(control.value).toFixed(control.step === '1' ? 0 : 2);
+            }
+          });
+          control.addEventListener('change', () => {
+            clearError();
+            const numericValue = Number(control.value);
+            updateSettingAtPath(spec.path, Number.isFinite(numericValue) ? numericValue : undefined);
+          });
+          controlWrap.appendChild(control);
+        } else if (spec.kind === 'number' || spec.kind === 'text') {
+          control = document.createElement('input');
+          control.type = (spec.kind === 'number') ? 'number' : 'text';
+          control.className = 'responses-setting-input';
+          if (typeof spec.placeholder === 'string') control.placeholder = spec.placeholder;
+          if (Number.isFinite(spec.min)) control.min = String(spec.min);
+          if (Number.isFinite(spec.max)) control.max = String(spec.max);
+          if (Number.isFinite(spec.step)) control.step = String(spec.step);
+          if (Number.isFinite(spec.maxLength)) control.maxLength = spec.maxLength;
+          const commitValue = () => {
+            clearError();
+            if (spec.kind === 'number') {
+              const parsed = parseNumberFieldValue(control.value, spec);
+              if (!parsed.ok) {
+                showError(parsed.message);
+                return;
+              }
+              updateSettingAtPath(spec.path, parsed.value);
+              if (typeof parsed.value === 'undefined') {
+                transientFieldKeys.delete(spec.key);
+                syncControlVisibility();
+              }
+            } else {
+              const nextValue = compactResponsesApiSettingValue(control.value);
+              updateSettingAtPath(spec.path, nextValue);
+              if (typeof nextValue === 'undefined') {
+                transientFieldKeys.delete(spec.key);
+                syncControlVisibility();
+              }
+            }
+          };
+          control.addEventListener('change', commitValue);
+          control.addEventListener('blur', commitValue);
+          controlWrap.appendChild(control);
+        } else if (isEditorField) {
+          editorToggle = document.createElement('button');
+          editorToggle.type = 'button';
+          editorToggle.className = 'responses-setting-editor-toggle';
+          editorToggle.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (!isEnabled()) return;
+            field.classList.toggle('is-editor-open');
+            syncControlVisibility();
+          });
+          controlWrap.appendChild(editorToggle);
+
+          editorWrap = document.createElement('div');
+          editorWrap.className = 'responses-setting-editor-wrap';
+          control = document.createElement('textarea');
+          control.className = 'responses-setting-textarea';
+          control.rows = spec.rows || 4;
+          if (typeof spec.placeholder === 'string') control.placeholder = spec.placeholder;
+          const commitValue = () => {
+            clearError();
+            let parsed = null;
+            if (spec.kind === 'textarea') {
+              parsed = {
+                ok: true,
+                value: compactResponsesApiSettingValue(control.value),
+                formatted: control.value.trim()
+              };
+            } else if (spec.kind === 'json') {
+              parsed = parseJsonFieldValue(control.value, spec);
+            } else {
+              parsed = parseJsonOrStringFieldValue(control.value);
+            }
+            if (!parsed?.ok) {
+              control.value = jsonValueBeforeEdit || lastJsonFormattedValue || '';
+              showError(parsed?.message || '字段格式无效');
+              return;
+            }
+            const nextFormatted = (typeof parsed.formatted === 'string') ? parsed.formatted : '';
+            control.value = nextFormatted;
+            lastJsonFormattedValue = nextFormatted;
+            jsonValueBeforeEdit = nextFormatted;
+            updateSettingAtPath(spec.path, parsed.value);
+            if (typeof parsed.value === 'undefined') {
+              transientFieldKeys.delete(spec.key);
+              syncControlVisibility();
+            }
+          };
+          control.addEventListener('focus', () => {
+            jsonValueBeforeEdit = lastJsonFormattedValue || control.value;
+          });
+          control.addEventListener('change', commitValue);
+          control.addEventListener('blur', commitValue);
+          editorWrap.appendChild(control);
+          field.appendChild(editorWrap);
+        }
+
+        const syncControlValue = () => {
+          const storedValue = getStoredValue();
+          const fallbackValue = resolveFallbackValue();
+          const effectiveValue = (typeof storedValue === 'undefined') ? fallbackValue : storedValue;
+          if (!control) return;
+
+          if (spec.kind === 'boolean') {
+            control.checked = (typeof storedValue === 'boolean') ? storedValue : !!fallbackValue;
+            return;
+          }
+          if (spec.kind === 'select') {
+            control.value = effectiveValue || '';
+            return;
+          }
+          if (spec.kind === 'range') {
+            control.value = String(typeof effectiveValue === 'number' ? effectiveValue : fallbackValue || 0);
+            if (controlValueLabel) {
+              controlValueLabel.textContent = Number(control.value).toFixed((spec.step ?? 0.1) === 1 ? 0 : 2);
+            }
+            return;
+          }
+          if (spec.kind === 'number') {
+            control.value = (typeof storedValue === 'number') ? String(storedValue) : '';
+            return;
+          }
+          if (spec.kind === 'text' || spec.kind === 'textarea') {
+            control.value = (typeof storedValue === 'string') ? storedValue : '';
+            return;
+          }
+          if (spec.kind === 'json') {
+            const formatted = (typeof storedValue === 'undefined') ? '' : JSON.stringify(storedValue, null, 2);
+            control.value = formatted;
+            lastJsonFormattedValue = formatted;
+            jsonValueBeforeEdit = formatted;
+            if (editorToggle) {
+              editorToggle.textContent = formatted ? '编辑 JSON' : '填写 JSON';
+            }
+            return;
+          }
+          if (spec.kind === 'json_or_string') {
+            const formatted = (() => {
+              if (typeof storedValue === 'undefined') return '';
+              if (typeof storedValue === 'string') return storedValue;
+              return JSON.stringify(storedValue, null, 2);
+            })();
+            control.value = formatted;
+            lastJsonFormattedValue = formatted;
+            jsonValueBeforeEdit = formatted;
+            if (editorToggle) {
+              editorToggle.textContent = formatted ? '编辑' : '填写';
+            }
+            return;
+          }
+          if (spec.kind === 'textarea' && editorToggle) {
+            editorToggle.textContent = (typeof storedValue === 'string' && storedValue.trim()) ? '编辑文本' : '填写文本';
+          }
+        };
+
+        enableToggle.addEventListener('change', () => {
+          clearError();
+          if (enableToggle.checked) {
+            transientFieldKeys.add(spec.key);
+            if (spec.kind === 'boolean' && control) {
+              updateSettingAtPath(spec.path, !!control.checked);
+            }
+          } else {
+            transientFieldKeys.delete(spec.key);
+            updateSettingAtPath(spec.path, undefined);
+            field.classList.remove('is-editor-open');
+          }
+          syncControlValue();
+          syncControlVisibility();
+        });
+
+        syncControlValue();
+        syncControlVisibility();
+        field.appendChild(error);
+        return field;
+      };
+
+      (mainSpecs || []).forEach((spec) => {
+        mainGrid.appendChild(createField(spec));
+      });
+      (advancedSpecs || []).forEach((spec) => {
+        advancedGrid.appendChild(createField(spec));
+      });
+
+      const currentSettings = getSettingsSnapshot();
+      const hasAdvancedValue = (advancedSpecs || []).some(spec =>
+        typeof getNestedValue(currentSettings, spec.path) !== 'undefined');
+      advancedDetails.open = hasAdvancedValue;
+
+      return section;
+    };
+    const createResponsesSettingsSection = () => createApiFieldSettingsSection({
+      title: 'Responses API 字段',
+      description: '已启用的字段才会写入 /responses 请求体；未启用字段不会占用同步存储。',
+      mainSpecs: RESPONSES_MAIN_FIELD_SPECS,
+      advancedSpecs: RESPONSES_ADVANCED_FIELD_SPECS,
+      getSettingsSnapshot: getResponsesSettingsSnapshot,
+      updateSettingAtPath: updateResponsesSettingAtPath
+    });
+    const createGeminiSettingsSection = () => createApiFieldSettingsSection({
+      title: 'Gemini API 字段',
+      description: 'Gemini generateContent 的附加字段会以稀疏结构存储；未启用字段不会附加到请求体。',
+      mainSpecs: GEMINI_MAIN_FIELD_SPECS,
+      advancedSpecs: GEMINI_ADVANCED_FIELD_SPECS,
+      getSettingsSnapshot: getGeminiSettingsSnapshot,
+      updateSettingAtPath: updateGeminiSettingAtPath
+    });
+
     // 在 temperature 设置后添加“聊天历史裁剪”设置：分别控制 user / AI(assistant) 的历史消息条数
     // 背景：超长对话时，AI 回复往往更长；允许只保留最近 N 条 AI，同时保留更多用户指令上下文。
     const formLeft = apiForm.querySelector('.api-form-left');
@@ -2457,6 +3588,23 @@ export function createApiManager(appContext) {
       apiForm.appendChild(streamingGroup);
     }
 
+    const responsesSettingsSection = createResponsesSettingsSection();
+    const geminiSettingsSection = createGeminiSettingsSection();
+    if (apiFormGrid?.parentElement === apiForm) {
+      apiForm.appendChild(responsesSettingsSection);
+      apiForm.appendChild(geminiSettingsSection);
+    } else if (apiForm) {
+      apiForm.appendChild(responsesSettingsSection);
+      apiForm.appendChild(geminiSettingsSection);
+    }
+    const refreshProviderSettingsVisibility = () => {
+      if (!responsesSettingsSection) return;
+      responsesSettingsSection.hidden = !isResponsesConnectionSelected();
+      if (geminiSettingsSection) {
+        geminiSettingsSection.hidden = !isGeminiConnectionSelected();
+      }
+    };
+
     // 选择按钮点击事件
     selectBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2485,6 +3633,7 @@ export function createApiManager(appContext) {
       apiConfigs[index].connectionSourceId = getConnectionSourceById(connectionSourceSelect.value)?.id || '';
     }
     refreshConnectionSourceHint();
+    refreshProviderSettingsVisibility();
 
     displayNameInput.value = config.displayName ?? '';
     modelNameInput.value = config.modelName ?? 'gpt-4o';
@@ -2621,6 +3770,7 @@ export function createApiManager(appContext) {
     if (connectionSourceSelect) {
       connectionSourceSelect.addEventListener('change', () => {
         applyModelNameOptions();
+        refreshProviderSettingsVisibility();
         saveCardBasicFields();
       });
     }
@@ -3057,6 +4207,76 @@ export function createApiManager(appContext) {
     return isOpenAIResponsesEndpoint(config?.baseUrl);
   }
 
+  /**
+   * 读取当前配置上的 Responses API 额外参数，并做最终请求前校验。
+   * 约束：
+   * - 只保留启用的字段；
+   * - stream_options 仅在当前配置启用了流式输出时才发送；
+   * - conversation 与 previous_response_id 互斥，冲突时直接报错，避免把 400 留给上游接口。
+   * @param {Object} config
+   * @returns {Object|null}
+   */
+  function buildResponsesApiRequestOverrides(config) {
+    const normalizedSettings = normalizeResponsesApiSettings(config?.responsesApiSettings);
+    if (!normalizedSettings) return null;
+
+    const settings = cloneJsonCompatible(normalizedSettings);
+    if (!settings || typeof settings !== 'object') return null;
+
+    if (settings.conversation && settings.previous_response_id) {
+      throw new Error('OpenAI Responses 配置冲突：conversation 与 previous_response_id 不能同时启用。');
+    }
+
+    if (config?.useStreaming === false && settings.stream_options) {
+      delete settings.stream_options;
+    }
+
+    return normalizeResponsesApiSettings(settings) || null;
+  }
+
+  /**
+   * 构造 Gemini generateContent 的附加请求字段。
+   * 说明：
+   * - geminiApiSettings 允许同时配置根级字段与 generationConfig；
+   * - 仅保留启用字段；
+   * - 对明显互斥/依赖关系做前置校验，减少上游 400 噪音。
+   * @param {Object} config
+   * @returns {Object|null}
+   */
+  function buildGeminiApiRequestOverrides(config) {
+    const normalizedSettings = normalizeGeminiApiSettings(config?.geminiApiSettings);
+    if (!normalizedSettings) return null;
+
+    const settings = cloneJsonCompatible(normalizedSettings);
+    if (!settings || typeof settings !== 'object') return null;
+
+    const generationConfig = (settings.generationConfig && typeof settings.generationConfig === 'object' && !Array.isArray(settings.generationConfig))
+      ? settings.generationConfig
+      : null;
+
+    if (generationConfig?.responseSchema && generationConfig?.responseJsonSchema) {
+      throw new Error('Gemini 配置冲突：responseSchema 与 responseJsonSchema 不能同时启用。');
+    }
+
+    if ((generationConfig?.responseSchema || generationConfig?.responseJsonSchema)
+      && generationConfig?.responseMimeType !== 'application/json') {
+      throw new Error('Gemini 配置冲突：启用 responseSchema / responseJsonSchema 时，responseMimeType 必须为 application/json。');
+    }
+
+    if (generationConfig?.logprobs != null && generationConfig?.responseLogprobs !== true) {
+      throw new Error('Gemini 配置冲突：设置 logprobs 时必须同时启用 responseLogprobs。');
+    }
+
+    const thinkingConfig = (generationConfig?.thinkingConfig && typeof generationConfig.thinkingConfig === 'object' && !Array.isArray(generationConfig.thinkingConfig))
+      ? generationConfig.thinkingConfig
+      : null;
+    if (thinkingConfig?.thinkingBudget != null && thinkingConfig?.thinkingLevel) {
+      throw new Error('Gemini 配置冲突：thinkingBudget 与 thinkingLevel 请二选一。');
+    }
+
+    return normalizeGeminiApiSettings(settings) || null;
+  }
+
   async function convertOpenAIMessagesToResponsesInput(messages) {
     const source = Array.isArray(messages) ? messages : [];
     const result = [];
@@ -3281,13 +4501,20 @@ export function createApiManager(appContext) {
         return null; // 如果没有有效的 parts，则不为此消息创建 content entry
       }))).filter(Boolean); // 过滤掉 null (例如 system 消息或无效消息)
 
+      const geminiOverrides = buildGeminiApiRequestOverrides(config) || {};
+      const {
+        generationConfig: geminiGenerationOverrides = {},
+        ...geminiRootOverrides
+      } = geminiOverrides;
       requestBody = {
         contents: contents,
         generationConfig: {
           responseMimeType: "text/plain",
           temperature: config.temperature ?? 1.0,
           topP: 0.95, // Gemini 使用 topP 而不是 top_p
+          ...geminiGenerationOverrides
         },
+        ...geminiRootOverrides,
         ...overrides
       };
 
@@ -3427,10 +4654,12 @@ export function createApiManager(appContext) {
       const useResponsesApi = isOpenAIResponsesConnectionConfig(config);
       if (useResponsesApi) {
         const responsesInput = await convertOpenAIMessagesToResponsesInput(sanitizedMessages);
+        const responsesOverrides = buildResponsesApiRequestOverrides(config) || {};
         requestBody = {
           model: config.modelName,
           input: responsesInput,
           stream: (config.useStreaming !== false),
+          ...responsesOverrides,
           ...overrides
         };
         // Responses API 对不同模型支持参数存在差异；默认仅在用户主动调节时带上 temperature，避免不兼容参数导致 400。
@@ -4052,6 +5281,14 @@ export function createApiManager(appContext) {
       maxChatHistoryUser: 500,
       maxChatHistoryAssistant: 500
     };
+    const transientResponsesApiSettings = normalizeResponsesApiSettings(partialConfig.responsesApiSettings);
+    if (transientResponsesApiSettings) {
+      transientConfig.responsesApiSettings = transientResponsesApiSettings;
+    }
+    const transientGeminiApiSettings = normalizeGeminiApiSettings(partialConfig.geminiApiSettings);
+    if (transientGeminiApiSettings) {
+      transientConfig.geminiApiSettings = transientGeminiApiSettings;
+    }
 
     const hasSource = !!getConnectionSourceById(selectedSourceId);
     if (!hasSource) {
@@ -4188,6 +5425,14 @@ export function createApiManager(appContext) {
       maxChatHistoryUser: Number.isFinite(config.maxChatHistoryUser) ? config.maxChatHistoryUser : 500,
       maxChatHistoryAssistant: Number.isFinite(config.maxChatHistoryAssistant) ? config.maxChatHistoryAssistant : 500
     });
+    const mergedResponsesApiSettings = normalizeResponsesApiSettings(config.responsesApiSettings);
+    if (mergedResponsesApiSettings) {
+      mergedConfig.responsesApiSettings = mergedResponsesApiSettings;
+    }
+    const mergedGeminiApiSettings = normalizeGeminiApiSettings(config.geminiApiSettings);
+    if (mergedGeminiApiSettings) {
+      mergedConfig.geminiApiSettings = mergedGeminiApiSettings;
+    }
 
     const normalizedConfig = normalizeApiConfigsAfterMigration([mergedConfig], connectionSources)[0] || mergedConfig;
     apiConfigs.push(normalizedConfig);
