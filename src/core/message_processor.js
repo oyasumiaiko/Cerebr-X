@@ -741,16 +741,19 @@ export function createMessageProcessor(appContext) {
           thoughtsInnerContent.innerHTML = processMathAndMarkdownFn(rawThoughts);
       }
 
-      // 自动折叠策略：
-      // - 在 AI 还未开始输出正文时（data-original-text 为空），默认展开，便于实时查看思考流。
-      // - 一旦正文开始输出，则默认折叠为单行，仅保留“思考内容”入口；用户点击后可再次展开。
+      // 自动展开/折叠策略：
+      // - 只要这条消息还处于生成中（.updating），思考区默认保持展开，方便实时追踪；
+      // - 生成完成后再自动收起，避免长思考块长期占据垂直空间；
       // - 如果用户已经手动展开/折叠过，则尊重用户选择，不再自动干预。
       const answerText = messageWrapperDiv.getAttribute('data-original-text') || '';
       const hasAnswerContent = (typeof answerText === 'string') && answerText.trim() !== '';
+      const isUpdating = messageWrapperDiv.classList.contains('updating');
       const userHasToggled = thoughtsContentDiv.dataset.userToggled === 'true';
 
       if (!userHasToggled) {
-        if (hasAnswerContent) {
+        if (isUpdating) {
+          thoughtsContentDiv.classList.add('expanded');
+        } else if (hasAnswerContent) {
           thoughtsContentDiv.classList.remove('expanded');
         } else {
           thoughtsContentDiv.classList.add('expanded');
@@ -1454,8 +1457,10 @@ export function createMessageProcessor(appContext) {
     return `${type}:${fallbackIndex}`;
   }
 
-  function readExpandedResponseActivityToolKeys(timelineRoot) {
-    const raw = String(timelineRoot?.dataset?.expandedToolKeys || '').trim();
+  function readResponseActivityToolKeySet(timelineRoot, datasetKey) {
+    const key = (typeof datasetKey === 'string' && datasetKey.trim()) ? datasetKey.trim() : '';
+    if (!key) return new Set();
+    const raw = String(timelineRoot?.dataset?.[key] || '').trim();
     if (!raw) return new Set();
     try {
       const parsed = JSON.parse(raw);
@@ -1466,14 +1471,32 @@ export function createMessageProcessor(appContext) {
     }
   }
 
-  function writeExpandedResponseActivityToolKeys(timelineRoot, keys) {
+  function writeResponseActivityToolKeySet(timelineRoot, datasetKey, keys) {
     if (!timelineRoot || !timelineRoot.dataset) return;
+    const key = (typeof datasetKey === 'string' && datasetKey.trim()) ? datasetKey.trim() : '';
+    if (!key) return;
     const list = Array.from(keys || []).filter(value => typeof value === 'string' && value.trim());
     if (list.length === 0) {
-      delete timelineRoot.dataset.expandedToolKeys;
+      delete timelineRoot.dataset[key];
       return;
     }
-    timelineRoot.dataset.expandedToolKeys = JSON.stringify(list);
+    timelineRoot.dataset[key] = JSON.stringify(list);
+  }
+
+  function readExpandedResponseActivityToolKeys(timelineRoot) {
+    return readResponseActivityToolKeySet(timelineRoot, 'expandedToolKeys');
+  }
+
+  function writeExpandedResponseActivityToolKeys(timelineRoot, keys) {
+    writeResponseActivityToolKeySet(timelineRoot, 'expandedToolKeys', keys);
+  }
+
+  function readCollapsedInProgressResponseActivityToolKeys(timelineRoot) {
+    return readResponseActivityToolKeySet(timelineRoot, 'collapsedInProgressToolKeys');
+  }
+
+  function writeCollapsedInProgressResponseActivityToolKeys(timelineRoot, keys) {
+    writeResponseActivityToolKeySet(timelineRoot, 'collapsedInProgressToolKeys', keys);
   }
 
   function getResponseActivityToolSecondaryLines(entry) {
@@ -1572,12 +1595,17 @@ export function createMessageProcessor(appContext) {
     }
 
     const panelSummary = buildResponseActivityPanelSummary(node, timeline);
-    const userHasToggledPanel = timelineRoot.dataset.panelUserToggled === 'true';
-    const panelExpanded = userHasToggledPanel
-      ? timelineRoot.dataset.panelExpanded === 'true'
-      : !!panelSummary.isInProgress;
+    const panelWasInProgress = timelineRoot.dataset.panelWasInProgress === 'true';
+    if (!panelSummary.isInProgress && panelWasInProgress) {
+      delete timelineRoot.dataset.panelManualState;
+    }
+    const panelManualState = String(timelineRoot.dataset.panelManualState || '').trim().toLowerCase();
+    const panelExpanded = panelSummary.isInProgress
+      ? panelManualState !== 'collapsed'
+      : panelManualState === 'expanded';
 
     timelineRoot.dataset.panelExpanded = panelExpanded ? 'true' : 'false';
+    timelineRoot.dataset.panelWasInProgress = panelSummary.isInProgress ? 'true' : 'false';
     timelineRoot.classList.toggle('is-expanded', panelExpanded);
     timelineRoot.classList.toggle('is-streaming', !!panelSummary.isInProgress);
     timelineRoot.innerHTML = '';
@@ -1610,7 +1638,7 @@ export function createMessageProcessor(appContext) {
 
     panelToggle.addEventListener('click', () => {
       const nextExpanded = timelineRoot.dataset.panelExpanded !== 'true';
-      timelineRoot.dataset.panelUserToggled = 'true';
+      timelineRoot.dataset.panelManualState = nextExpanded ? 'expanded' : 'collapsed';
       timelineRoot.dataset.panelExpanded = nextExpanded ? 'true' : 'false';
       timelineRoot.classList.toggle('is-expanded', nextExpanded);
       panelToggle.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
@@ -1624,6 +1652,33 @@ export function createMessageProcessor(appContext) {
     panelBody.appendChild(panelBodyInner);
 
     const expandedToolKeys = readExpandedResponseActivityToolKeys(timelineRoot);
+    const collapsedInProgressToolKeys = readCollapsedInProgressResponseActivityToolKeys(timelineRoot);
+    const visibleToolKeys = new Set();
+    const inProgressToolKeys = new Set();
+
+    timeline.forEach((entry, index) => {
+      if (entry?.kind !== 'tool_call') return;
+      const hasDetails = hasResponseActivityToolDetails(entry);
+      if (!hasDetails) return;
+      const toolKey = getResponseActivityToolEntryKey(entry, index);
+      visibleToolKeys.add(toolKey);
+      if (isResponseActivityEntryInProgress(entry)) {
+        inProgressToolKeys.add(toolKey);
+      }
+    });
+
+    Array.from(expandedToolKeys).forEach((key) => {
+      if (!visibleToolKeys.has(key)) {
+        expandedToolKeys.delete(key);
+      }
+    });
+    Array.from(collapsedInProgressToolKeys).forEach((key) => {
+      if (!inProgressToolKeys.has(key)) {
+        collapsedInProgressToolKeys.delete(key);
+      }
+    });
+    writeExpandedResponseActivityToolKeys(timelineRoot, expandedToolKeys);
+    writeCollapsedInProgressResponseActivityToolKeys(timelineRoot, collapsedInProgressToolKeys);
 
     timeline.forEach((entry, index) => {
       if (entry.kind === 'reasoning_summary' || entry.kind === 'commentary') {
@@ -1649,7 +1704,12 @@ export function createMessageProcessor(appContext) {
       const renderSearchQueriesInline = isResponseActivitySearchQueryEntry(entry);
       const searchQueryLines = renderSearchQueriesInline ? getResponseActivityToolQueryLines(entry) : [];
       const hasDetails = hasResponseActivityToolDetails(entry);
-      const isExpanded = hasDetails && expandedToolKeys.has(toolKey);
+      const isInProgress = isResponseActivityEntryInProgress(entry);
+      const isExpanded = hasDetails && (
+        isInProgress
+          ? !collapsedInProgressToolKeys.has(toolKey)
+          : expandedToolKeys.has(toolKey)
+      );
       item.classList.toggle('is-expanded', isExpanded);
 
       const summaryTag = hasDetails ? 'button' : 'div';
@@ -1738,13 +1798,24 @@ export function createMessageProcessor(appContext) {
         summary.appendChild(chevron);
         summary.addEventListener('click', () => {
           const nextExpandedKeys = readExpandedResponseActivityToolKeys(timelineRoot);
-          if (nextExpandedKeys.has(toolKey)) {
+          const nextCollapsedInProgressKeys = readCollapsedInProgressResponseActivityToolKeys(timelineRoot);
+          const entryStillInProgress = isResponseActivityEntryInProgress(entry);
+          if (entryStillInProgress) {
+            if (nextCollapsedInProgressKeys.has(toolKey)) {
+              nextCollapsedInProgressKeys.delete(toolKey);
+            } else {
+              nextCollapsedInProgressKeys.add(toolKey);
+            }
+            writeCollapsedInProgressResponseActivityToolKeys(timelineRoot, nextCollapsedInProgressKeys);
+          } else if (nextExpandedKeys.has(toolKey)) {
             nextExpandedKeys.delete(toolKey);
           } else {
             nextExpandedKeys.add(toolKey);
           }
           writeExpandedResponseActivityToolKeys(timelineRoot, nextExpandedKeys);
-          const expanded = nextExpandedKeys.has(toolKey);
+          const expanded = entryStillInProgress
+            ? !nextCollapsedInProgressKeys.has(toolKey)
+            : nextExpandedKeys.has(toolKey);
           item.classList.toggle('is-expanded', expanded);
           summary.setAttribute('aria-expanded', expanded ? 'true' : 'false');
         });

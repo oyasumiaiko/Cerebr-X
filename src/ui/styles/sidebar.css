@@ -8525,21 +8525,21 @@ body.chat-empty .empty-state-content {
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 0 10px 8px 10px;
+    gap: 6px;
+    padding: 0 10px 6px 10px;
 }
 
 .message .response-activity-entry {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding-top: 8px;
+    gap: 4px;
+    padding-top: 6px;
     border-top: 1px solid color-mix(in srgb, var(--cerebr-border-color) 24%, transparent);
 }
 
 .message .response-activity-entry:first-child {
     border-top: none;
-    padding-top: 4px;
+    padding-top: 2px;
 }
 
 .message .response-activity-entry-summary {
@@ -8705,8 +8705,8 @@ body.chat-empty .empty-state-content {
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 6px 0 0 calc(var(--response-activity-kind-column-width) + var(--response-activity-tool-gap));
+    gap: 4px;
+    padding: 4px 0 0 calc(var(--response-activity-kind-column-width) + var(--response-activity-tool-gap));
 }
 
 .message .response-activity-tool-secondary {

@@ -4302,8 +4302,11 @@ export function createMessageSender(appContext) {
     const timelineRoot = targetElement.querySelector('.response-activity-timeline');
     if (!timelineRoot || !timelineRoot.dataset) return;
     delete timelineRoot.dataset.panelUserToggled;
+    delete timelineRoot.dataset.panelManualState;
+    delete timelineRoot.dataset.panelWasInProgress;
     delete timelineRoot.dataset.panelExpanded;
     delete timelineRoot.dataset.expandedToolKeys;
+    delete timelineRoot.dataset.collapsedInProgressToolKeys;
   }
 
   function applyResponsesActivityTimelineToNode(node, timeline) {
