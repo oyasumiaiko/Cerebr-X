@@ -1105,6 +1105,7 @@ export function createMessageProcessor(appContext) {
   function getResponseToolCallTypeLabel(record) {
     const type = String(record?.type || '').toLowerCase();
     if (type === 'web_search_call') return '搜索';
+    if (type === 'code_interpreter_call') return '代码解释器';
     if (type === 'function_call') return '函数';
     return type || 'tool';
   }
@@ -1148,6 +1149,9 @@ export function createMessageProcessor(appContext) {
     if (type === 'function_call') {
       const name = (typeof record.name === 'string' && record.name.trim()) ? record.name.trim() : '匿名函数';
       return `调用函数 ${name}`;
+    }
+    if (type === 'code_interpreter_call') {
+      return '运行 Python';
     }
     return getResponseToolCallTypeLabel(record);
   }
@@ -1196,6 +1200,13 @@ export function createMessageProcessor(appContext) {
       return {
         action: '调用函数',
         value: name,
+        valueUrl: ''
+      };
+    }
+    if (type === 'code_interpreter_call') {
+      return {
+        action: '运行',
+        value: 'Python',
         valueUrl: ''
       };
     }

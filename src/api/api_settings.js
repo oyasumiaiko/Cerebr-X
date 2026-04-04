@@ -63,6 +63,12 @@ const RESPONSES_SEARCH_TOOL_SECTION_TOGGLE_SPEC = Object.freeze({
   label: '启用搜索工具',
   help: '启用后自动在 /responses 的 tools 中附加 { type: "web_search" }，由 OpenAI 服务端执行搜索。'
 });
+const RESPONSES_CODE_INTERPRETER_TOOL_SECTION_TOGGLE_SPEC = Object.freeze({
+  path: ['builtin_tools', 'code_interpreter', 'enabled'],
+  key: 'builtin_tools.code_interpreter.enabled',
+  label: '启用代码解释器',
+  help: '启用后自动在 /responses 的 tools 中附加 { type: "code_interpreter", container: { type: "auto" } }，由 OpenAI 服务端沙箱执行 Python。'
+});
 const RESPONSES_MAIN_FIELD_SPECS = Object.freeze([
   {
     path: ['reasoning', 'effort'],
@@ -347,6 +353,7 @@ const RESPONSES_SEARCH_TOOL_FIELD_SPECS = Object.freeze([
     help: '传给 web_search 的 user_location 对象。'
   }
 ]);
+const RESPONSES_CODE_INTERPRETER_TOOL_FIELD_SPECS = Object.freeze([]);
 const GEMINI_THINKING_LEVEL_OPTIONS = Object.freeze(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH']);
 const GEMINI_RESPONSE_MIME_TYPE_OPTIONS = Object.freeze(['text/plain', 'application/json']);
 const GEMINI_MEDIA_RESOLUTION_OPTIONS = Object.freeze([
@@ -762,7 +769,8 @@ export function createApiManager(appContext) {
    * 合并同类型 tool 定义。
    * 设计说明：
    * - 用户既可以用“专门开关”启用 web_search，也可以在 Tools JSON 里手写更完整的对象；
-   * - 这里选择“同类型工具做浅合并 + filters 深一层合并”，避免出现两个重复 web_search tool。
+   * - 这里选择“同类型工具做浅合并 + filters/container 深一层合并”，
+   *   避免出现两个重复内置工具，同时减少开关默认值把用户手写细节覆盖掉的概率。
    * @param {any} existingTool
    * @param {Object} nextTool
    * @returns {Object}
@@ -782,12 +790,19 @@ export function createApiManager(appContext) {
         ...(nextTool.filters || {})
       };
     }
+    if ((existingTool.container && typeof existingTool.container === 'object' && !Array.isArray(existingTool.container))
+      || (nextTool.container && typeof nextTool.container === 'object' && !Array.isArray(nextTool.container))) {
+      merged.container = {
+        ...(existingTool.container || {}),
+        ...(nextTool.container || {})
+      };
+    }
     return compactResponsesApiSettingValue(merged);
   }
 
   /**
    * 把“专门的内置工具开关”翻译为真正的 Responses API tools/include 字段。
-   * 目前先覆盖 web_search，后续若要扩展 file_search / code_interpreter，也只需在这里追加。
+   * 当前覆盖 web_search / code_interpreter；后续若要扩展 file_search，也只需在这里追加。
    * @param {Object} settings
    * @returns {{tools: Array<Object>, include: Array<string>}}
    */
@@ -803,6 +818,9 @@ export function createApiManager(appContext) {
     const include = [];
     const webSearch = (builtinTools.web_search && typeof builtinTools.web_search === 'object' && !Array.isArray(builtinTools.web_search))
       ? builtinTools.web_search
+      : null;
+    const codeInterpreter = (builtinTools.code_interpreter && typeof builtinTools.code_interpreter === 'object' && !Array.isArray(builtinTools.code_interpreter))
+      ? builtinTools.code_interpreter
       : null;
 
     if (webSearch?.enabled === true) {
@@ -829,6 +847,17 @@ export function createApiManager(appContext) {
 
       if (webSearch.include_sources === true) {
         include.push(RESPONSES_WEB_SEARCH_SOURCE_INCLUDE);
+      }
+    }
+
+    if (codeInterpreter?.enabled === true) {
+      const tool = {
+        type: 'code_interpreter',
+        container: { type: 'auto' }
+      };
+      const compactedTool = compactResponsesApiSettingValue(tool);
+      if (compactedTool && typeof compactedTool === 'object' && !Array.isArray(compactedTool)) {
+        tools.push(compactedTool);
       }
     }
 
@@ -3675,6 +3704,15 @@ export function createApiManager(appContext) {
       getSettingsSnapshot: getResponsesSettingsSnapshot,
       updateSettingAtPath: updateResponsesSettingAtPath
     });
+    const createResponsesCodeInterpreterToolSection = () => createApiFieldSettingsSection({
+      title: '代码解释器工具',
+      description: '这里单独管理 Responses API 的 code_interpreter 工具；开启后会自动附加一个 `container.type=auto` 的托管 Python 沙箱。',
+      mainSpecs: [],
+      advancedSpecs: RESPONSES_CODE_INTERPRETER_TOOL_FIELD_SPECS,
+      sectionToggleSpec: RESPONSES_CODE_INTERPRETER_TOOL_SECTION_TOGGLE_SPEC,
+      getSettingsSnapshot: getResponsesSettingsSnapshot,
+      updateSettingAtPath: updateResponsesSettingAtPath
+    });
     const createGeminiSettingsSection = () => createApiFieldSettingsSection({
       title: 'Gemini API 字段',
       description: 'Gemini generateContent 的附加字段会以稀疏结构存储；未启用字段不会附加到请求体。',
@@ -3812,6 +3850,7 @@ export function createApiManager(appContext) {
 
     const responsesSettingsSection = createResponsesSettingsSection();
     const responsesSearchToolSection = createResponsesSearchToolSection();
+    const responsesCodeInterpreterToolSection = createResponsesCodeInterpreterToolSection();
     const geminiSettingsSection = createGeminiSettingsSection();
     const providerSettingsHost = document.createElement('div');
     providerSettingsHost.className = 'provider-settings-host';
@@ -3830,10 +3869,17 @@ export function createApiManager(appContext) {
           responsesSearchToolSection.hidden = false;
           nextSections.push(responsesSearchToolSection);
         }
+        if (responsesCodeInterpreterToolSection) {
+          responsesCodeInterpreterToolSection.hidden = false;
+          nextSections.push(responsesCodeInterpreterToolSection);
+        }
       } else if (responsesSettingsSection) {
         responsesSettingsSection.hidden = true;
         if (responsesSearchToolSection) {
           responsesSearchToolSection.hidden = true;
+        }
+        if (responsesCodeInterpreterToolSection) {
+          responsesCodeInterpreterToolSection.hidden = true;
         }
       }
       if (isGeminiConnectionSelected() && geminiSettingsSection) {
