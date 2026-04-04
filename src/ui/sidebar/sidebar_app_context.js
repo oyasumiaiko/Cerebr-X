@@ -660,6 +660,33 @@ export function registerSidebarUtilities(appContext) {
   };
 
   /**
+   * 获取当前活动网页标签页的 frame 快照。
+   * 主要用于在发起 Responses 请求前，把 frameId/url/title 注入模型上下文。
+   */
+  appContext.utils.getJsRuntimeFrames = async () => {
+    if (appContext.state.isStandalone) {
+      return {
+        success: false,
+        error: '独立聊天页面当前没有稳定的目标网页标签页，暂不支持读取 JS Runtime frame 快照。'
+      };
+    }
+    if (!chrome?.runtime?.sendMessage) {
+      return {
+        success: false,
+        error: '当前环境不支持 chrome.runtime.sendMessage'
+      };
+    }
+    try {
+      return await chrome.runtime.sendMessage({ type: 'GET_JS_RUNTIME_FRAMES' });
+    } catch (error) {
+      return {
+        success: false,
+        error: error?.message || '获取 JS Runtime frame 快照失败'
+      };
+    }
+  };
+
+  /**
    * 在当前网页标签页里执行一段基于 userScripts 的 JS 代码。
    * 第一阶段先提供给调试入口与后续工具层使用，不额外引入复杂 UI。
    *
@@ -685,7 +712,6 @@ export function registerSidebarUtilities(appContext) {
         type: 'EXECUTE_JS_RUNTIME',
         code: (typeof code === 'string') ? code : '',
         frameIds: Array.isArray(options?.frameIds) ? options.frameIds : null,
-        allFrames: options?.allFrames === true,
         injectImmediately: options?.injectImmediately === true
       });
     } catch (error) {

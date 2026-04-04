@@ -43,6 +43,26 @@ function normalizeExecuteResultItem(item) {
 }
 
 /**
+ * 将 frame 探测结果压成适合注入模型上下文的轻量快照。
+ * @param {any} item
+ * @returns {{frameId:number|null, documentId:string|null, url:string, title:string, isTop:boolean, error:any}}
+ */
+function normalizeFrameSnapshotItem(item) {
+  const normalized = normalizeExecuteResultItem(item);
+  const result = (normalized?.result && typeof normalized.result === 'object' && !Array.isArray(normalized.result))
+    ? normalized.result
+    : {};
+  return {
+    frameId: normalized.frameId,
+    documentId: normalized.documentId,
+    url: (typeof result.url === 'string') ? result.url : '',
+    title: (typeof result.title === 'string') ? result.title : '',
+    isTop: result.isTop === true || normalized.frameId === 0,
+    error: normalized.error
+  };
+}
+
+/**
  * 构造注入到 userScripts world 里的代码。
  *
  * 实现方式：
@@ -253,6 +273,57 @@ export function createJsRuntimeManager(deps = {}) {
   }
 
   /**
+   * 枚举当前标签页所有可注入 frame 的快照。
+   *
+   * 说明：
+   * - 这里在扩展侧主动做一次 allFrames 探测；
+   * - 目的是把 frameId/url/title/isTop 注入模型上下文，帮助模型在一次工具调用里直接选择目标 frame；
+   * - 不是为了让模型再额外走一次“发现 frame”工具调用。
+   *
+   * @param {{tabId:number}} request
+   * @returns {Promise<{ok:boolean, frames:Array<Object>}>}
+   */
+  async function listFrames(request = {}) {
+    const tabId = Number(request?.tabId);
+    if (!Number.isFinite(tabId)) {
+      throw new Error('获取 JS Runtime frame 快照失败：缺少有效 tabId。');
+    }
+
+    const probeResult = await execute({
+      tabId,
+      allFrames: true,
+      code: `
+        let isTop = false;
+        try {
+          isTop = globalThis === globalThis.top;
+        } catch (_) {
+          isTop = false;
+        }
+        return {
+          url: location.href,
+          title: document.title || '',
+          isTop
+        };
+      `
+    });
+
+    const frames = Array.isArray(probeResult?.items)
+      ? probeResult.items
+        .map(normalizeFrameSnapshotItem)
+        .filter(item => !item.error && Number.isFinite(item.frameId))
+        .sort((a, b) => {
+          if (a.isTop !== b.isTop) return a.isTop ? -1 : 1;
+          return (a.frameId ?? Number.MAX_SAFE_INTEGER) - (b.frameId ?? Number.MAX_SAFE_INTEGER);
+        })
+      : [];
+
+    return {
+      ok: probeResult?.ok === true,
+      frames
+    };
+  }
+
+  /**
    * 处理来自 userScripts world 的扩展桥请求。
    * 第一阶段只暴露极少量高价值能力。
    *
@@ -314,6 +385,7 @@ export function createJsRuntimeManager(deps = {}) {
 
   return {
     getAvailability,
+    listFrames,
     execute,
     installBridge
   };

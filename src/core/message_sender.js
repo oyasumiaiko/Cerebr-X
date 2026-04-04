@@ -4481,6 +4481,84 @@ export function createMessageSender(appContext) {
     }
   }
 
+  /**
+   * 获取当前活动标签页的 JS Runtime frame 快照。
+   * 这里的目标不是让模型再额外调用发现工具，而是在请求发出前把 frame_id 提示直接塞进隐藏上下文。
+   *
+   * @returns {Promise<Array<{frameId:number, documentId:string|null, url:string, title:string, isTop:boolean}>|null>}
+   */
+  async function getJsRuntimeFrameSnapshot() {
+    if (typeof utils?.getJsRuntimeFrames !== 'function') return null;
+    try {
+      const response = await utils.getJsRuntimeFrames();
+      if (response?.success !== true || !Array.isArray(response?.frames)) {
+        return null;
+      }
+      const frames = response.frames
+        .map((item) => ({
+          frameId: Number(item?.frameId),
+          documentId: (typeof item?.documentId === 'string' && item.documentId) ? item.documentId : null,
+          url: (typeof item?.url === 'string') ? item.url : '',
+          title: (typeof item?.title === 'string') ? item.title : '',
+          isTop: item?.isTop === true || Number(item?.frameId) === 0
+        }))
+        .filter(item => Number.isFinite(item.frameId))
+        .sort((a, b) => {
+          if (a.isTop !== b.isTop) return a.isTop ? -1 : 1;
+          return a.frameId - b.frameId;
+        });
+      return frames.length > 0 ? frames : null;
+    } catch (error) {
+      console.warn('获取 JS Runtime frame 快照失败（忽略，上下文将不注入 frame 列表）:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 把 frame 快照格式化为隐藏 system message，帮助模型在一次 js_runtime_execute 调用里直接选择目标 frame_ids。
+   *
+   * @param {Array<{frameId:number, documentId:string|null, url:string, title:string, isTop:boolean}>|null} frames
+   * @returns {string}
+   */
+  function buildJsRuntimeFrameContextMessage(frames) {
+    const normalizedFrames = Array.isArray(frames) ? frames : [];
+    if (normalizedFrames.length <= 0) return '';
+    const payload = normalizedFrames.map((item) => ({
+      frame_id: item.frameId,
+      is_top: item.isTop === true,
+      url: item.url || '',
+      title: item.title || '',
+      document_id: item.documentId || null
+    }));
+    return [
+      '以下是当前活动标签页可执行的 frame 快照，仅供 js_runtime_execute 选择 frame_ids：',
+      '- 若 frame_ids 省略或为空数组，则默认在顶层 frame 执行。',
+      '- 若需要进入 iframe 内部，请从下面的 frame_id 中选择。',
+      JSON.stringify(payload, null, 2)
+    ].join('\n');
+  }
+
+  /**
+   * 将一次性 system 上下文插入请求消息中，但不写入历史。
+   * 规则：插到现有 system 消息之后、第一条非 system 消息之前。
+   *
+   * @param {Array<Object>} messages
+   * @param {string} content
+   * @returns {Array<Object>}
+   */
+  function appendEphemeralSystemMessage(messages, content) {
+    if (!Array.isArray(messages)) return messages;
+    const text = (typeof content === 'string') ? content.trim() : '';
+    if (!text) return messages;
+    const next = messages.slice();
+    let insertIndex = 0;
+    while (insertIndex < next.length && next[insertIndex]?.role === 'system') {
+      insertIndex += 1;
+    }
+    next.splice(insertIndex, 0, { role: 'system', content: text });
+    return next;
+  }
+
   function GetInputContainer() {
     return document.getElementById('input-container');
   }
@@ -4558,19 +4636,15 @@ export function createMessageSender(appContext) {
             type: 'string',
             description: '要执行的 JavaScript 代码片段。它会作为 async 函数体执行，可直接使用 await 和 return。'
           },
-          all_frames: {
-            type: ['boolean', 'null'],
-            description: '是否在当前标签页的所有可注入 frame 中执行。默认 false。'
-          },
           frame_ids: {
             type: ['array', 'null'],
-            description: '指定要执行的 frame ID 列表。与 all_frames 互斥。',
+            description: '可选的 frame ID 数组。省略或传空数组时，默认在顶层 frame 执行。',
             items: {
               type: 'integer'
             }
           }
         },
-        required: ['code', 'all_frames', 'frame_ids']
+        required: ['code', 'frame_ids']
       }
     };
   }
@@ -4728,7 +4802,7 @@ export function createMessageSender(appContext) {
    * 规范化 js_runtime_execute 的参数。
    *
    * @param {any} rawArgs
-   * @returns {{code:string, allFrames:boolean, frameIds:number[]|null}}
+   * @returns {{code:string, frameIds:number[]|null}}
    */
   function normalizeResponsesJsRuntimeToolArguments(rawArgs) {
     const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs))
@@ -4745,14 +4819,9 @@ export function createMessageSender(appContext) {
         .filter(value => Number.isFinite(value))
         .map(value => Math.trunc(value))
       : null;
-    const allFrames = args.all_frames === true;
-    if (allFrames && Array.isArray(frameIds) && frameIds.length > 0) {
-      throw new Error('js_runtime_execute 参数错误：all_frames 与 frame_ids 不能同时使用。');
-    }
 
     return {
       code,
-      allFrames,
       frameIds: (Array.isArray(frameIds) && frameIds.length > 0) ? frameIds : null
     };
   }
@@ -4780,7 +4849,6 @@ export function createMessageSender(appContext) {
     try {
       const normalizedArgs = normalizeResponsesJsRuntimeToolArguments(rawArgs);
       const result = await utils.executeJsRuntime(normalizedArgs.code, {
-        allFrames: normalizedArgs.allFrames,
         frameIds: normalizedArgs.frameIds
       });
 
@@ -5762,6 +5830,21 @@ export function createMessageSender(appContext) {
         config = apiManager.getSelectedConfig();
       }
       effectiveApiConfig = config;
+      let requestMessages = finalMessages;
+
+      const shouldInjectJsRuntimeFrameContext = (
+        Array.isArray(getResponsesCustomFunctionTools(effectiveApiConfig))
+        && getResponsesCustomFunctionTools(effectiveApiConfig).length > 0
+        && typeof utils?.getJsRuntimeFrames === 'function'
+      );
+      if (shouldInjectJsRuntimeFrameContext) {
+        updateLoadingStatus(loadingMessage, '正在获取 JS Runtime frame 上下文...', { stage: 'get_js_runtime_frames' });
+        const jsRuntimeFrames = await getJsRuntimeFrameSnapshot();
+        const jsRuntimeFrameContext = buildJsRuntimeFrameContextMessage(jsRuntimeFrames);
+        if (jsRuntimeFrameContext) {
+          requestMessages = appendEphemeralSystemMessage(requestMessages, jsRuntimeFrameContext);
+        }
+      }
 
       // 添加字数统计元素
       if (!regenerateMode) {
@@ -5807,7 +5890,7 @@ export function createMessageSender(appContext) {
       }
 
       const requestBody = await apiManager.buildRequest({
-        messages: finalMessages,
+        messages: requestMessages,
         config: config,
         overrides: requestOverrides
       });

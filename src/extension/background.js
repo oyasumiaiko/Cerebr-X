@@ -399,6 +399,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === 'GET_JS_RUNTIME_FRAMES') {
+    (async () => {
+      try {
+        if (typeof sender?.url === 'string' && sender.url.includes('#standalone')) {
+          sendResponse({
+            success: false,
+            error: '独立聊天页面当前没有稳定的目标网页标签页，暂不支持读取 JS Runtime frame 快照。'
+          });
+          return;
+        }
+
+        const explicitTabId = Number(message?.tabId);
+        const queriedTabId = Number((await chrome.tabs.query({ active: true, currentWindow: true }))?.[0]?.id);
+        const targetTabId = Number.isFinite(explicitTabId) ? explicitTabId : queriedTabId;
+        if (!Number.isFinite(targetTabId)) {
+          sendResponse({ success: false, error: '未找到可读取 frame 快照的目标标签页。' });
+          return;
+        }
+
+        const result = await jsRuntimeManager.listFrames({ tabId: targetTabId });
+        sendResponse({
+          success: true,
+          tabId: targetTabId,
+          ...result
+        });
+      } catch (error) {
+        sendResponse({ success: false, error: error?.message || '获取 JS Runtime frame 快照失败' });
+      }
+    })();
+    return true;
+  }
+
   if (message?.type === 'GET_OPEN_CONVERSATION_TABS') {
     const ids = Array.isArray(message.conversationIds) ? message.conversationIds : null;
     const snapshot = buildOpenConversationSnapshot(ids);
