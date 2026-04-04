@@ -4790,9 +4790,7 @@ export function createMessageSender(appContext) {
       name: RESPONSES_JS_RUNTIME_TOOL_NAME,
       description: [
         '在当前活动网页标签页中执行一次性 JavaScript。',
-        'code 字段会作为 async 函数体运行，可直接使用 await 和 return。',
-        '运行时提供 cerebr.invoke(method, params) 扩展桥。',
-        '当前支持的方法包括 extension.getRuntimeStatus、page.getContent、page.captureVisible。'
+        'code 字段会作为 async 函数体运行，可直接使用 await 和 return。'
       ].join(' '),
       strict: true,
       parameters: {

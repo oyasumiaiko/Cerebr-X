@@ -693,8 +693,7 @@ const jsRuntimeManager = createJsRuntimeManager({
             throw new Error('当前标签页未连接内容脚本，无法提取页面内容。');
         }
         return payload;
-    },
-    captureVisibleTab
+    }
 });
 
 try {

@@ -116,16 +116,12 @@ ${body}
  *
  * @param {Object} deps
  * @param {(tabId:number)=>Promise<any>} deps.getPageContentByTabId
- * @param {(windowId:number|null)=>Promise<any>} deps.captureVisibleTab
  * @returns {Object}
  */
 export function createJsRuntimeManager(deps = {}) {
   const getPageContentByTabId = (typeof deps.getPageContentByTabId === 'function')
     ? deps.getPageContentByTabId
     : (async () => null);
-  const captureVisibleTab = (typeof deps.captureVisibleTab === 'function')
-    ? deps.captureVisibleTab
-    : (async () => ({ success: false, error: 'captureVisibleTab 未实现' }));
 
   let configureWorldPromise = null;
 
@@ -335,7 +331,6 @@ export function createJsRuntimeManager(deps = {}) {
   async function dispatchExtensionCall(method, params, sender) {
     const normalizedMethod = (typeof method === 'string') ? method.trim() : '';
     const tabId = Number(sender?.tab?.id);
-    const windowId = Number(sender?.tab?.windowId);
 
     if (normalizedMethod === 'extension.getRuntimeStatus') {
       return getAvailability();
@@ -346,10 +341,6 @@ export function createJsRuntimeManager(deps = {}) {
         throw new Error('当前执行上下文没有关联到标签页，无法读取页面内容。');
       }
       return await getPageContentByTabId(tabId);
-    }
-
-    if (normalizedMethod === 'page.captureVisible') {
-      return await captureVisibleTab(Number.isFinite(windowId) ? windowId : null);
     }
 
     throw new Error(`未支持的 Cerebr JS Runtime 扩展方法：${normalizedMethod || '(empty)'}`);
