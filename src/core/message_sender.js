@@ -1462,6 +1462,44 @@ export function createMessageSender(appContext) {
   }
 
   /**
+   * 将服务端返回的 output item 规整成“可再次放进 input 重放”的版本。
+   *
+   * 兼容端点常见问题：
+   * - 当 `store=false` 时，服务端生成的 `id` 不能在后续请求里被当作历史引用；
+   * - 某些 output item（尤其空 reasoning）就算带回去也没有任何上下文价值；
+   * - `status` 这类服务端运行态字段也没有必要在重放时继续携带。
+   *
+   * 当前策略：
+   * - 一律删除 `id` / `status`；
+   * - 保留 `call_id` 等真正用于配对的字段；
+   * - 对没有任何实质内容的 reasoning item 直接丢弃。
+   *
+   * @param {any} item
+   * @returns {Object|null}
+   */
+  function sanitizeResponsesReplayOutputItem(item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+    const cloned = cloneDataSafely(item);
+    if (!cloned || typeof cloned !== 'object' || Array.isArray(cloned)) return null;
+
+    delete cloned.id;
+    delete cloned.status;
+
+    const type = String(cloned.type || '').trim().toLowerCase();
+    if (type === 'reasoning') {
+      const hasSummary = Array.isArray(cloned.summary)
+        && cloned.summary.some(part => typeof part?.text === 'string' && part.text.trim());
+      const hasEncryptedContent = typeof cloned.encrypted_content === 'string'
+        && cloned.encrypted_content.trim();
+      if (!hasSummary && !hasEncryptedContent) {
+        return null;
+      }
+    }
+
+    return cloned;
+  }
+
+  /**
    * 合并多批 Responses output item，供“下一轮 full replay input”使用。
    *
    * 设计目标：
@@ -1476,8 +1514,8 @@ export function createMessageSender(appContext) {
   function mergeResponsesReplayOutputItems(existingItems, incomingItems) {
     const merged = Array.isArray(existingItems)
       ? existingItems
+        .map(item => sanitizeResponsesReplayOutputItem(item))
         .filter(item => item && typeof item === 'object' && !Array.isArray(item))
-        .map(item => cloneDataSafely(item))
       : [];
     const keyToIndex = new Map();
 
@@ -1486,8 +1524,8 @@ export function createMessageSender(appContext) {
     });
 
     (Array.isArray(incomingItems) ? incomingItems : []).forEach((item, index) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return;
-      const cloned = cloneDataSafely(item);
+      const cloned = sanitizeResponsesReplayOutputItem(item);
+      if (!cloned || typeof cloned !== 'object' || Array.isArray(cloned)) return;
       const key = getResponsesReplayOutputItemKey(cloned, index);
       if (keyToIndex.has(key)) {
         merged[keyToIndex.get(key)] = cloned;
