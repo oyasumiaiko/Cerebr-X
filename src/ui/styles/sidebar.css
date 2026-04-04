@@ -8442,6 +8442,7 @@ body.chat-empty .empty-state-content {
     line-height: 1.45;
     --response-activity-kind-column-width: 2.4em;
     --response-activity-tool-gap: 8px;
+    --response-activity-stack-gap: 4px;
     border-radius: 10px;
     border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 42%, transparent);
     background: color-mix(in srgb, var(--cerebr-message-ai-bg) 78%, transparent);
@@ -8525,21 +8526,21 @@ body.chat-empty .empty-state-content {
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    gap: 0;
+    gap: var(--response-activity-stack-gap);
     padding: 0 10px 4px 10px;
 }
 
 .message .response-activity-entry {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    padding-top: 4px;
+    gap: var(--response-activity-stack-gap);
+    padding-top: 0;
     border-top: 1px solid color-mix(in srgb, var(--cerebr-border-color) 24%, transparent);
 }
 
 .message .response-activity-entry:first-child {
     border-top: none;
-    padding-top: 1px;
+    padding-top: 0;
 }
 
 .message .response-activity-entry-summary {
@@ -8705,8 +8706,8 @@ body.chat-empty .empty-state-content {
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    padding: 2px 0 0 calc(var(--response-activity-kind-column-width) + var(--response-activity-tool-gap));
+    gap: var(--response-activity-stack-gap);
+    padding: 0 0 0 calc(var(--response-activity-kind-column-width) + var(--response-activity-tool-gap));
 }
 
 .message .response-activity-tool-secondary {
