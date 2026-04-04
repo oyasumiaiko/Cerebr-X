@@ -4965,6 +4965,132 @@ export function createMessageSender(appContext) {
     }
   }
 
+  const RESPONSES_JS_RUNTIME_MAX_TEXT_PREVIEW_CHARS = 4000;
+  const RESPONSES_JS_RUNTIME_MAX_ARRAY_ITEMS = 12;
+  const RESPONSES_JS_RUNTIME_MAX_OBJECT_KEYS = 24;
+  const RESPONSES_JS_RUNTIME_MAX_SERIALIZED_CHARS = 60000;
+
+  function summarizeResponsesJsRuntimeString(value) {
+    if (typeof value !== 'string') return value;
+    if (!value) return value;
+
+    const dataUrlMatch = value.match(/^data:([^;,]+)?(;base64)?,/i);
+    if (dataUrlMatch) {
+      return {
+        type: 'data_url',
+        mime_type: dataUrlMatch[1] || '',
+        length: value.length,
+        preview: value.slice(0, 96)
+      };
+    }
+
+    if (value.length <= RESPONSES_JS_RUNTIME_MAX_TEXT_PREVIEW_CHARS) {
+      return value;
+    }
+
+    return {
+      type: 'truncated_string',
+      length: value.length,
+      preview: value.slice(0, RESPONSES_JS_RUNTIME_MAX_TEXT_PREVIEW_CHARS)
+    };
+  }
+
+  function summarizeResponsesJsRuntimeValue(value, depth = 0) {
+    if (value == null) return value;
+    if (typeof value === 'string') return summarizeResponsesJsRuntimeString(value);
+    if (typeof value === 'number' || typeof value === 'boolean') return value;
+    if (depth >= 5) {
+      return {
+        type: 'truncated_structure',
+        value_type: Array.isArray(value) ? 'array' : typeof value
+      };
+    }
+
+    if (Array.isArray(value)) {
+      const items = value
+        .slice(0, RESPONSES_JS_RUNTIME_MAX_ARRAY_ITEMS)
+        .map(item => summarizeResponsesJsRuntimeValue(item, depth + 1));
+      if (value.length > RESPONSES_JS_RUNTIME_MAX_ARRAY_ITEMS) {
+        items.push({
+          type: 'truncated_items',
+          omitted_count: value.length - RESPONSES_JS_RUNTIME_MAX_ARRAY_ITEMS
+        });
+      }
+      return items;
+    }
+
+    if (typeof value === 'object') {
+      const entries = Object.entries(value);
+      const result = {};
+      entries.slice(0, RESPONSES_JS_RUNTIME_MAX_OBJECT_KEYS).forEach(([key, child]) => {
+        result[key] = summarizeResponsesJsRuntimeValue(child, depth + 1);
+      });
+      if (entries.length > RESPONSES_JS_RUNTIME_MAX_OBJECT_KEYS) {
+        result.__truncated_keys__ = entries.length - RESPONSES_JS_RUNTIME_MAX_OBJECT_KEYS;
+      }
+      return result;
+    }
+
+    try {
+      return String(value);
+    } catch (_) {
+      return '[unserializable]';
+    }
+  }
+
+  function compactResponsesJsRuntimeResult(rawResult) {
+    const normalized = (rawResult && typeof rawResult === 'object' && !Array.isArray(rawResult))
+      ? cloneDataSafely(rawResult)
+      : { ok: false, value: null, items: [], error: null };
+    const compacted = {
+      ok: normalized?.ok === true,
+      tabId: Number.isFinite(Number(normalized?.tabId)) ? Number(normalized.tabId) : null,
+      value: summarizeResponsesJsRuntimeValue(normalized?.value ?? null, 0),
+      items: Array.isArray(normalized?.items)
+        ? normalized.items.map(item => summarizeResponsesJsRuntimeValue(item, 0))
+        : [],
+      error: normalized?.error ? summarizeResponsesJsRuntimeValue(normalized.error, 0) : null
+    };
+
+    // 单 frame 成功时，`items[0].result` 往往和顶层 `value` 完全重复；对模型没有额外价值，只会把 payload 翻倍。
+    if (
+      Array.isArray(compacted.items)
+      && compacted.items.length === 1
+      && compacted.items[0]
+      && typeof compacted.items[0] === 'object'
+      && !Array.isArray(compacted.items[0])
+      && !compacted.items[0].error
+    ) {
+      const topValueSerialized = JSON.stringify(compacted.value);
+      const itemResultSerialized = JSON.stringify(compacted.items[0].result);
+      if (topValueSerialized && itemResultSerialized && topValueSerialized === itemResultSerialized) {
+        compacted.items = [{
+          frameId: compacted.items[0].frameId ?? null,
+          documentId: compacted.items[0].documentId ?? null,
+          result_ref: 'value',
+          error: null
+        }];
+      }
+    }
+
+    let serialized = serializeResponsesFunctionToolOutput(compacted);
+    if (typeof serialized === 'string' && serialized.length <= RESPONSES_JS_RUNTIME_MAX_SERIALIZED_CHARS) {
+      return compacted;
+    }
+
+    return {
+      ok: compacted.ok,
+      tabId: compacted.tabId,
+      value: summarizeResponsesJsRuntimeValue(compacted.value, 2),
+      items: Array.isArray(compacted.items)
+        ? compacted.items.slice(0, 4).map(item => summarizeResponsesJsRuntimeValue(item, 2))
+        : [],
+      error: compacted.error,
+      truncated: true,
+      note: 'js_runtime_execute 输出过大，已为模型截断'
+    };
+  }
+
   /**
    * 规范化 js_runtime_execute 的参数。
    *
@@ -5020,7 +5146,7 @@ export function createMessageSender(appContext) {
       });
 
       if (!result || result.success !== true) {
-        return {
+        return compactResponsesJsRuntimeResult({
           ok: false,
           tabId: Number.isFinite(Number(result?.tabId)) ? Number(result.tabId) : null,
           value: null,
@@ -5032,23 +5158,23 @@ export function createMessageSender(appContext) {
             name: 'RuntimeExecutionError',
             stack: ''
           }
-        };
+        });
       }
 
-      return {
+      return compactResponsesJsRuntimeResult({
         ok: result.ok === true,
         tabId: Number.isFinite(Number(result?.tabId)) ? Number(result.tabId) : null,
         value: result?.value ?? null,
         items: Array.isArray(result?.items) ? cloneDataSafely(result.items) : [],
         error: null
-      };
+      });
     } catch (error) {
-      return {
+      return compactResponsesJsRuntimeResult({
         ok: false,
         value: null,
         items: [],
         error: normalizeResponsesCustomToolError(error)
-      };
+      });
     }
   }
 
