@@ -972,17 +972,7 @@ export function createMessageSender(appContext) {
         const existingIndex = keyToIndex.get(key);
         const previous = merged[existingIndex] || {};
         if (normalized.kind === 'reasoning_summary' || normalized.kind === 'commentary') {
-          const mergedText = (typeof previous.text === 'string' && previous.text && typeof normalized.text === 'string' && normalized.text)
-            ? (
-              normalized.kind === 'reasoning_summary'
-                ? (
-                  isResponsesActivityEntryInProgress(normalized)
-                    ? mergeStreamingThoughts(previous.text, normalized.text)
-                    : normalized.text
-                )
-                : normalizeResponsesCommentaryText(mergeStreamingThoughts(previous.text, normalized.text))
-            )
-            : ((typeof normalized.text === 'string' && normalized.text) ? normalized.text : (previous.text || ''));
+          const mergedText = mergeResponsesNarrativeEntryText(previous, normalized);
           merged[existingIndex] = normalizeResponsesActivityTimelineEntry({
             ...previous,
             ...normalized,
@@ -992,9 +982,7 @@ export function createMessageSender(appContext) {
           merged[existingIndex] = normalizeResponsesActivityTimelineEntry({
             ...previous,
             ...normalized,
-            arguments: (typeof previous.arguments === 'string' && previous.arguments && typeof normalized.arguments === 'string' && normalized.arguments)
-              ? mergeStreamingThoughts(previous.arguments, normalized.arguments)
-              : (normalized.arguments || previous.arguments || ''),
+            arguments: mergeResponsesToolArguments(previous, normalized),
             sources: (Array.isArray(normalized.sources) && normalized.sources.length > 0)
               ? normalized.sources
               : previous.sources
@@ -1067,6 +1055,50 @@ export function createMessageSender(appContext) {
   function isResponsesActivityEntryInProgress(entry) {
     const status = String(entry?.status || '').trim().toLowerCase();
     return status === 'streaming' || status === 'in_progress';
+  }
+
+  function isResponsesActivityEntryCompleted(entry) {
+    const status = String(entry?.status || '').trim().toLowerCase();
+    return status === 'completed' || status === 'done';
+  }
+
+  function mergeResponsesNarrativeEntryText(previous, normalized) {
+    const prev = (typeof previous?.text === 'string') ? previous.text : '';
+    const next = (typeof normalized?.text === 'string') ? normalized.text : '';
+    if (!prev) return next;
+    if (!next) return prev;
+
+    if (normalized.kind === 'reasoning_summary') {
+      return isResponsesActivityEntryCompleted(normalized)
+        ? next
+        : mergeStreamingThoughts(prev, next);
+    }
+
+    if (normalized.kind === 'commentary') {
+      return isResponsesActivityEntryCompleted(normalized)
+        ? next
+        : normalizeResponsesCommentaryText(mergeStreamingThoughts(prev, next));
+    }
+
+    return next;
+  }
+
+  function mergeResponsesToolArguments(previous, normalized) {
+    const prev = (typeof previous?.arguments === 'string') ? previous.arguments : '';
+    const next = (typeof normalized?.arguments === 'string') ? normalized.arguments : '';
+    if (!prev) return next;
+    if (!next) return prev;
+
+    if (isResponsesActivityEntryCompleted(normalized)) {
+      if (next.startsWith(prev) || next.includes(prev) || next.length >= prev.length) {
+        return next;
+      }
+      if (prev.includes(next)) {
+        return prev;
+      }
+    }
+
+    return mergeStreamingThoughts(prev, next);
   }
 
   function isResponsesActivityTimelineInProgress(timeline) {
