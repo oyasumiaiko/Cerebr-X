@@ -978,7 +978,7 @@ export function createMessageSender(appContext) {
                 ? (
                   isResponsesActivityEntryInProgress(normalized)
                     ? mergeStreamingThoughts(previous.text, normalized.text)
-                    : mergeResponsesReasoningText(previous.text, normalized.text)
+                    : normalized.text
                 )
                 : normalizeResponsesCommentaryText(mergeStreamingThoughts(previous.text, normalized.text))
             )
