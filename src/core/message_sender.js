@@ -15,7 +15,6 @@ import { serializeSelectionTextWithMath } from '../utils/math_selection_text.js'
 import { buildApiFooterRenderData, normalizeApiUsageMeta } from '../utils/api_footer_template.js';
 
 const RESPONSES_JS_RUNTIME_TOOL_NAME = 'js_runtime_execute';
-const MAX_RESPONSES_CUSTOM_TOOL_ROUNDS = 8;
 
 /**
  * 创建消息发送器
@@ -1540,46 +1539,6 @@ export function createMessageSender(appContext) {
 
   function cloneResponsesReplayOutputItems(items) {
     return mergeResponsesReplayOutputItems([], items);
-  }
-
-  /**
-   * 用最小合法字段重建一个 Responses `function_call` item。
-   *
-   * 背景：
-   * - 某些兼容端点会稳定给出 `response.function_call_arguments.done`，
-   *   但未必总是给出完整的 `response.output_item.done(function_call item)`；
-   * - 为了满足“function_call_output 必须能在同一 input 中找到对应 function_call”
-   *   的约束，这里在必要时客户端自行补一个最小可匹配版本。
-   *
-   * @param {any} toolCallRecord
-   * @returns {Object|null}
-   */
-  function buildResponsesReplayFunctionCallItem(toolCallRecord) {
-    if (!toolCallRecord || typeof toolCallRecord !== 'object') return null;
-    const callId = (typeof toolCallRecord.call_id === 'string' && toolCallRecord.call_id.trim())
-      ? toolCallRecord.call_id.trim()
-      : '';
-    const name = (typeof toolCallRecord.name === 'string' && toolCallRecord.name.trim())
-      ? toolCallRecord.name.trim()
-      : '';
-    if (!callId || !name) return null;
-
-    const item = {
-      type: 'function_call',
-      call_id: callId,
-      name,
-      arguments: (typeof toolCallRecord.arguments === 'string') ? toolCallRecord.arguments : '',
-      status: 'completed'
-    };
-
-    const itemId = (typeof toolCallRecord.item_id === 'string' && toolCallRecord.item_id.trim())
-      ? toolCallRecord.item_id.trim()
-      : ((typeof toolCallRecord.id === 'string' && toolCallRecord.id.trim()) ? toolCallRecord.id.trim() : '');
-    if (itemId) {
-      item.id = itemId;
-    }
-
-    return item;
   }
 
   function extractOpenAIResponsesOutput(payload) {
@@ -5349,42 +5308,18 @@ export function createMessageSender(appContext) {
    * @param {Object} previousRequestBody
    * @param {Array<Object>|null|undefined} responseOutputItems
    * @param {Array<Object>} functionCallOutputs
-   * @param {Array<Object>|null|undefined} pendingFunctionCalls
    * @returns {Object}
    */
   function buildResponsesFunctionToolFollowUpRequest(
     previousRequestBody,
     responseOutputItems,
-    functionCallOutputs,
-    pendingFunctionCalls
+    functionCallOutputs
   ) {
     const nextBody = cloneDataSafely(previousRequestBody) || {};
     const previousInput = Array.isArray(nextBody.input)
       ? nextBody.input.map(item => cloneDataSafely(item))
       : [];
     let replayOutputItems = mergeResponsesReplayOutputItems([], responseOutputItems);
-
-    // 某些兼容端点只给 function_call_arguments.done，不给完整 function_call output item。
-    // 为确保后面的 function_call_output 都能在同一 input 中找到对应 call_id，
-    // 这里为“缺失的 function_call”补最小合法项。
-    const knownFunctionCallIds = new Set(
-      mergeResponsesReplayOutputItems(previousInput, replayOutputItems)
-        .filter(item => String(item?.type || '').trim().toLowerCase() === 'function_call')
-        .map(item => (typeof item?.call_id === 'string' ? item.call_id.trim() : ''))
-        .filter(Boolean)
-    );
-    const synthesizedFunctionCallItems = [];
-    (Array.isArray(pendingFunctionCalls) ? pendingFunctionCalls : []).forEach((record) => {
-      const callId = (typeof record?.call_id === 'string' && record.call_id.trim())
-        ? record.call_id.trim()
-        : '';
-      if (!callId || knownFunctionCallIds.has(callId)) return;
-      const rebuilt = buildResponsesReplayFunctionCallItem(record);
-      if (!rebuilt) return;
-      synthesizedFunctionCallItems.push(rebuilt);
-      knownFunctionCallIds.add(callId);
-    });
-    replayOutputItems = mergeResponsesReplayOutputItems(replayOutputItems, synthesizedFunctionCallItems);
 
     delete nextBody.previous_response_id;
     nextBody.input = previousInput
@@ -5490,7 +5425,6 @@ export function createMessageSender(appContext) {
     attemptState
   }) {
     let currentRequestBody = initialRequestBody;
-    let hopCount = 0;
     let lastHandleResult = null;
 
     while (true) {
@@ -5522,10 +5456,6 @@ export function createMessageSender(appContext) {
         return lastHandleResult;
       }
 
-      if (hopCount >= MAX_RESPONSES_CUSTOM_TOOL_ROUNDS) {
-        throw new Error(`Responses 自定义工具 follow-up 已超过最大轮数（${MAX_RESPONSES_CUSTOM_TOOL_ROUNDS}），为防止死循环已中止。`);
-      }
-
       await persistAttemptConversationSnapshot(attemptState, { force: true });
 
       const functionCallOutputs = [];
@@ -5549,10 +5479,8 @@ export function createMessageSender(appContext) {
       currentRequestBody = buildResponsesFunctionToolFollowUpRequest(
         currentRequestBody,
         lastHandleResult?.responseOutputItems,
-        functionCallOutputs,
-        pendingFunctionCalls
+        functionCallOutputs
       );
-      hopCount += 1;
     }
   }
 

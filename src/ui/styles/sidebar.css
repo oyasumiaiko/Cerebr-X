@@ -8744,6 +8744,20 @@ body.chat-empty .empty-state-content {
     white-space: pre-wrap;
     word-break: break-word;
     overflow-x: auto;
+    max-height: 168px;
+    overflow-y: auto;
+}
+
+.message .response-activity-tool-code code {
+    display: block;
+    white-space: pre;
+    word-break: normal;
+    overflow-wrap: normal;
+}
+
+.message .response-activity-tool-code code.hljs {
+    padding: 0;
+    background: transparent;
 }
 
 .message .response-activity-tool-sources {

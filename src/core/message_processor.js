@@ -1186,8 +1186,16 @@ export function createMessageProcessor(appContext) {
 
     const codeBlock = document.createElement('pre');
     codeBlock.className = 'response-activity-tool-code';
-    codeBlock.textContent = meta.code || '';
+    const codeInner = document.createElement('code');
+    codeInner.className = 'language-javascript';
+    codeInner.textContent = meta.code || '';
+    codeBlock.appendChild(codeInner);
     toolBodyInner.appendChild(codeBlock);
+    try {
+      if (typeof hljs !== 'undefined' && codeInner.textContent.trim()) {
+        hljs.highlightElement(codeInner);
+      }
+    } catch (_) {}
 
     if (formattedOutput) {
       const outputTitle = document.createElement('div');
