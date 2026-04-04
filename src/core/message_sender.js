@@ -4201,6 +4201,15 @@ export function createMessageSender(appContext) {
     return raw.replace(/["\\]/g, '\\$&');
   }
 
+  function resolveMessageElementForSender(messageId) {
+    const safeMessageId = escapeMessageIdForSelector(messageId);
+    const selector = safeMessageId ? `.message[data-message-id="${safeMessageId}"]` : '';
+    if (!selector) return null;
+    return chatContainer?.querySelector(selector)
+      || (threadContainer ? threadContainer.querySelector(selector) : null)
+      || null;
+  }
+
   /**
    * 读取当前滚动视口内“最靠上的可见消息元素”（阅读锚点）。
    *
@@ -5315,7 +5324,7 @@ export function createMessageSender(appContext) {
     attemptState.aiMessageNode = node;
     applyResponsesActivityTimelineToNode(node, normalizedTimeline);
 
-    const wrapper = resolveMessageElement(attemptState.aiMessageId || '');
+    const wrapper = resolveMessageElementForSender(attemptState.aiMessageId || '');
     messageProcessor.syncAssistantMessageMetadata?.(
       attemptState.aiMessageId || '',
       node,
