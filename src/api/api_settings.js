@@ -4597,6 +4597,69 @@ export function createApiManager(appContext) {
     return (typeof value === 'string') ? value.trim().toLowerCase() : '';
   }
 
+  /**
+   * 将 Responses 请求中的 system 消息抽离为顶层 instructions。
+   *
+   * 背景：
+   * - 一些 OpenAI 兼容的 `/responses` 端点会拒绝 `input` 里的 `role=system`，
+   *   报错形如 `System messages are not allowed`；
+   * - 但同一批 system 指令通常可以安全地放到顶层 `instructions`；
+   * - 因此这里在构造 Responses 请求体前，统一把 system 消息从历史里摘出来并顺序合并。
+   *
+   * 设计约束：
+   * - 只改 Responses 请求；Chat Completions / Gemini 路线保持原样；
+   * - 仅提取文本内容；system 里若出现非文本片段则忽略（当前 Cerebr 正常路径本来也主要生成纯文本 system）。
+   *
+   * @param {Array<any>} messages
+   * @returns {{messages:Array<any>, instructions:string|undefined}}
+   */
+  function extractResponsesSystemInstructions(messages) {
+    const source = Array.isArray(messages) ? messages : [];
+    const filteredMessages = [];
+    const instructionParts = [];
+
+    source.forEach((msg) => {
+      if (!msg || typeof msg !== 'object') return;
+      const role = (typeof msg.role === 'string') ? msg.role.trim() : '';
+      if (role !== 'system') {
+        filteredMessages.push(msg);
+        return;
+      }
+
+      if (typeof msg.content === 'string') {
+        const text = msg.content.trim();
+        if (text) instructionParts.push(text);
+        return;
+      }
+
+      if (Array.isArray(msg.content)) {
+        const text = msg.content
+          .filter(part => part && typeof part === 'object' && part.type === 'text' && typeof part.text === 'string' && part.text.trim())
+          .map(part => part.text.trim())
+          .join('\n');
+        if (text) instructionParts.push(text);
+      }
+    });
+
+    return {
+      messages: filteredMessages,
+      instructions: instructionParts.length > 0 ? instructionParts.join('\n\n') : undefined
+    };
+  }
+
+  /**
+   * 合并 Responses 顶层 instructions。
+   * @param {string|undefined|null} baseInstructions
+   * @param {string|undefined|null} appendedInstructions
+   * @returns {string|undefined}
+   */
+  function appendResponsesInstructions(baseInstructions, appendedInstructions) {
+    const base = (typeof baseInstructions === 'string') ? baseInstructions.trim() : '';
+    const appended = (typeof appendedInstructions === 'string') ? appendedInstructions.trim() : '';
+    if (!appended) return base || undefined;
+    return base ? `${base}\n\n${appended}` : appended;
+  }
+
   async function buildResponsesInputMessageItem(msg, options = {}) {
     if (!msg || typeof msg !== 'object') return null;
     const role = (typeof options.role === 'string' && options.role.trim())
@@ -5019,7 +5082,11 @@ export function createApiManager(appContext) {
 
       const useResponsesApi = isOpenAIResponsesConnectionConfig(config);
       if (useResponsesApi) {
-        const responsesInput = await convertOpenAIMessagesToResponsesInput(normalizedMessages);
+        const {
+          messages: responsesMessages,
+          instructions: responsesSystemInstructions
+        } = extractResponsesSystemInstructions(normalizedMessages);
+        const responsesInput = await convertOpenAIMessagesToResponsesInput(responsesMessages);
         const responsesOverrides = buildResponsesApiRequestOverrides(config) || {};
         requestBody = {
           model: config.modelName,
@@ -5028,6 +5095,10 @@ export function createApiManager(appContext) {
           ...responsesOverrides,
           ...overrides
         };
+        requestBody.instructions = appendResponsesInstructions(
+          requestBody.instructions,
+          responsesSystemInstructions
+        );
         // Responses API 对不同模型支持参数存在差异；默认仅在用户主动调节时带上 temperature，避免不兼容参数导致 400。
         const temperature = Number(config.temperature);
         if (Number.isFinite(temperature) && temperature !== 1) {
