@@ -14,6 +14,9 @@ import { resolveResponseHandlingMode, planStreamingRenderTransition } from './re
 import { serializeSelectionTextWithMath } from '../utils/math_selection_text.js';
 import { buildApiFooterRenderData, normalizeApiUsageMeta } from '../utils/api_footer_template.js';
 
+const RESPONSES_JS_RUNTIME_TOOL_NAME = 'js_runtime_execute';
+const MAX_RESPONSES_CUSTOM_TOOL_ROUNDS = 8;
+
 /**
  * 创建消息发送器
  * @param {Function} options.getPrompts - 获取提示词设置的函数
@@ -1415,6 +1418,9 @@ export function createMessageSender(appContext) {
     let responseActivityTimeline = [];
     let assistantPhase = '';
     const outputItems = Array.isArray(payload?.output) ? payload.output : [];
+    const responseId = (typeof payload?.id === 'string' && payload.id)
+      ? payload.id
+      : ((typeof payload?.response?.id === 'string' && payload.response.id) ? payload.response.id : null);
 
     const pushAnswer = (text) => {
       if (typeof text === 'string' && text) answerParts.push(text);
@@ -1440,6 +1446,7 @@ export function createMessageSender(appContext) {
     const answer = answerFromOutput || answerFromField || '';
     return {
       answer,
+      responseId,
       responseActivityTimeline: responseActivityTimeline.length > 0 ? responseActivityTimeline : null,
       reasoningSummary: getResponsesReasoningSummaryFromTimeline(responseActivityTimeline),
       responseToolCalls: getResponsesToolCallsFromTimeline(responseActivityTimeline),
@@ -4520,6 +4527,544 @@ export function createMessageSender(appContext) {
     } catch (_) {}
   }
 
+
+  /**
+   * 构造给 Responses API 使用的 js_runtime_execute 自定义函数工具定义。
+   *
+   * 说明：
+   * - 这是模型“看到”的工具面；
+   * - 代码真正执行时运行在浏览器页面上下文中；
+   * - 模型在代码体里可以直接 `await` / `return`，
+   *   并通过 `cerebr.invoke(method, params)` 使用扩展桥能力。
+   *
+   * @returns {Object}
+   */
+  function buildResponsesJsRuntimeFunctionToolDefinition() {
+    return {
+      type: 'function',
+      name: RESPONSES_JS_RUNTIME_TOOL_NAME,
+      description: [
+        '在当前活动网页标签页中执行一次性 JavaScript。',
+        'code 字段会作为 async 函数体运行，可直接使用 await 和 return。',
+        '运行时提供 cerebr.invoke(method, params) 扩展桥。',
+        '当前支持的方法包括 extension.getRuntimeStatus、page.getContent、page.captureVisible。'
+      ].join(' '),
+      strict: true,
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          code: {
+            type: 'string',
+            description: '要执行的 JavaScript 代码片段。它会作为 async 函数体执行，可直接使用 await 和 return。'
+          },
+          all_frames: {
+            type: 'boolean',
+            description: '是否在当前标签页的所有可注入 frame 中执行。默认 false。'
+          },
+          frame_ids: {
+            type: 'array',
+            description: '指定要执行的 frame ID 列表。与 all_frames 互斥。',
+            items: {
+              type: 'integer'
+            }
+          },
+          inject_immediately: {
+            type: 'boolean',
+            description: '是否使用 injectImmediately。默认 false。'
+          }
+        },
+        required: ['code']
+      }
+    };
+  }
+
+  /**
+   * 返回当前这次发送应该暴露给 Responses API 的自定义函数工具列表。
+   *
+   * 当前只开放 js_runtime_execute：
+   * - 仅在 Responses API 场景下注入；
+   * - 独立页模式下不开放，因为没有稳定的目标网页标签页。
+   *
+   * @param {Object|null|undefined} usedApiConfig
+   * @returns {Array<Object>}
+   */
+  function getResponsesCustomFunctionTools(usedApiConfig) {
+    if (!isOpenAIResponsesApiConfig(usedApiConfig)) return [];
+    if (state?.isStandalone) return [];
+    if (typeof utils?.executeJsRuntime !== 'function') return [];
+    return [buildResponsesJsRuntimeFunctionToolDefinition()];
+  }
+
+  /**
+   * 把自定义函数工具合并进 Responses API requestBody.tools。
+   *
+   * 合并规则：
+   * - 普通内置工具仍按 type 去重；
+   * - function 工具按 type + name 去重；
+   * - 若同名 function 已存在，则以当前客户端定义覆盖，确保参数契约稳定。
+   *
+   * @param {Array<any>} existingTools
+   * @param {Array<any>} customTools
+   * @returns {Array<Object>}
+   */
+  function mergeResponsesRequestTools(existingTools, customTools) {
+    const merged = Array.isArray(existingTools)
+      ? existingTools
+        .filter(item => item && typeof item === 'object' && !Array.isArray(item))
+        .map(item => cloneDataSafely(item))
+      : [];
+
+    for (const tool of Array.isArray(customTools) ? customTools : []) {
+      if (!tool || typeof tool !== 'object' || Array.isArray(tool)) continue;
+      const toolType = (typeof tool.type === 'string') ? tool.type.trim() : '';
+      const toolName = (typeof tool.name === 'string') ? tool.name.trim() : '';
+      if (!toolType) continue;
+
+      const existingIndex = merged.findIndex((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+        const itemType = (typeof item.type === 'string') ? item.type.trim() : '';
+        if (itemType !== toolType) return false;
+        if (toolType === 'function') {
+          return ((typeof item.name === 'string') ? item.name.trim() : '') === toolName;
+        }
+        return true;
+      });
+
+      if (existingIndex >= 0) {
+        merged[existingIndex] = cloneDataSafely(tool);
+      } else {
+        merged.push(cloneDataSafely(tool));
+      }
+    }
+
+    return merged;
+  }
+
+  /**
+   * 在真正发请求前，把当前客户端支持的自定义 function tools 注入 Responses 请求体。
+   *
+   * @param {Object} requestBody
+   * @param {Object|null|undefined} usedApiConfig
+   * @returns {Object}
+   */
+  function prepareResponsesRequestBodyForCustomTools(requestBody, usedApiConfig) {
+    if (!isOpenAIResponsesApiConfig(usedApiConfig)) return requestBody;
+    const customTools = getResponsesCustomFunctionTools(usedApiConfig);
+    if (!Array.isArray(customTools) || customTools.length <= 0) return requestBody;
+
+    const nextBody = cloneDataSafely(requestBody) || {};
+    nextBody.tools = mergeResponsesRequestTools(nextBody.tools, customTools);
+    return nextBody;
+  }
+
+  /**
+   * 计算“新一轮 Responses 返回里新增的工具调用”。
+   *
+   * 背景：
+   * - 我们在同一个 assistant 消息里展示多轮 function_call -> function_call_output follow-up；
+   * - 节点上的 response_activity_timeline 需要跨 hop 累积；
+   * - 但真正要执行的只应该是“当前 hop 新出现的 function_call”，不能把上一轮已执行过的再跑一次。
+   *
+   * @param {Array<Object>|null|undefined} previousTimeline
+   * @param {Array<Object>|null|undefined} nextTimeline
+   * @returns {Array<Object>}
+   */
+  function getNewResponsesToolCalls(previousTimeline, nextTimeline) {
+    const previousCalls = getResponsesToolCallsFromTimeline(previousTimeline);
+    const nextCalls = getResponsesToolCallsFromTimeline(nextTimeline);
+    if (!Array.isArray(nextCalls) || nextCalls.length <= 0) return [];
+    if (!Array.isArray(previousCalls) || previousCalls.length <= 0) return nextCalls;
+
+    const previousKeys = new Set(
+      previousCalls.map((record, index) => getResponsesToolCallRecordKey(record, index))
+    );
+
+    return nextCalls.filter((record, index) => {
+      return !previousKeys.has(getResponsesToolCallRecordKey(record, index));
+    });
+  }
+
+  /**
+   * 将本地工具执行异常压成稳定 JSON 结构，便于作为 function_call_output 返回给模型。
+   *
+   * @param {any} error
+   * @returns {{message:string, name:string, stack:string}}
+   */
+  function normalizeResponsesCustomToolError(error) {
+    return {
+      message: (typeof error?.message === 'string' && error.message.trim())
+        ? error.message.trim()
+        : String(error || '未知工具错误'),
+      name: (typeof error?.name === 'string' && error.name.trim())
+        ? error.name.trim()
+        : 'Error',
+      stack: (typeof error?.stack === 'string') ? error.stack : ''
+    };
+  }
+
+  /**
+   * 序列化 function_call_output 的 output 字段。
+   *
+   * Responses API 要求 output 是字符串；这里优先返回 JSON 字符串，
+   * 让模型能稳定读取结构化字段。
+   *
+   * @param {any} value
+   * @returns {string}
+   */
+  function serializeResponsesFunctionToolOutput(value) {
+    if (value == null) return 'null';
+    if (typeof value === 'string') return value;
+    try {
+      const serialized = JSON.stringify(value);
+      return (typeof serialized === 'string') ? serialized : 'null';
+    } catch (error) {
+      return JSON.stringify({
+        ok: false,
+        value: null,
+        items: [],
+        error: normalizeResponsesCustomToolError(error)
+      });
+    }
+  }
+
+  /**
+   * 规范化 js_runtime_execute 的参数。
+   *
+   * @param {any} rawArgs
+   * @returns {{code:string, allFrames:boolean, frameIds:number[]|null, injectImmediately:boolean}}
+   */
+  function normalizeResponsesJsRuntimeToolArguments(rawArgs) {
+    const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs))
+      ? rawArgs
+      : {};
+    const code = (typeof args.code === 'string') ? args.code : '';
+    if (!code.trim()) {
+      throw new Error('js_runtime_execute 参数错误：code 不能为空。');
+    }
+
+    const frameIds = Array.isArray(args.frame_ids)
+      ? args.frame_ids
+        .map(value => Number(value))
+        .filter(value => Number.isFinite(value))
+        .map(value => Math.trunc(value))
+      : null;
+    const allFrames = args.all_frames === true;
+    if (allFrames && Array.isArray(frameIds) && frameIds.length > 0) {
+      throw new Error('js_runtime_execute 参数错误：all_frames 与 frame_ids 不能同时使用。');
+    }
+
+    return {
+      code,
+      allFrames,
+      frameIds: (Array.isArray(frameIds) && frameIds.length > 0) ? frameIds : null,
+      injectImmediately: args.inject_immediately === true
+    };
+  }
+
+  /**
+   * 执行 js_runtime_execute 并返回稳定结果对象。
+   *
+   * @param {any} rawArgs
+   * @returns {Promise<Object>}
+   */
+  async function executeResponsesJsRuntimeFunction(rawArgs) {
+    if (typeof utils?.executeJsRuntime !== 'function') {
+      return {
+        ok: false,
+        value: null,
+        items: [],
+        error: {
+          message: '当前客户端没有可用的 JS Runtime 执行入口。',
+          name: 'UnavailableError',
+          stack: ''
+        }
+      };
+    }
+
+    try {
+      const normalizedArgs = normalizeResponsesJsRuntimeToolArguments(rawArgs);
+      const result = await utils.executeJsRuntime(normalizedArgs.code, {
+        allFrames: normalizedArgs.allFrames,
+        frameIds: normalizedArgs.frameIds,
+        injectImmediately: normalizedArgs.injectImmediately
+      });
+
+      if (!result || result.success !== true) {
+        return {
+          ok: false,
+          tabId: Number.isFinite(Number(result?.tabId)) ? Number(result.tabId) : null,
+          value: null,
+          items: Array.isArray(result?.items) ? cloneDataSafely(result.items) : [],
+          error: {
+            message: (typeof result?.error === 'string' && result.error.trim())
+              ? result.error.trim()
+              : 'JS Runtime 执行失败',
+            name: 'RuntimeExecutionError',
+            stack: ''
+          }
+        };
+      }
+
+      return {
+        ok: result.ok === true,
+        tabId: Number.isFinite(Number(result?.tabId)) ? Number(result.tabId) : null,
+        value: result?.value ?? null,
+        items: Array.isArray(result?.items) ? cloneDataSafely(result.items) : [],
+        error: null
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        value: null,
+        items: [],
+        error: normalizeResponsesCustomToolError(error)
+      };
+    }
+  }
+
+  /**
+   * 执行一个客户端负责落地的 Responses function_call。
+   *
+   * 当前策略：
+   * - 已知函数：返回真正执行结果；
+   * - 未知函数：显式回一个错误对象，而不是静默吞掉，方便模型自我修正。
+   *
+   * @param {Object} toolCallRecord
+   * @returns {Promise<{type:'function_call_output', call_id:string, output:string}>}
+   */
+  async function executeResponsesCustomFunctionToolCall(toolCallRecord) {
+    const callId = (typeof toolCallRecord?.id === 'string') ? toolCallRecord.id.trim() : '';
+    const functionName = (typeof toolCallRecord?.name === 'string') ? toolCallRecord.name.trim() : '';
+    if (!callId) {
+      throw new Error(`Responses function_call 缺少 call_id，无法回传工具结果（${functionName || 'unknown'}）。`);
+    }
+
+    let parsedArgs = {};
+    const rawArguments = (typeof toolCallRecord?.arguments === 'string') ? toolCallRecord.arguments : '';
+    try {
+      parsedArgs = rawArguments.trim() ? JSON.parse(rawArguments) : {};
+    } catch (error) {
+      const normalizedError = normalizeResponsesCustomToolError(error);
+      return {
+        type: 'function_call_output',
+        call_id: callId,
+        output: serializeResponsesFunctionToolOutput({
+          ok: false,
+          value: null,
+          items: [],
+          error: {
+            ...normalizedError,
+            message: `函数参数 JSON 解析失败：${normalizedError.message}`
+          }
+        })
+      };
+    }
+
+    let outputPayload = null;
+    if (functionName === RESPONSES_JS_RUNTIME_TOOL_NAME) {
+      outputPayload = await executeResponsesJsRuntimeFunction(parsedArgs);
+    } else {
+      outputPayload = {
+        ok: false,
+        value: null,
+        items: [],
+        error: {
+          message: `当前客户端尚未实现自定义函数 ${functionName || '(unnamed)'}。`,
+          name: 'UnsupportedFunctionError',
+          stack: ''
+        }
+      };
+    }
+
+    return {
+      type: 'function_call_output',
+      call_id: callId,
+      output: serializeResponsesFunctionToolOutput(outputPayload)
+    };
+  }
+
+  /**
+   * 基于上一轮 requestBody 构造下一轮 Responses follow-up 请求。
+   *
+   * 核心规则：
+   * - input 只发送 function_call_output；
+   * - previous_response_id 指向上一轮响应；
+   * - conversation 与 previous_response_id 互斥，因此这里明确移除 conversation。
+   *
+   * @param {Object} previousRequestBody
+   * @param {string} previousResponseId
+   * @param {Array<Object>} functionCallOutputs
+   * @returns {Object}
+   */
+  function buildResponsesFunctionToolFollowUpRequest(previousRequestBody, previousResponseId, functionCallOutputs) {
+    const nextBody = cloneDataSafely(previousRequestBody) || {};
+    delete nextBody.input;
+    delete nextBody.conversation;
+    nextBody.previous_response_id = previousResponseId;
+    nextBody.input = Array.isArray(functionCallOutputs)
+      ? functionCallOutputs.map(item => cloneDataSafely(item))
+      : [];
+    return nextBody;
+  }
+
+  /**
+   * 发送单次 API 请求，并根据“loading 占位是否仍然存在”决定是否展示细粒度状态文案。
+   *
+   * 注意：
+   * - 一旦 loadingMessage 已升级为正式 AI 消息，再写它的 text-content 会污染正文；
+   * - 所以 follow-up hop 里若已经出现 AI 消息，这里会自动静默，不再改写占位状态。
+   *
+   * @param {Object} options
+   * @param {Object} options.requestBody
+   * @param {Object} options.usedApiConfig
+   * @param {AbortSignal} options.signal
+   * @param {HTMLElement|null} options.loadingMessage
+   * @param {{aiMessageId?:string}|null} options.attemptState
+   * @returns {Promise<Response>}
+   */
+  async function sendApiRequestForAttempt({
+    requestBody,
+    usedApiConfig,
+    signal,
+    loadingMessage,
+    attemptState
+  }) {
+    const canUpdateLoadingStatus = !!(
+      loadingMessage
+      && loadingMessage.parentNode
+      && !attemptState?.aiMessageId
+      && !loadingMessage.classList?.contains('ai-message')
+    );
+
+    if (canUpdateLoadingStatus) {
+      updateLoadingStatus(loadingMessage, '正在发送请求（上传请求载荷）...', {
+        stage: 'send_request',
+        apiBase: usedApiConfig?.baseUrl || '',
+        modelName: usedApiConfig?.modelName || ''
+      });
+    }
+
+    const response = await apiManager.sendRequest({
+      requestBody,
+      config: usedApiConfig,
+      signal,
+      onStatus: canUpdateLoadingStatus ? createRequestStatusHandler(loadingMessage) : undefined
+    });
+
+    if (!response.ok) {
+      if (canUpdateLoadingStatus) {
+        updateLoadingStatus(
+          loadingMessage,
+          `服务器返回错误 (HTTP ${response.status})，正在读取错误详情...`,
+          { stage: 'read_error_body', httpStatus: response.status, apiBase: usedApiConfig?.baseUrl || '', modelName: usedApiConfig?.modelName || '' }
+        );
+      }
+      const error = await response.text();
+      throw new Error(`API错误 (${response.status}): ${error}`);
+    }
+
+    if (canUpdateLoadingStatus) {
+      updateLoadingStatus(
+        loadingMessage,
+        `已收到响应头 (HTTP ${response.status})，准备接收回复...`,
+        { stage: 'response_headers_received', httpStatus: response.status, apiBase: usedApiConfig?.baseUrl || '', modelName: usedApiConfig?.modelName || '' }
+      );
+    }
+
+    return response;
+  }
+
+  /**
+   * 处理一次“Responses 请求 + 本地自定义 function tool follow-up”生命周期。
+   *
+   * 流程：
+   * 1. 发送初始请求；
+   * 2. 渲染当前 hop 的模型输出；
+   * 3. 若模型返回 function_call，则本地执行；
+   * 4. 以 function_call_output + previous_response_id 继续下一 hop；
+   * 5. 直到没有新的 function_call 为止。
+   *
+   * @param {Object} options
+   * @param {Object} options.initialRequestBody
+   * @param {HTMLElement|null} options.loadingMessage
+   * @param {Object} options.usedApiConfig
+   * @param {AbortSignal} options.signal
+   * @param {Object|null} options.attemptState
+   * @returns {Promise<Object|null>}
+   */
+  async function executeApiRequestLifecycle({
+    initialRequestBody,
+    loadingMessage,
+    usedApiConfig,
+    signal,
+    attemptState
+  }) {
+    let currentRequestBody = initialRequestBody;
+    let hopCount = 0;
+    let lastHandleResult = null;
+
+    while (true) {
+      const response = await sendApiRequestForAttempt({
+        requestBody: currentRequestBody,
+        usedApiConfig,
+        signal,
+        loadingMessage,
+        attemptState
+      });
+
+      const responseHandlingMode = resolveResponseHandlingMode({
+        apiBase: usedApiConfig?.baseUrl,
+        connectionType: usedApiConfig?.connectionType,
+        geminiUseStreaming: usedApiConfig?.useStreaming,
+        requestBodyStream: !!(currentRequestBody && currentRequestBody.stream)
+      });
+      const useStreaming = responseHandlingMode === 'stream';
+
+      lastHandleResult = useStreaming
+        ? await handleStreamResponse(response, loadingMessage, usedApiConfig, attemptState)
+        : await handleNonStreamResponse(response, loadingMessage, usedApiConfig, attemptState);
+
+      const pendingFunctionCalls = Array.isArray(lastHandleResult?.responseToolCalls)
+        ? lastHandleResult.responseToolCalls
+          .filter(record => String(record?.type || '').trim().toLowerCase() === 'function_call')
+        : [];
+      if (pendingFunctionCalls.length <= 0) {
+        return lastHandleResult;
+      }
+
+      const previousResponseId = (typeof lastHandleResult?.responseId === 'string' && lastHandleResult.responseId)
+        ? lastHandleResult.responseId
+        : ((typeof attemptState?.responsesToolLoopLastResponseId === 'string' && attemptState.responsesToolLoopLastResponseId)
+          ? attemptState.responsesToolLoopLastResponseId
+          : '');
+      if (!previousResponseId) {
+        throw new Error('Responses 返回了 function_call，但缺少 response id，无法继续发送 function_call_output。');
+      }
+
+      if (hopCount >= MAX_RESPONSES_CUSTOM_TOOL_ROUNDS) {
+        throw new Error(`Responses 自定义工具 follow-up 已超过最大轮数（${MAX_RESPONSES_CUSTOM_TOOL_ROUNDS}），为防止死循环已中止。`);
+      }
+
+      await persistAttemptConversationSnapshot(attemptState, { force: true });
+
+      const functionCallOutputs = [];
+      for (const toolCall of pendingFunctionCalls) {
+        if (signal?.aborted) {
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        }
+        functionCallOutputs.push(await executeResponsesCustomFunctionToolCall(toolCall));
+      }
+
+      currentRequestBody = buildResponsesFunctionToolFollowUpRequest(
+        currentRequestBody,
+        previousResponseId,
+        functionCallOutputs
+      );
+      hopCount += 1;
+    }
+  }
+
   /**
    * Core single-request send logic.
    *
@@ -5272,47 +5817,15 @@ export function createMessageSender(appContext) {
         config: config,
         overrides: requestOverrides
       });
+      const preparedRequestBody = prepareResponsesRequestBodyForCustomTools(requestBody, effectiveApiConfig);
 
-      // 根据统一纯函数规则选择流式/非流式处理（提前判定，便于状态文案与分支逻辑一致）。
-      const responseHandlingMode = resolveResponseHandlingMode({
-        apiBase: effectiveApiConfig?.baseUrl,
-        connectionType: effectiveApiConfig?.connectionType,
-        geminiUseStreaming: effectiveApiConfig?.useStreaming,
-        requestBodyStream: !!(requestBody && requestBody.stream)
-      });
-      const useStreaming = responseHandlingMode === 'stream';
-
-      // 发送 API 请求（开始网络阶段）
-      updateLoadingStatus(loadingMessage, '正在发送请求（上传请求载荷）...', { stage: 'send_request' });
-      const response = await apiManager.sendRequest({
-        requestBody: requestBody,
-        config: effectiveApiConfig,
-        signal: signal,
-        onStatus: createRequestStatusHandler(loadingMessage)
-      });
-
-      if (!response.ok) {
-        updateLoadingStatus(
-          loadingMessage,
-          `服务器返回错误 (HTTP ${response.status})，正在读取错误详情...`,
-          { stage: 'read_error_body', httpStatus: response.status, apiBase: effectiveApiConfig?.baseUrl || '', modelName: effectiveApiConfig?.modelName || '' }
-        );
-        const error = await response.text();
-        throw new Error(`API错误 (${response.status}): ${error}`);
-      }
-
-      // 响应状态为 ok：此时已收到响应头，接下来进入“等待首 token / 下载完整正文”等阶段
-      updateLoadingStatus(
+      await executeApiRequestLifecycle({
+        initialRequestBody: preparedRequestBody,
         loadingMessage,
-        `已收到响应头 (HTTP ${response.status})，准备接收回复...`,
-        { stage: 'response_headers_received', httpStatus: response.status, apiBase: effectiveApiConfig?.baseUrl || '', modelName: effectiveApiConfig?.modelName || '' }
-      );
-
-      if (useStreaming) {
-        await handleStreamResponse(response, loadingMessage, effectiveApiConfig, attempt);
-      } else {
-        await handleNonStreamResponse(response, loadingMessage, effectiveApiConfig, attempt);
-      }
+        usedApiConfig: effectiveApiConfig,
+        signal,
+        attemptState: attempt
+      });
 
       // 消息处理完成后，强制保存一次最终态。
       // 注意：这里必须使用 attempt 绑定的会话上下文，避免“中途切到其它会话”时写错目标会话。
@@ -5921,16 +6434,25 @@ export function createMessageSender(appContext) {
    * @param {HTMLElement} loadingMessage
    * @param {Object} usedApiConfig
    * @param {Object} attemptState
+   * @returns {Promise<{answer:string, responseId:string|null, responseActivityTimeline:Array<Object>|null, responseToolCalls:Array<Object>|null, assistantPhase:string|null, isResponsesApi:boolean}>}
    */
   async function handleStreamResponse(response, loadingMessage, usedApiConfig, attemptState) {
     captureAttemptConversationContext(attemptState);
+    const canUpdateLoadingStatus = !!(
+      loadingMessage
+      && loadingMessage.parentNode
+      && !attemptState?.aiMessageId
+      && !loadingMessage.classList?.contains('ai-message')
+    );
     // 流式场景：此时已拿到响应头，但正文 token 尚未到达。
     // 在首个 token 到达前维持占位消息，并展示“等待首 token”的细粒度状态。
-    updateLoadingStatus(
-      loadingMessage,
-      '已建立流式连接，等待首个 token...',
-      { stage: 'stream_wait_first_token', apiBase: usedApiConfig?.baseUrl || '', modelName: usedApiConfig?.modelName || '' }
-    );
+    if (canUpdateLoadingStatus) {
+      updateLoadingStatus(
+        loadingMessage,
+        '已建立流式连接，等待首个 token...',
+        { stage: 'stream_wait_first_token', apiBase: usedApiConfig?.baseUrl || '', modelName: usedApiConfig?.modelName || '' }
+      );
+    }
 
     const threadContext = attemptState?.threadContext || null;
     const {
@@ -6028,8 +6550,12 @@ export function createMessageSender(appContext) {
 	    // OpenAI 兼容：累积 tool_calls（流式增量会把 function.arguments 分片输出）
 	    let latestOpenAIToolCalls = [];
       // Responses API：按事件顺序保存 reasoning summary / 工具调用的活动时间线。
-      let latestResponsesActivityTimeline = [];
-      let latestResponsesAssistantPhase = null;
+      const previousResponsesActivityTimeline = Array.isArray(attemptState?.responsesToolLoopAccumulatedTimeline)
+        ? cloneResponsesActivityTimeline(attemptState.responsesToolLoopAccumulatedTimeline)
+        : [];
+      let latestResponsesActivityTimeline = cloneResponsesActivityTimeline(previousResponsesActivityTimeline);
+      let latestResponsesAssistantPhase = attemptState?.responsesToolLoopAssistantPhase || null;
+      let latestResponsesResponseId = attemptState?.responsesToolLoopLastResponseId || null;
       const latestResponsesOutputItemPhaseById = new Map();
       // Responses API：记录“正文可见文本”的分片状态，避免 delta/done/full item 多次到来时重复拼接。
       const latestResponsesOutputTextState = new Map();
@@ -6384,7 +6910,28 @@ export function createMessageSender(appContext) {
 	      }
 	    }
 
+      if (isOpenAIResponsesStream && attemptState) {
+        attemptState.responsesToolLoopAccumulatedTimeline = (Array.isArray(latestResponsesActivityTimeline) && latestResponsesActivityTimeline.length > 0)
+          ? cloneResponsesActivityTimeline(latestResponsesActivityTimeline)
+          : null;
+        attemptState.responsesToolLoopAssistantPhase = latestResponsesAssistantPhase || null;
+        attemptState.responsesToolLoopLastResponseId = latestResponsesResponseId || null;
+      }
+
       await persistAttemptConversationSnapshot(attemptState, { force: true });
+
+      return {
+        answer: aiResponse || '',
+        responseId: latestResponsesResponseId || null,
+        responseActivityTimeline: (Array.isArray(latestResponsesActivityTimeline) && latestResponsesActivityTimeline.length > 0)
+          ? cloneResponsesActivityTimeline(latestResponsesActivityTimeline)
+          : null,
+        responseToolCalls: isOpenAIResponsesStream
+          ? getNewResponsesToolCalls(previousResponsesActivityTimeline, latestResponsesActivityTimeline)
+          : null,
+        assistantPhase: latestResponsesAssistantPhase || null,
+        isResponsesApi: isOpenAIResponsesStream
+      };
 
     async function processLine(line) {
       // Trim the line to handle potential CR characters as well (e.g. '\r\n')
@@ -6801,6 +7348,9 @@ export function createMessageSender(appContext) {
             { status: 'completed' }
           ) || shouldRebuildResponsesVisibleAnswer;
           const extracted = extractOpenAIResponsesOutput(completedPayload);
+          if (typeof extracted.responseId === 'string' && extracted.responseId) {
+            latestResponsesResponseId = extracted.responseId;
+          }
           if (!shouldRebuildResponsesVisibleAnswer && typeof extracted.answer === 'string' && extracted.answer) {
             currentEventAnswerDelta = extracted.answer;
           }
@@ -6826,6 +7376,9 @@ export function createMessageSender(appContext) {
             { status: 'completed' }
           ) || shouldRebuildResponsesVisibleAnswer;
           const extracted = extractOpenAIResponsesOutput(data);
+          if (typeof extracted.responseId === 'string' && extracted.responseId) {
+            latestResponsesResponseId = extracted.responseId;
+          }
           if (!shouldRebuildResponsesVisibleAnswer && typeof extracted.answer === 'string' && extracted.answer) {
             currentEventAnswerDelta = extracted.answer;
           }
@@ -6946,15 +7499,23 @@ export function createMessageSender(appContext) {
    * @param {HTMLElement} loadingMessage - 加载状态消息元素
    * @param {Object} usedApiConfig - 本次使用的 API 配置
    * @param {{id:string, aiMessageId?:string}|null} attemptState - 当前请求的 attempt 状态对象
-   * @returns {Promise<void>}
+   * @returns {Promise<{answer:string, responseId:string|null, responseActivityTimeline:Array<Object>|null, responseToolCalls:Array<Object>|null, assistantPhase:string|null, isResponsesApi:boolean}>}
    */
   async function handleNonStreamResponse(response, loadingMessage, usedApiConfig, attemptState) {
-    // 非流式场景：响应头已收到，但需要完整下载/解析 body，可能会明显等待。
-    updateLoadingStatus(
-      loadingMessage,
-      '正在下载并解析完整回复（非流式）...',
-      { stage: 'non_stream_read_body', apiBase: usedApiConfig?.baseUrl || '', modelName: usedApiConfig?.modelName || '' }
+    const canUpdateLoadingStatus = !!(
+      loadingMessage
+      && loadingMessage.parentNode
+      && !attemptState?.aiMessageId
+      && !loadingMessage.classList?.contains('ai-message')
     );
+    // 非流式场景：响应头已收到，但需要完整下载/解析 body，可能会明显等待。
+    if (canUpdateLoadingStatus) {
+      updateLoadingStatus(
+        loadingMessage,
+        '正在下载并解析完整回复（非流式）...',
+        { stage: 'non_stream_read_body', apiBase: usedApiConfig?.baseUrl || '', modelName: usedApiConfig?.modelName || '' }
+      );
+    }
 
     const threadContext = attemptState?.threadContext || null;
     const {
@@ -6983,8 +7544,14 @@ export function createMessageSender(appContext) {
     // OpenAI 兼容：工具调用（若存在则与 thoughtSignature 一并回传）
     let toolCalls = null;
     // Responses API：按顺序保存 reasoning summary / 工具调用活动。
+    const previousResponsesActivityTimeline = Array.isArray(attemptState?.responsesToolLoopAccumulatedTimeline)
+      ? cloneResponsesActivityTimeline(attemptState.responsesToolLoopAccumulatedTimeline)
+      : [];
     let responseActivityTimeline = null;
-    let responsesAssistantPhase = null;
+    let responsesAssistantPhase = attemptState?.responsesToolLoopAssistantPhase || null;
+    let responsesResponseId = (typeof attemptState?.responsesToolLoopLastResponseId === 'string' && attemptState.responsesToolLoopLastResponseId)
+      ? attemptState.responsesToolLoopLastResponseId
+      : null;
     let json = null;
     try {
       json = await response.json();
@@ -7003,6 +7570,27 @@ export function createMessageSender(appContext) {
     const isGeminiApi = isGeminiApiResponse(response, usedApiConfig);
     const isResponsesApi = !isGeminiApi
       && (isOpenAIResponsesApiResponse(response, usedApiConfig) || isOpenAIResponsesPayload(json));
+    const finalizeNonStreamResult = () => {
+      if (isResponsesApi && attemptState) {
+        attemptState.responsesToolLoopAccumulatedTimeline = (Array.isArray(responseActivityTimeline) && responseActivityTimeline.length > 0)
+          ? cloneResponsesActivityTimeline(responseActivityTimeline)
+          : null;
+        attemptState.responsesToolLoopAssistantPhase = responsesAssistantPhase || null;
+        attemptState.responsesToolLoopLastResponseId = responsesResponseId || null;
+      }
+      return {
+        answer: answer || '',
+        responseId: responsesResponseId || null,
+        responseActivityTimeline: (Array.isArray(responseActivityTimeline) && responseActivityTimeline.length > 0)
+          ? cloneResponsesActivityTimeline(responseActivityTimeline)
+          : null,
+        responseToolCalls: isResponsesApi
+          ? getNewResponsesToolCalls(previousResponsesActivityTimeline, responseActivityTimeline)
+          : null,
+        assistantPhase: responsesAssistantPhase || null,
+        isResponsesApi
+      };
+    };
     if (isGeminiApi) {
       // 优先检测 Gemini 返回的「安全拦截但 HTTP 为 200」场景，交给上层自动重试逻辑处理
       const safetyBlock = detectGeminiSafetyBlock(json, { hasExistingContent: false });
@@ -7099,8 +7687,16 @@ export function createMessageSender(appContext) {
       if (typeof extracted.answer === 'string') {
         answer = extracted.answer;
       }
+      if (typeof extracted.responseId === 'string' && extracted.responseId) {
+        responsesResponseId = extracted.responseId;
+      }
       if (Array.isArray(extracted.responseActivityTimeline) && extracted.responseActivityTimeline.length > 0) {
-        responseActivityTimeline = extracted.responseActivityTimeline;
+        responseActivityTimeline = mergeResponsesActivityTimeline(
+          previousResponsesActivityTimeline,
+          extracted.responseActivityTimeline
+        );
+      } else if (previousResponsesActivityTimeline.length > 0) {
+        responseActivityTimeline = cloneResponsesActivityTimeline(previousResponsesActivityTimeline);
       }
       if (typeof extracted.assistantPhase === 'string' && extracted.assistantPhase) {
         responsesAssistantPhase = extracted.assistantPhase;
@@ -7215,7 +7811,7 @@ export function createMessageSender(appContext) {
             if (!anchor && regenContainer) {
               scrollToBottom(regenContainer);
             }
-            return;
+            return finalizeNonStreamResult();
           } finally {
             if (regenContainer) {
               restoreReadingAnchor(regenContainer, anchor);
@@ -7257,7 +7853,7 @@ export function createMessageSender(appContext) {
       } catch (e) {
         console.warn('记录推理签名失败（非流式，复用占位）:', e);
       }
-      return;
+      return finalizeNonStreamResult();
     }
     if (loadingMessage && loadingMessage.parentNode) loadingMessage.remove();
 
@@ -7314,7 +7910,7 @@ export function createMessageSender(appContext) {
           }
         }
       }
-      return;
+      return finalizeNonStreamResult();
     }
 
     const threadOptions = threadContext
@@ -7390,6 +7986,7 @@ export function createMessageSender(appContext) {
     if (scrollContainer) {
       scrollToBottom(scrollContainer);
     }
+    return finalizeNonStreamResult();
   }
 
   /**
