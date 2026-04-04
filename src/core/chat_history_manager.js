@@ -18,7 +18,8 @@
  * @property {string|null} [thoughtSignatureSource] - 签名来源（'gemini' | 'openai'，可选），用于避免跨 API 误回传导致上游报错
  * @property {string|null} [reasoning_content] - OpenAI 兼容：需要原样回传的推理原文（与 thoughtSignature 配对，可选）
  * @property {Array<any>|null} [tool_calls] - OpenAI 兼容：assistant.tool_calls（可能包含 thoughtSignature，可选）
- * @property {Array<any>|null} [response_activity_timeline] - Responses API：按顺序记录 reasoning summary 与工具调用的活动时间线（可选）
+ * @property {string|null} [phase] - Responses API assistant message phase（如 commentary，可选）
+ * @property {Array<any>|null} [response_activity_timeline] - Responses API：按顺序记录 commentary / reasoning summary / 工具调用的活动时间线（可选）
  * @property {number|null} [response_activity_duration_ms] - Responses API：思考/工具活动总耗时（毫秒，可选，仅在完成后写入）
  * @property {string|null} [response_reasoning_summary] - Responses API：reasoning summary 文本（仅用于展示/存档，可选）
  * @property {Array<any>|null} [response_tool_calls] - Responses API：output item 级工具调用记录（如 web_search_call，可选）
@@ -69,7 +70,8 @@ function createMessageNode(role, content, parentId = null) {
     reasoning_content: null,
     // OpenAI 兼容：assistant.tool_calls（可能包含 tool_calls[i].thoughtSignature）
     tool_calls: null,
-    // Responses API：按事件顺序保存 reasoning summary / 工具调用活动
+    // Responses API：保存 assistant phase 以及按事件顺序记录 commentary / reasoning summary / 工具调用活动
+    phase: null,
     response_activity_timeline: null,
     response_activity_duration_ms: null,
     // --- API 元信息（用于消息 footer 显示与持久化）---

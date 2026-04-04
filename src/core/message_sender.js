@@ -724,9 +724,83 @@ export function createMessageSender(appContext) {
     }
   }
 
+  function normalizeResponsesMessagePhase(value) {
+    return (typeof value === 'string') ? value.trim().toLowerCase() : '';
+  }
+
+  function isResponsesCommentaryPhase(value) {
+    return normalizeResponsesMessagePhase(value) === 'commentary';
+  }
+
+  function normalizeResponsesCommentaryText(rawText) {
+    return String(rawText || '')
+      .replace(/\r\n?/g, '\n')
+      .trim();
+  }
+
+  function extractResponsesMessageTextParts(item, options = {}) {
+    const {
+      excludeReasoning = false
+    } = options || {};
+    const parts = [];
+    const contentParts = Array.isArray(item?.content) ? item.content : [];
+    contentParts.forEach((part) => {
+      if (!part || typeof part !== 'object') return;
+      const partType = String(part.type || '').toLowerCase();
+      if (partType === 'refusal') return;
+      if (excludeReasoning && partType.includes('reasoning')) return;
+      if (typeof part.text === 'string' && part.text) {
+        parts.push(part.text);
+        return;
+      }
+      if (typeof part.output_text === 'string' && part.output_text) {
+        parts.push(part.output_text);
+      }
+    });
+    return parts;
+  }
+
+  function extractResponsesMessageVisibleText(item, options = {}) {
+    return extractResponsesMessageTextParts(item, options).join('');
+  }
+
+  function createResponsesCommentaryTimelineEntry(text, options = {}) {
+    const content = normalizeResponsesCommentaryText(text);
+    if (!content) return null;
+    return normalizeResponsesActivityTimelineEntry({
+      kind: 'commentary',
+      id: options.id || 'commentary',
+      status: options.status || '',
+      phase: options.phase || 'commentary',
+      text: content
+    });
+  }
+
+  function preferResponsesCommentaryTimeline(timeline) {
+    const normalizedList = Array.isArray(timeline) ? timeline : [];
+    const hasCommentary = normalizedList.some(entry => entry?.kind === 'commentary');
+    if (!hasCommentary) return normalizedList;
+    return normalizedList.filter(entry => entry?.kind !== 'reasoning_summary');
+  }
+
   function normalizeResponsesActivityTimelineEntry(entry) {
     if (!entry || typeof entry !== 'object') return null;
     const kind = (typeof entry.kind === 'string') ? entry.kind.trim().toLowerCase() : '';
+    if (kind === 'commentary') {
+      const text = normalizeResponsesCommentaryText((typeof entry.text === 'string') ? entry.text : '');
+      if (!text) return null;
+      const normalized = {
+        kind: 'commentary',
+        text
+      };
+      const id = (typeof entry.id === 'string' && entry.id.trim()) ? entry.id.trim() : '';
+      const status = (typeof entry.status === 'string' && entry.status.trim()) ? entry.status.trim() : '';
+      const phase = normalizeResponsesMessagePhase(entry.phase || 'commentary') || 'commentary';
+      if (id) normalized.id = id;
+      if (status) normalized.status = status;
+      if (phase) normalized.phase = phase;
+      return normalized;
+    }
     if (kind === 'reasoning_summary') {
       const text = normalizeResponsesReasoningText((typeof entry.text === 'string') ? entry.text : '');
       if (!text) return null;
@@ -861,6 +935,10 @@ export function createMessageSender(appContext) {
       return `unknown:${fallbackIndex}`;
     }
     const kind = (typeof entry.kind === 'string' && entry.kind) ? entry.kind : 'unknown';
+    if (kind === 'commentary') {
+      const id = (typeof entry.id === 'string' && entry.id) ? entry.id : `commentary_${fallbackIndex}`;
+      return `commentary:${id}`;
+    }
     if (kind === 'reasoning_summary') {
       const id = (typeof entry.id === 'string' && entry.id) ? entry.id : `reasoning_${fallbackIndex}`;
       return `reasoning:${id}`;
@@ -889,9 +967,13 @@ export function createMessageSender(appContext) {
       if (keyToIndex.has(key)) {
         const existingIndex = keyToIndex.get(key);
         const previous = merged[existingIndex] || {};
-        if (normalized.kind === 'reasoning_summary') {
+        if (normalized.kind === 'reasoning_summary' || normalized.kind === 'commentary') {
           const mergedText = (typeof previous.text === 'string' && previous.text && typeof normalized.text === 'string' && normalized.text)
-            ? mergeResponsesReasoningText(previous.text, normalized.text)
+            ? (
+              normalized.kind === 'reasoning_summary'
+                ? mergeResponsesReasoningText(previous.text, normalized.text)
+                : normalizeResponsesCommentaryText(mergeStreamingThoughts(previous.text, normalized.text))
+            )
             : ((typeof normalized.text === 'string' && normalized.text) ? normalized.text : (previous.text || ''));
           merged[existingIndex] = normalizeResponsesActivityTimelineEntry({
             ...previous,
@@ -916,13 +998,23 @@ export function createMessageSender(appContext) {
       }
     });
 
-    return merged;
+    return preferResponsesCommentaryTimeline(merged);
   }
 
   function upsertResponsesReasoningTimeline(existingTimeline, payload, text, options = {}) {
     const entry = createResponsesReasoningTimelineEntry(text, {
       id: payload?.item_id || payload?.id || options.id || 'reasoning_summary',
       status: options.status || payload?.status || ''
+    });
+    if (!entry) return Array.isArray(existingTimeline) ? existingTimeline : [];
+    return mergeResponsesActivityTimeline(existingTimeline, [entry]);
+  }
+
+  function upsertResponsesCommentaryTimeline(existingTimeline, payload, text, options = {}) {
+    const entry = createResponsesCommentaryTimelineEntry(text, {
+      id: payload?.item_id || payload?.id || options.id || 'commentary',
+      status: options.status || payload?.status || '',
+      phase: options.phase || payload?.phase || 'commentary'
     });
     if (!entry) return Array.isArray(existingTimeline) ? existingTimeline : [];
     return mergeResponsesActivityTimeline(existingTimeline, [entry]);
@@ -1048,6 +1140,21 @@ export function createMessageSender(appContext) {
       const itemType = String(item.type || '').toLowerCase();
 
       if (itemType === 'message') {
+        const itemPhase = normalizeResponsesMessagePhase(item.phase);
+        if (isResponsesCommentaryPhase(itemPhase)) {
+          const commentaryEntry = createResponsesCommentaryTimelineEntry(
+            extractResponsesMessageVisibleText(item, { excludeReasoning: true }),
+            {
+              id: item.id || item.item_id || `commentary_${index}`,
+              status: item.status || 'completed',
+              phase: itemPhase || 'commentary'
+            }
+          );
+          if (commentaryEntry) {
+            timeline.push(commentaryEntry);
+          }
+          continue;
+        }
         const contentParts = Array.isArray(item.content) ? item.content : [];
         let messageReasoningText = '';
         contentParts.forEach((part) => {
@@ -1087,12 +1194,13 @@ export function createMessageSender(appContext) {
       }
     }
 
-    return mergeResponsesActivityTimeline([], timeline);
+    return preferResponsesCommentaryTimeline(mergeResponsesActivityTimeline([], timeline));
   }
 
   function extractOpenAIResponsesOutput(payload) {
     const answerParts = [];
     let responseActivityTimeline = [];
+    let assistantPhase = '';
     const outputItems = Array.isArray(payload?.output) ? payload.output : [];
 
     const pushAnswer = (text) => {
@@ -1104,20 +1212,10 @@ export function createMessageSender(appContext) {
       const itemType = String(item.type || '').toLowerCase();
 
       if (itemType === 'message') {
-        const contentParts = Array.isArray(item.content) ? item.content : [];
-        for (const part of contentParts) {
-          if (!part || typeof part !== 'object') continue;
-          const partType = String(part.type || '').toLowerCase();
-          if (partType === 'refusal') continue;
-          if (typeof part.text === 'string') {
-            if (!partType.includes('reasoning')) {
-              pushAnswer(part.text);
-            }
-            continue;
-          }
-          if (typeof part.output_text === 'string') {
-            pushAnswer(part.output_text);
-          }
+        const itemPhase = normalizeResponsesMessagePhase(item.phase);
+        if (!isResponsesCommentaryPhase(itemPhase)) {
+          if (itemPhase) assistantPhase = itemPhase;
+          pushAnswer(extractResponsesMessageVisibleText(item, { excludeReasoning: true }));
         }
         continue;
       }
@@ -1131,7 +1229,8 @@ export function createMessageSender(appContext) {
       answer,
       responseActivityTimeline: responseActivityTimeline.length > 0 ? responseActivityTimeline : null,
       reasoningSummary: getResponsesReasoningSummaryFromTimeline(responseActivityTimeline),
-      responseToolCalls: getResponsesToolCallsFromTimeline(responseActivityTimeline)
+      responseToolCalls: getResponsesToolCallsFromTimeline(responseActivityTimeline),
+      assistantPhase: assistantPhase || null
     };
   }
 
@@ -2731,6 +2830,7 @@ export function createMessageSender(appContext) {
       thoughtSignatureSource: null,
       reasoning_content: null,
       tool_calls: null,
+      phase: null,
       response_activity_timeline: null,
       response_activity_duration_ms: null,
       apiUuid: null,
@@ -2791,6 +2891,7 @@ export function createMessageSender(appContext) {
       thoughtSignatureSource: null,
       reasoning_content: null,
       tool_calls: null,
+      phase: null,
       response_activity_timeline: null,
       response_activity_duration_ms: null,
       apiUuid: null,
@@ -3870,6 +3971,17 @@ export function createMessageSender(appContext) {
     return true;
   }
 
+  function applyResponsesAssistantPhaseToNode(node, phase) {
+    if (!node || typeof node !== 'object') return false;
+    const normalizedPhase = normalizeResponsesMessagePhase(phase);
+    if (normalizedPhase) {
+      node.phase = normalizedPhase;
+    } else {
+      delete node.phase;
+    }
+    return true;
+  }
+
   /**
    * 重新生成（原地替换）时清空旧的“推理签名/推理字段”。
    *
@@ -3900,6 +4012,7 @@ export function createMessageSender(appContext) {
       node.thoughtSignatureSource = null;
       node.reasoning_content = null;
       node.tool_calls = null;
+      delete node.phase;
       delete node.response_activity_timeline;
       delete node.response_activity_duration_ms;
       delete node.response_reasoning_summary;
@@ -5703,6 +5816,8 @@ export function createMessageSender(appContext) {
 	    let latestOpenAIToolCalls = [];
       // Responses API：按事件顺序保存 reasoning summary / 工具调用的活动时间线。
       let latestResponsesActivityTimeline = [];
+      let latestResponsesAssistantPhase = null;
+      const latestResponsesOutputItemPhaseById = new Map();
       // OpenAI 兼容：记录末尾 usage 分片（通常出现在 finish_reason=stop 的最后一个 chunk）。
       let latestOpenAIUsage = null;
 		    // 当前流对应的 AI 消息 ID：
@@ -5725,6 +5840,7 @@ export function createMessageSender(appContext) {
             attemptState.aiMessageNode = boundNode;
             if (Array.isArray(payload.responsesActivityTimeline)) {
               applyResponsesActivityTimelineToNode(boundNode, payload.responsesActivityTimeline);
+              applyResponsesAssistantPhaseToNode(boundNode, latestResponsesAssistantPhase);
             }
           }
 	        const regenContainer = getUiContainer();
@@ -5792,6 +5908,7 @@ export function createMessageSender(appContext) {
           attemptState.aiMessageNode = boundNode;
           if (isOpenAIResponsesStream) {
             applyResponsesActivityTimelineToNode(boundNode, latestResponsesActivityTimeline);
+            applyResponsesAssistantPhaseToNode(boundNode, latestResponsesAssistantPhase);
           }
         }
         const regenContainer = getUiContainer();
@@ -5813,6 +5930,7 @@ export function createMessageSender(appContext) {
           }
           if (isOpenAIResponsesStream && boundNode) {
             applyResponsesActivityTimelineToNode(boundNode, latestResponsesActivityTimeline);
+            applyResponsesAssistantPhaseToNode(boundNode, latestResponsesAssistantPhase);
             messageProcessor.syncAssistantMessageMetadata?.(currentAiMessageId, boundNode);
           }
           applyApiMetaToMessage(currentAiMessageId, usedApiConfig);
@@ -5842,6 +5960,7 @@ export function createMessageSender(appContext) {
             const promotedNode = resolveAttemptAiNode(attemptState, currentAiMessageId);
             if (promotedNode) {
               applyResponsesActivityTimelineToNode(promotedNode, latestResponsesActivityTimeline);
+              applyResponsesAssistantPhaseToNode(promotedNode, latestResponsesAssistantPhase);
               messageProcessor.syncAssistantMessageMetadata?.(currentAiMessageId, promotedNode);
             }
           }
@@ -5871,6 +5990,7 @@ export function createMessageSender(appContext) {
             bindAttemptAiMessage(attemptState, currentAiMessageId, createdNode);
             if (isOpenAIResponsesStream) {
               applyResponsesActivityTimelineToNode(createdNode, latestResponsesActivityTimeline);
+              applyResponsesAssistantPhaseToNode(createdNode, latestResponsesAssistantPhase);
             }
             applyApiMetaToMessage(currentAiMessageId, usedApiConfig);
             updateThreadLastMessage(threadContext, currentAiMessageId);
@@ -5903,6 +6023,7 @@ export function createMessageSender(appContext) {
               const createdNode = resolveAttemptAiNode(attemptState, currentAiMessageId);
               if (createdNode) {
                 applyResponsesActivityTimelineToNode(createdNode, latestResponsesActivityTimeline);
+                applyResponsesAssistantPhaseToNode(createdNode, latestResponsesAssistantPhase);
                 messageProcessor.syncAssistantMessageMetadata?.(currentAiMessageId, createdNode, { fallbackElement: newAiMessageDiv });
               }
             }
@@ -6010,6 +6131,7 @@ export function createMessageSender(appContext) {
 	          if (!isGeminiApi) {
               if (isOpenAIResponsesStream) {
                 applyResponsesActivityTimelineToNode(node, latestResponsesActivityTimeline);
+                applyResponsesAssistantPhaseToNode(node, latestResponsesAssistantPhase);
               } else {
 	              // OpenAI 兼容：推理签名与推理原文、tool_calls 原样落库，供后续历史消息回传
 	              if (latestOpenAIThoughtSignature) {
@@ -6341,8 +6463,33 @@ export function createMessageSender(appContext) {
         let currentEventReasoningDelta = '';
         let hasToolCallsDelta = false;
 
-        if (eventType === 'response.output_text.delta') {
-          currentEventAnswerDelta = (typeof data?.delta === 'string') ? data.delta : '';
+        if (eventType === 'response.output_text.delta' || eventType === 'response.output_text.done') {
+          const outputItemId = (typeof data?.item_id === 'string' && data.item_id)
+            || (typeof data?.output_item_id === 'string' && data.output_item_id)
+            || '';
+          const outputItemPhase = normalizeResponsesMessagePhase(
+            outputItemId ? latestResponsesOutputItemPhaseById.get(outputItemId) : ''
+          );
+          const outputTextDelta = (typeof data?.delta === 'string')
+            ? data.delta
+            : ((typeof data?.text === 'string') ? data.text : '');
+          if (isResponsesCommentaryPhase(outputItemPhase)) {
+            currentEventReasoningDelta = outputTextDelta;
+            if (typeof currentEventReasoningDelta === 'string' && currentEventReasoningDelta) {
+              latestResponsesActivityTimeline = upsertResponsesCommentaryTimeline(
+                latestResponsesActivityTimeline,
+                data,
+                currentEventReasoningDelta,
+                {
+                  id: outputItemId || data?.item_id || data?.id || 'commentary',
+                  status: eventType.endsWith('.done') ? 'completed' : (data?.status || 'streaming'),
+                  phase: outputItemPhase || 'commentary'
+                }
+              );
+            }
+          } else {
+            currentEventAnswerDelta = outputTextDelta;
+          }
         } else if (
           eventType === 'response.reasoning_text.delta'
           || eventType === 'response.reasoning_summary_text.delta'
@@ -6365,9 +6512,19 @@ export function createMessageSender(appContext) {
         } else if (eventType === 'response.output_item.added' || eventType === 'response.output_item.done') {
           const outputItem = (data?.item && typeof data.item === 'object') ? data.item : null;
           if (outputItem) {
+            const outputItemPhase = normalizeResponsesMessagePhase(outputItem.phase);
+            const outputItemId = (typeof outputItem.id === 'string' && outputItem.id)
+              || (typeof outputItem.item_id === 'string' && outputItem.item_id)
+              || '';
+            if (outputItemId && outputItem.type === 'message' && outputItemPhase) {
+              latestResponsesOutputItemPhaseById.set(outputItemId, outputItemPhase);
+            }
             const extractedItem = extractOpenAIResponsesOutput({ output: [outputItem] });
             if (!aiResponse && typeof extractedItem.answer === 'string' && extractedItem.answer) {
               currentEventAnswerDelta = extractedItem.answer;
+            }
+            if (typeof extractedItem.assistantPhase === 'string' && extractedItem.assistantPhase) {
+              latestResponsesAssistantPhase = extractedItem.assistantPhase;
             }
             if (Array.isArray(extractedItem.responseActivityTimeline) && extractedItem.responseActivityTimeline.length > 0) {
               latestResponsesActivityTimeline = mergeResponsesActivityTimeline(
@@ -6404,6 +6561,9 @@ export function createMessageSender(appContext) {
           if (!aiResponse && typeof extracted.answer === 'string' && extracted.answer) {
             currentEventAnswerDelta = extracted.answer;
           }
+          if (typeof extracted.assistantPhase === 'string' && extracted.assistantPhase) {
+            latestResponsesAssistantPhase = extracted.assistantPhase;
+          }
           if (Array.isArray(extracted.responseActivityTimeline) && extracted.responseActivityTimeline.length > 0) {
             latestResponsesActivityTimeline = mergeResponsesActivityTimeline(
               latestResponsesActivityTimeline,
@@ -6420,6 +6580,9 @@ export function createMessageSender(appContext) {
           const extracted = extractOpenAIResponsesOutput(data);
           if (!aiResponse && typeof extracted.answer === 'string' && extracted.answer) {
             currentEventAnswerDelta = extracted.answer;
+          }
+          if (typeof extracted.assistantPhase === 'string' && extracted.assistantPhase) {
+            latestResponsesAssistantPhase = extracted.assistantPhase;
           }
           if (Array.isArray(extracted.responseActivityTimeline) && extracted.responseActivityTimeline.length > 0) {
             latestResponsesActivityTimeline = mergeResponsesActivityTimeline(
@@ -6565,6 +6728,7 @@ export function createMessageSender(appContext) {
     let toolCalls = null;
     // Responses API：按顺序保存 reasoning summary / 工具调用活动。
     let responseActivityTimeline = null;
+    let responsesAssistantPhase = null;
     let json = null;
     try {
       json = await response.json();
@@ -6682,6 +6846,9 @@ export function createMessageSender(appContext) {
       if (Array.isArray(extracted.responseActivityTimeline) && extracted.responseActivityTimeline.length > 0) {
         responseActivityTimeline = extracted.responseActivityTimeline;
       }
+      if (typeof extracted.assistantPhase === 'string' && extracted.assistantPhase) {
+        responsesAssistantPhase = extracted.assistantPhase;
+      }
     } else {
       // OpenAI Chat Completions 兼容 非流式
       const choice = Array.isArray(json?.choices) ? json.choices[0] : null;
@@ -6745,6 +6912,7 @@ export function createMessageSender(appContext) {
           try {
             if (isResponsesApi) {
               applyResponsesActivityTimelineToNode(existingNode, responseActivityTimeline);
+              applyResponsesAssistantPhaseToNode(existingNode, responsesAssistantPhase);
             }
             messageProcessor.updateAIMessage(existingMessageId, answer || '', displayThoughts, {
               fallbackNode: existingNode,
@@ -6768,6 +6936,7 @@ export function createMessageSender(appContext) {
             if (!isGeminiApi && isResponsesApi) {
               try {
                 applyResponsesActivityTimelineToNode(existingNode, responseActivityTimeline);
+                applyResponsesAssistantPhaseToNode(existingNode, responsesAssistantPhase);
                 messageProcessor.syncAssistantMessageMetadata?.(existingMessageId, existingNode, { fallbackElement: existingEl });
               } catch (e) {
                 console.warn('记录 Responses 元信息失败（非流式，原地替换）:', e);
@@ -6818,6 +6987,7 @@ export function createMessageSender(appContext) {
         }
         if (!isGeminiApi && isResponsesApi && node) {
           applyResponsesActivityTimelineToNode(node, responseActivityTimeline);
+          applyResponsesAssistantPhaseToNode(node, responsesAssistantPhase);
           messageProcessor.syncAssistantMessageMetadata?.(promotedId, node, { fallbackElement: loadingMessage });
         } else if (!isGeminiApi && node) {
           if (typeof reasoningContentRaw === 'string' && reasoningContentRaw) {
@@ -6869,6 +7039,7 @@ export function createMessageSender(appContext) {
         if (!isGeminiApi && isResponsesApi) {
           try {
             applyResponsesActivityTimelineToNode(createdNode, responseActivityTimeline);
+            applyResponsesAssistantPhaseToNode(createdNode, responsesAssistantPhase);
           } catch (e) {
             console.warn('记录 Responses 元信息失败（非流式，后台线程）:', e);
           }
@@ -6935,6 +7106,7 @@ export function createMessageSender(appContext) {
 	          const node = resolveAttemptAiNode(attemptState, messageId);
 	          if (node) {
                 applyResponsesActivityTimelineToNode(node, responseActivityTimeline);
+                applyResponsesAssistantPhaseToNode(node, responsesAssistantPhase);
                 messageProcessor.syncAssistantMessageMetadata?.(messageId, node, { fallbackElement: newAiMessageDiv });
 	          }
 	        } catch (e) {

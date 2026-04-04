@@ -1238,9 +1238,13 @@ export function createMessageProcessor(appContext) {
     const source = Array.isArray(node.response_activity_timeline) && node.response_activity_timeline.length > 0
       ? node.response_activity_timeline
       : buildResponseActivityTimelineFromLegacyMetadata(node);
-    return Array.isArray(source)
+    const timeline = Array.isArray(source)
       ? source.filter(entry => entry && typeof entry === 'object' && typeof entry.kind === 'string')
       : [];
+    const hasCommentary = timeline.some(entry => String(entry?.kind || '').toLowerCase() === 'commentary');
+    return hasCommentary
+      ? timeline.filter(entry => String(entry?.kind || '').toLowerCase() !== 'reasoning_summary')
+      : timeline;
   }
 
   function formatResponseActivityElapsedDuration(durationMs) {
@@ -1282,7 +1286,10 @@ export function createMessageProcessor(appContext) {
   }
 
   function buildResponseActivityPanelSummary(node, timeline) {
-    const reasoningCount = timeline.filter(entry => entry?.kind === 'reasoning_summary').length;
+    const narrativeCount = timeline.filter((entry) => {
+      const kind = String(entry?.kind || '').toLowerCase();
+      return kind === 'reasoning_summary' || kind === 'commentary';
+    }).length;
     const toolCount = timeline.filter(entry => entry?.kind === 'tool_call').length;
     const isInProgress = timeline.some(entry => isResponseActivityEntryInProgress(entry));
     const durationMs = getResponseActivityDurationMs(node, timeline, isInProgress);
@@ -1294,13 +1301,13 @@ export function createMessageProcessor(appContext) {
     if (toolCount > 0) {
       metaParts.push(`${toolCount} 个工具调用`);
     }
-    if (reasoningCount > 1 || (reasoningCount > 0 && toolCount === 0)) {
-      metaParts.push(`${reasoningCount} 段摘要`);
+    if (narrativeCount > 1 || (narrativeCount > 0 && toolCount === 0)) {
+      metaParts.push(`${narrativeCount} 段过程记录`);
     }
     return {
       isInProgress,
       toolCount,
-      reasoningCount,
+      reasoningCount: narrativeCount,
       title: isInProgress ? '思考中' : '思考记录',
       metaText: metaParts.join(' · ')
     };
@@ -1488,13 +1495,17 @@ export function createMessageProcessor(appContext) {
     const expandedToolKeys = readExpandedResponseActivityToolKeys(timelineRoot);
 
     timeline.forEach((entry, index) => {
-      if (entry.kind === 'reasoning_summary') {
+      if (entry.kind === 'reasoning_summary' || entry.kind === 'commentary') {
         const item = document.createElement('div');
         item.className = 'response-activity-entry response-activity-entry--reasoning';
 
         const content = document.createElement('div');
         content.className = 'response-activity-content response-activity-content--reasoning';
-        content.innerHTML = processMathAndMarkdownFn(normalizeResponsesReasoningText(typeof entry.text === 'string' ? entry.text : ''));
+        const rawText = (typeof entry.text === 'string') ? entry.text : '';
+        const normalizedText = entry.kind === 'reasoning_summary'
+          ? normalizeResponsesReasoningText(rawText)
+          : rawText.trim();
+        content.innerHTML = processMathAndMarkdownFn(normalizedText);
         item.appendChild(content);
         panelBodyInner.appendChild(item);
         return;

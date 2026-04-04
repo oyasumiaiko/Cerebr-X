@@ -4547,51 +4547,101 @@ export function createApiManager(appContext) {
     return normalizeGeminiApiSettings(settings) || null;
   }
 
+  function normalizeResponsesMessagePhase(value) {
+    return (typeof value === 'string') ? value.trim().toLowerCase() : '';
+  }
+
+  async function buildResponsesInputMessageItem(msg, options = {}) {
+    if (!msg || typeof msg !== 'object') return null;
+    const role = (typeof options.role === 'string' && options.role.trim())
+      ? options.role.trim()
+      : ((typeof msg.role === 'string') ? msg.role.trim() : '');
+    if (!role) return null;
+
+    const item = {
+      type: 'message',
+      role
+    };
+    if (typeof msg.name === 'string' && msg.name.trim()) {
+      item.name = msg.name.trim();
+    }
+
+    const phase = normalizeResponsesMessagePhase(
+      Object.prototype.hasOwnProperty.call(options, 'phase') ? options.phase : msg.phase
+    );
+    if (phase) {
+      item.phase = phase;
+    }
+
+    const contentSource = Object.prototype.hasOwnProperty.call(options, 'content')
+      ? options.content
+      : msg.content;
+
+    if (Array.isArray(contentSource)) {
+      const contentParts = [];
+      for (const part of contentSource) {
+        if (!part || typeof part !== 'object') continue;
+        if (part.type === 'text') {
+          const text = (typeof part.text === 'string') ? part.text : '';
+          if (!text) continue;
+          contentParts.push({ type: 'input_text', text });
+          continue;
+        }
+        if (part.type === 'image_url' && part.image_url) {
+          const rawUrl = part.image_url.url || part.image_url.path || '';
+          const resolvedUrl = await normalizeImageUrlForOpenAI(rawUrl);
+          if (!resolvedUrl) continue;
+          contentParts.push({
+            type: 'input_image',
+            image_url: resolvedUrl
+          });
+        }
+      }
+      if (contentParts.length === 0) {
+        contentParts.push({ type: 'input_text', text: '[图片无法读取]' });
+      }
+      item.content = contentParts;
+      return item;
+    }
+
+    if (typeof contentSource === 'string') {
+      item.content = contentSource;
+      return item;
+    }
+
+    item.content = '';
+    return item;
+  }
+
   async function convertOpenAIMessagesToResponsesInput(messages) {
     const source = Array.isArray(messages) ? messages : [];
     const result = [];
 
     for (const msg of source) {
       if (!msg || typeof msg !== 'object') continue;
-      const role = (typeof msg.role === 'string') ? msg.role : '';
+      const role = (typeof msg.role === 'string') ? msg.role.trim() : '';
       if (!role) continue;
 
-      const item = { role };
-      if (typeof msg.name === 'string' && msg.name.trim()) {
-        item.name = msg.name.trim();
-      }
-
-      if (Array.isArray(msg.content)) {
-        const contentParts = [];
-        for (const part of msg.content) {
-          if (!part || typeof part !== 'object') continue;
-          if (part.type === 'text') {
-            const text = (typeof part.text === 'string') ? part.text : '';
-            if (!text) continue;
-            contentParts.push({ type: 'input_text', text });
-            continue;
-          }
-          if (part.type === 'image_url' && part.image_url) {
-            const rawUrl = part.image_url.url || part.image_url.path || '';
-            const resolvedUrl = await normalizeImageUrlForOpenAI(rawUrl);
-            if (!resolvedUrl) continue;
-            contentParts.push({
-              type: 'input_image',
-              image_url: resolvedUrl
-            });
+      if (role === 'assistant' && Array.isArray(msg.response_activity_timeline)) {
+        for (const entry of msg.response_activity_timeline) {
+          if (!entry || typeof entry !== 'object') continue;
+          if (String(entry.kind || '').trim().toLowerCase() !== 'commentary') continue;
+          const commentaryText = (typeof entry.text === 'string') ? entry.text.trim() : '';
+          if (!commentaryText) continue;
+          const commentaryItem = await buildResponsesInputMessageItem(msg, {
+            content: commentaryText,
+            phase: normalizeResponsesMessagePhase(entry.phase || 'commentary') || 'commentary'
+          });
+          if (commentaryItem) {
+            result.push(commentaryItem);
           }
         }
-        if (contentParts.length === 0) {
-          contentParts.push({ type: 'input_text', text: '[图片无法读取]' });
-        }
-        item.content = contentParts;
-      } else if (typeof msg.content === 'string') {
-        item.content = msg.content;
-      } else {
-        item.content = '';
       }
 
-      result.push(item);
+      const item = await buildResponsesInputMessageItem(msg);
+      if (item) {
+        result.push(item);
+      }
     }
 
     return result;
@@ -4923,7 +4973,7 @@ export function createApiManager(appContext) {
 
       const useResponsesApi = isOpenAIResponsesConnectionConfig(config);
       if (useResponsesApi) {
-        const responsesInput = await convertOpenAIMessagesToResponsesInput(sanitizedMessages);
+        const responsesInput = await convertOpenAIMessagesToResponsesInput(normalizedMessages);
         const responsesOverrides = buildResponsesApiRequestOverrides(config) || {};
         requestBody = {
           model: config.modelName,
