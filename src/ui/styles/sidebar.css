@@ -8726,6 +8726,26 @@ body.chat-empty .empty-state-content {
     overflow-x: auto;
 }
 
+.message .response-activity-tool-block-title {
+    font-size: inherit;
+    line-height: 1.35;
+    color: color-mix(in srgb, var(--cerebr-text-color) 54%, transparent);
+}
+
+.message .response-activity-tool-code,
+.message .response-activity-tool-output {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--cerebr-bg-color) 90%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cerebr-border-color) 28%, transparent);
+    font-size: inherit;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+}
+
 .message .response-activity-tool-sources {
     display: block;
 }

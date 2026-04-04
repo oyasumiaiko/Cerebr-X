@@ -5241,6 +5241,90 @@ export function createMessageSender(appContext) {
   }
 
   /**
+   * 将本地 function_call_output 合并回 response_activity_timeline。
+   *
+   * 目的：
+   * - UI 上我们希望“工具调用条目”同时展示调用参数与执行结果；
+   * - 但 Responses 服务端 output item 只会返回 function_call，不会带上本地执行后的 output；
+   * - 因此需要在客户端把这段 output 反向写回同一个 tool timeline entry。
+   *
+   * @param {Array<Object>|null|undefined} timeline
+   * @param {Array<Object>|null|undefined} toolCallRecords
+   * @param {Array<Object>|null|undefined} functionCallOutputs
+   * @returns {Array<Object>}
+   */
+  function mergeResponsesFunctionOutputsIntoTimeline(timeline, toolCallRecords, functionCallOutputs) {
+    let nextTimeline = cloneResponsesActivityTimeline(Array.isArray(timeline) ? timeline : []);
+
+    (Array.isArray(toolCallRecords) ? toolCallRecords : []).forEach((record) => {
+      if (!record || typeof record !== 'object') return;
+      nextTimeline = upsertResponsesToolTimeline(nextTimeline, {
+        ...record,
+        status: record.status || 'completed'
+      }, {
+        status: record.status || 'completed'
+      });
+    });
+
+    (Array.isArray(functionCallOutputs) ? functionCallOutputs : []).forEach((outputItem) => {
+      if (!outputItem || typeof outputItem !== 'object') return;
+      const callId = (typeof outputItem.call_id === 'string' && outputItem.call_id.trim())
+        ? outputItem.call_id.trim()
+        : '';
+      if (!callId) return;
+
+      let merged = false;
+      nextTimeline = nextTimeline.map((entry) => {
+        if (!entry || entry.kind !== 'tool_call') return entry;
+        if (String(entry.type || '').trim().toLowerCase() !== 'function_call') return entry;
+        if (String(entry.call_id || '').trim() !== callId) return entry;
+        merged = true;
+        return normalizeResponsesActivityTimelineEntry({
+          ...entry,
+          status: 'completed',
+          output: (typeof outputItem.output === 'string') ? outputItem.output : ''
+        }) || entry;
+      });
+
+      if (merged) return;
+
+      nextTimeline = upsertResponsesToolTimeline(nextTimeline, {
+        type: 'function_call',
+        call_id: callId,
+        status: 'completed',
+        output: (typeof outputItem.output === 'string') ? outputItem.output : ''
+      }, {
+        status: 'completed'
+      });
+    });
+
+    return mergeResponsesActivityTimeline([], nextTimeline);
+  }
+
+  function applyResponsesActivityTimelineToAttempt(attemptState, timeline) {
+    if (!attemptState) return false;
+    const normalizedTimeline = mergeResponsesActivityTimeline([], timeline);
+    attemptState.responsesToolLoopAccumulatedTimeline = normalizedTimeline.length > 0
+      ? cloneResponsesActivityTimeline(normalizedTimeline)
+      : null;
+
+    const node = attemptState.aiMessageNode
+      || resolveAttemptAiNode(attemptState, attemptState.aiMessageId || '');
+    if (!node) return false;
+
+    attemptState.aiMessageNode = node;
+    applyResponsesActivityTimelineToNode(node, normalizedTimeline);
+
+    const wrapper = resolveMessageElement(attemptState.aiMessageId || '');
+    messageProcessor.syncAssistantMessageMetadata?.(
+      attemptState.aiMessageId || '',
+      node,
+      wrapper ? { fallbackElement: wrapper } : undefined
+    );
+    return true;
+  }
+
+  /**
    * 基于上一轮 requestBody 构造下一轮 Responses follow-up 请求。
    *
    * 这里对齐 Codex 的 HTTP 路线，而不是走“output-only continuation”：
@@ -5441,6 +5525,16 @@ export function createMessageSender(appContext) {
           throw new DOMException('The operation was aborted.', 'AbortError');
         }
         functionCallOutputs.push(await executeResponsesCustomFunctionToolCall(toolCall));
+      }
+
+      if (attemptState) {
+        const mergedTimeline = mergeResponsesFunctionOutputsIntoTimeline(
+          attemptState.responsesToolLoopAccumulatedTimeline || lastHandleResult?.responseActivityTimeline,
+          pendingFunctionCalls,
+          functionCallOutputs
+        );
+        applyResponsesActivityTimelineToAttempt(attemptState, mergedTimeline);
+        await persistAttemptConversationSnapshot(attemptState, { force: true });
       }
 
       currentRequestBody = buildResponsesFunctionToolFollowUpRequest(

@@ -1102,10 +1102,111 @@ export function createMessageProcessor(appContext) {
     }
   }
 
+  const RESPONSE_ACTIVITY_JS_RUNTIME_TOOL_NAME = 'js_runtime_execute';
+
+  function parseResponseToolCallArgumentsObject(rawArguments) {
+    const text = (typeof rawArguments === 'string') ? rawArguments.trim() : '';
+    if (!text) return null;
+    try {
+      const parsed = JSON.parse(text);
+      return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function isResponseActivityJsRuntimeEntry(record) {
+    return String(record?.type || '').toLowerCase() === 'function_call'
+      && String(record?.name || '').trim().toLowerCase() === RESPONSE_ACTIVITY_JS_RUNTIME_TOOL_NAME;
+  }
+
+  function getResponseActivityJsRuntimeMeta(record) {
+    const parsedArgs = parseResponseToolCallArgumentsObject(record?.arguments);
+    const code = (typeof parsedArgs?.code === 'string') ? parsedArgs.code : '';
+    const frameIds = Array.isArray(parsedArgs?.frame_ids)
+      ? parsedArgs.frame_ids
+        .map(value => Number(value))
+        .filter(value => Number.isFinite(value))
+        .map(value => Math.trunc(value))
+      : [];
+    return {
+      code,
+      frameIds,
+      isTopLevel: frameIds.length <= 0
+    };
+  }
+
+  function formatResponseActivityJsCodePreview(code) {
+    const text = (typeof code === 'string') ? code : '';
+    return text
+      .replace(/\r\n?/g, '\n')
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+      .join(' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+  function formatResponseToolCallOutput(rawOutput) {
+    const text = (typeof rawOutput === 'string') ? rawOutput.trim() : '';
+    if (!text) return '';
+    try {
+      return JSON.stringify(JSON.parse(text), null, 2);
+    } catch (_) {
+      return text;
+    }
+  }
+
+  function buildResponseActivityJsRuntimeSummaryParts(record) {
+    const meta = getResponseActivityJsRuntimeMeta(record);
+    const codePreview = formatResponseActivityJsCodePreview(meta.code) || 'JavaScript';
+    const action = meta.isTopLevel
+      ? '已运行'
+      : `已在${meta.frameIds.length}个iframe运行`;
+    return {
+      action,
+      value: codePreview,
+      valueUrl: '',
+      locationAction: '',
+      locationValue: '',
+      locationUrl: ''
+    };
+  }
+
+  function renderResponseActivityJsRuntimeBody(toolBodyInner, entry) {
+    if (!toolBodyInner || !entry) return;
+    const meta = getResponseActivityJsRuntimeMeta(entry);
+    const formattedOutput = formatResponseToolCallOutput(entry.output);
+
+    const codeTitle = document.createElement('div');
+    codeTitle.className = 'response-activity-tool-block-title';
+    codeTitle.textContent = '代码';
+    toolBodyInner.appendChild(codeTitle);
+
+    const codeBlock = document.createElement('pre');
+    codeBlock.className = 'response-activity-tool-code';
+    codeBlock.textContent = meta.code || '';
+    toolBodyInner.appendChild(codeBlock);
+
+    if (formattedOutput) {
+      const outputTitle = document.createElement('div');
+      outputTitle.className = 'response-activity-tool-block-title';
+      outputTitle.textContent = '返回值';
+      toolBodyInner.appendChild(outputTitle);
+
+      const outputBlock = document.createElement('pre');
+      outputBlock.className = 'response-activity-tool-output';
+      outputBlock.textContent = formattedOutput;
+      toolBodyInner.appendChild(outputBlock);
+    }
+  }
+
   function getResponseToolCallTypeLabel(record) {
     const type = String(record?.type || '').toLowerCase();
     if (type === 'web_search_call') return '搜索';
     if (type === 'code_interpreter_call') return '代码解释器';
+    if (isResponseActivityJsRuntimeEntry(record)) return 'JS';
     if (type === 'function_call') return '函数';
     return type || 'tool';
   }
@@ -1145,6 +1246,10 @@ export function createMessageProcessor(appContext) {
       }
       const subject = query || title || pattern || url;
       return subject ? `${actionLabel} ${subject}` : actionLabel;
+    }
+    if (isResponseActivityJsRuntimeEntry(record)) {
+      const parts = buildResponseActivityJsRuntimeSummaryParts(record);
+      return `${parts.action} ${parts.value}`.trim();
     }
     if (type === 'function_call') {
       const name = (typeof record.name === 'string' && record.name.trim()) ? record.name.trim() : '匿名函数';
@@ -1194,6 +1299,9 @@ export function createMessageProcessor(appContext) {
         value: title || url || query || pattern || '',
         valueUrl: url
       };
+    }
+    if (isResponseActivityJsRuntimeEntry(record)) {
+      return buildResponseActivityJsRuntimeSummaryParts(record);
     }
     if (type === 'function_call') {
       const name = (typeof record.name === 'string' && record.name.trim()) ? record.name.trim() : '匿名函数';
@@ -1406,6 +1514,10 @@ export function createMessageProcessor(appContext) {
 
   function hasResponseActivityToolDetails(entry) {
     if (!entry || typeof entry !== 'object') return false;
+    if (isResponseActivityJsRuntimeEntry(entry)) {
+      const meta = getResponseActivityJsRuntimeMeta(entry);
+      return !!((typeof meta.code === 'string' && meta.code.trim()) || (typeof entry.output === 'string' && entry.output.trim()));
+    }
     if (String(entry?.action_type || '').toLowerCase() === 'find_in_page') {
       return false;
     }
@@ -1638,50 +1750,54 @@ export function createMessageProcessor(appContext) {
         const toolBodyInner = document.createElement('div');
         toolBodyInner.className = 'response-activity-tool-body-inner';
 
-        getResponseActivityToolSecondaryLines(entry).forEach((line) => {
-          const secondary = document.createElement('div');
-          secondary.className = 'response-activity-tool-secondary';
-          secondary.textContent = line;
-          toolBodyInner.appendChild(secondary);
-        });
-
-        if (typeof entry.arguments === 'string' && entry.arguments.trim()) {
-          const pre = document.createElement('pre');
-          pre.className = 'response-activity-tool-arguments';
-          pre.textContent = formatResponseToolCallArguments(entry.arguments);
-          toolBodyInner.appendChild(pre);
-        }
-
-        if (Array.isArray(entry.sources) && entry.sources.length > 0) {
-          const sources = document.createElement('details');
-          sources.className = 'response-activity-tool-sources';
-
-          const sourceSummary = document.createElement('summary');
-          sourceSummary.className = 'response-activity-tool-source-title';
-          sourceSummary.textContent = `来源 ${entry.sources.length}`;
-          sources.appendChild(sourceSummary);
-
-          const sourceList = document.createElement('div');
-          sourceList.className = 'response-activity-tool-source-list';
-          entry.sources.forEach((source) => {
-            const label = source.title || source.domain || source.url || '未命名来源';
-            if (source.url) {
-              const link = document.createElement('a');
-              link.className = 'response-activity-tool-source-link';
-              link.target = '_blank';
-              link.rel = 'noopener noreferrer';
-              link.href = source.url;
-              link.textContent = label;
-              sourceList.appendChild(link);
-            } else {
-              const text = document.createElement('span');
-              text.className = 'response-activity-tool-source-link';
-              text.textContent = label;
-              sourceList.appendChild(text);
-            }
+        if (isResponseActivityJsRuntimeEntry(entry)) {
+          renderResponseActivityJsRuntimeBody(toolBodyInner, entry);
+        } else {
+          getResponseActivityToolSecondaryLines(entry).forEach((line) => {
+            const secondary = document.createElement('div');
+            secondary.className = 'response-activity-tool-secondary';
+            secondary.textContent = line;
+            toolBodyInner.appendChild(secondary);
           });
-          sources.appendChild(sourceList);
-          toolBodyInner.appendChild(sources);
+
+          if (typeof entry.arguments === 'string' && entry.arguments.trim()) {
+            const pre = document.createElement('pre');
+            pre.className = 'response-activity-tool-arguments';
+            pre.textContent = formatResponseToolCallArguments(entry.arguments);
+            toolBodyInner.appendChild(pre);
+          }
+
+          if (Array.isArray(entry.sources) && entry.sources.length > 0) {
+            const sources = document.createElement('details');
+            sources.className = 'response-activity-tool-sources';
+
+            const sourceSummary = document.createElement('summary');
+            sourceSummary.className = 'response-activity-tool-source-title';
+            sourceSummary.textContent = `来源 ${entry.sources.length}`;
+            sources.appendChild(sourceSummary);
+
+            const sourceList = document.createElement('div');
+            sourceList.className = 'response-activity-tool-source-list';
+            entry.sources.forEach((source) => {
+              const label = source.title || source.domain || source.url || '未命名来源';
+              if (source.url) {
+                const link = document.createElement('a');
+                link.className = 'response-activity-tool-source-link';
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.href = source.url;
+                link.textContent = label;
+                sourceList.appendChild(link);
+              } else {
+                const text = document.createElement('span');
+                text.className = 'response-activity-tool-source-link';
+                text.textContent = label;
+                sourceList.appendChild(text);
+              }
+            });
+            sources.appendChild(sourceList);
+            toolBodyInner.appendChild(sources);
+          }
         }
 
         toolBody.appendChild(toolBodyInner);
