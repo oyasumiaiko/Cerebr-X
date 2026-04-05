@@ -24,6 +24,10 @@ import {
 } from './conversation_pending_steer.js';
 import { serializeSelectionTextWithMath } from '../utils/math_selection_text.js';
 import { normalizeApiUsageMeta } from '../utils/api_footer_template.js';
+import {
+  normalizeResponsesPromptCacheKey,
+  buildDefaultResponsesPromptCacheKey
+} from '../utils/responses_prompt_cache.js';
 
 const RESPONSES_JS_RUNTIME_TOOL_NAME = 'js_runtime_execute';
 
@@ -3564,7 +3568,7 @@ export function createMessageSender(appContext) {
     return false;
   }
 
-  function resolveAttemptAiNode(attemptState, messageId) {
+  function resolveAttemptMessageNode(attemptState, messageId) {
     const normalizedId = normalizeConversationId(messageId);
     if (!normalizedId) return null;
 
@@ -3575,6 +3579,10 @@ export function createMessageSender(appContext) {
       ? attemptState.historyMessagesRef
       : [];
     return fallbackList.find(m => m.id === normalizedId) || null;
+  }
+
+  function resolveAttemptAiNode(attemptState, messageId) {
+    return resolveAttemptMessageNode(attemptState, messageId);
   }
 
   function isConversationIdCurrentlyActive(conversationId) {
@@ -3987,6 +3995,7 @@ export function createMessageSender(appContext) {
         } else {
           node.content = newText;
         }
+        node.outboundContent = cloneDataSafely(node.content);
         context.chatHistory.conversationRevision = normalizeConversationHistoryRevision(context.chatHistory.conversationRevision) + 1;
         markConversationQueuedJobsStale(effectiveQueueKey, context.chatHistory.conversationRevision);
         await saveConversationMutationContext(context);
@@ -4139,6 +4148,12 @@ export function createMessageSender(appContext) {
         attemptState.historyConversationRevision
       );
     }
+    if (!normalizeResponsesPromptCacheKey(attemptState.historyPromptCacheKey)) {
+      attemptState.historyPromptCacheKey = normalizeResponsesPromptCacheKey(
+        chatHistoryManager?.getConversationPromptCacheKey?.()
+          || chatHistoryManager?.chatHistory?.promptCacheKey
+      );
+    }
   }
 
   function isAttemptUsingDetachedMainConversationHistory(attemptState) {
@@ -4189,7 +4204,8 @@ export function createMessageSender(appContext) {
         conversationId: boundId || undefined,
         chatHistoryOverride: {
           messages: historyMessages,
-          conversationRevision: normalizeConversationHistoryRevision(attemptState.historyConversationRevision)
+          conversationRevision: normalizeConversationHistoryRevision(attemptState.historyConversationRevision),
+          promptCacheKey: normalizeResponsesPromptCacheKey(attemptState.historyPromptCacheKey)
         },
         // 若当前界面已切到其它会话，只做后台落库，不反向抢占 UI 当前会话。
         updateActiveState: shouldActivate,
@@ -4203,6 +4219,9 @@ export function createMessageSender(appContext) {
       if (savedConversation) {
         attemptState.historyConversationRevision = normalizeConversationHistoryRevision(
           savedConversation.conversationRevision
+        );
+        attemptState.historyPromptCacheKey = normalizeResponsesPromptCacheKey(
+          savedConversation?.promptCacheKey || attemptState.historyPromptCacheKey
         );
       }
       if (savedId) {
@@ -4272,6 +4291,7 @@ export function createMessageSender(appContext) {
       promptMeta: null,
       preprocessOriginalText: null,
       preprocessRenderedText: null,
+      outboundContent: null,
       pageMeta: null
     };
 
@@ -5917,6 +5937,126 @@ export function createMessageSender(appContext) {
     return source;
   }
 
+  /**
+   * 提取“最后一条 user 消息”的发送正文。
+   *
+   * @param {Array<Object>} messages
+   * @returns {string|Array<any>|null}
+   */
+  function getLatestUserMessageContent(messages) {
+    const list = Array.isArray(messages) ? messages : [];
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const item = list[i];
+      if (String(item?.role || '').trim().toLowerCase() !== 'user') continue;
+      return cloneDataSafely(item?.content);
+    }
+    return null;
+  }
+
+  /**
+   * 比较两个值是否在“可 JSON 化数据”意义上相等。
+   *
+   * @param {any} left
+   * @param {any} right
+   * @returns {boolean}
+   */
+  function isDeepEqual(left, right) {
+    try {
+      return JSON.stringify(left) === JSON.stringify(right);
+    } catch (_) {
+      return left === right;
+    }
+  }
+
+  /**
+   * 将“本次实际发送给模型的 user 正文”写回历史节点。
+   *
+   * 说明：
+   * - node.content 继续代表 UI 中展示给用户看的原始内容；
+   * - node.outboundContent 代表真正发给模型的稳定正文快照；
+   * - 这样下一轮 composeMessages 才能精确重放前一轮的 prompt 前缀。
+   *
+   * @param {{attemptState?: Object|null, userMessageId?: string|null, detachedUserMessageNode?: Object|null, outboundContent?: any}} options
+   * @returns {boolean}
+   */
+  function syncHistoryUserOutboundContent(options = {}) {
+    const normalizedOptions = (options && typeof options === 'object') ? options : {};
+    const userMessageId = normalizeConversationId(normalizedOptions.userMessageId);
+    const outboundContent = cloneDataSafely(normalizedOptions.outboundContent);
+    const candidateNode = userMessageId
+      ? resolveAttemptMessageNode(normalizedOptions.attemptState, userMessageId)
+      : (normalizedOptions.detachedUserMessageNode || null);
+    const node = candidateNode && String(candidateNode.role || '').toLowerCase() === 'user'
+      ? candidateNode
+      : null;
+    if (!node) return false;
+
+    if (outboundContent == null || isDeepEqual(node.content, outboundContent)) {
+      node.outboundContent = null;
+      return true;
+    }
+    node.outboundContent = outboundContent;
+    return true;
+  }
+
+  /**
+   * 解析当前会话应该使用的稳定 prompt_cache_key。
+   *
+   * @param {{requestBody?: Object|null, usedApiConfig?: Object|null, attemptState?: Object|null, conversationIdHint?: string, runtimeConversationKeyHint?: string}} options
+   * @returns {string}
+   */
+  function resolveAutoResponsesPromptCacheKey(options = {}) {
+    const normalizedOptions = (options && typeof options === 'object') ? options : {};
+    const requestBody = (normalizedOptions.requestBody && typeof normalizedOptions.requestBody === 'object')
+      ? normalizedOptions.requestBody
+      : null;
+    const explicitKey = normalizeResponsesPromptCacheKey(
+      requestBody?.prompt_cache_key
+        || normalizedOptions.usedApiConfig?.responsesApiSettings?.prompt_cache_key
+    );
+    if (explicitKey) {
+      return explicitKey;
+    }
+
+    const attemptState = normalizedOptions.attemptState || null;
+    const existingKey = normalizeResponsesPromptCacheKey(
+      attemptState?.historyPromptCacheKey
+        || chatHistoryManager?.getConversationPromptCacheKey?.()
+        || chatHistoryManager?.chatHistory?.promptCacheKey
+    );
+    if (existingKey) {
+      if (attemptState) attemptState.historyPromptCacheKey = existingKey;
+      if (typeof chatHistoryManager?.setConversationPromptCacheKey === 'function') {
+        chatHistoryManager.setConversationPromptCacheKey(existingKey);
+      } else if (chatHistoryManager?.chatHistory) {
+        chatHistoryManager.chatHistory.promptCacheKey = existingKey;
+      }
+      return existingKey;
+    }
+
+    const normalizedConversationId = normalizeConversationId(normalizedOptions.conversationIdHint)
+      || normalizeConversationId(attemptState?.boundConversationId)
+      || normalizeConversationId(currentConversationId)
+      || normalizeConversationId(chatHistoryUI?.getCurrentConversationId?.());
+    const draftConversationKey = (typeof normalizedOptions.runtimeConversationKeyHint === 'string'
+      && normalizedOptions.runtimeConversationKeyHint.trim())
+      ? normalizedOptions.runtimeConversationKeyHint.trim()
+      : (attemptState?.runtimeConversationKey || getCurrentActiveConversationQueueKey());
+    const generatedKey = buildDefaultResponsesPromptCacheKey({
+      conversationId: normalizedConversationId,
+      draftConversationKey
+    });
+    if (!generatedKey) return '';
+
+    if (attemptState) attemptState.historyPromptCacheKey = generatedKey;
+    if (typeof chatHistoryManager?.setConversationPromptCacheKey === 'function') {
+      chatHistoryManager.setConversationPromptCacheKey(generatedKey);
+    } else if (chatHistoryManager?.chatHistory) {
+      chatHistoryManager.chatHistory.promptCacheKey = generatedKey;
+    }
+    return generatedKey;
+  }
+
   function GetInputContainer() {
     return document.getElementById('input-container');
   }
@@ -7081,6 +7221,10 @@ export function createMessageSender(appContext) {
         responsesToolLoopAssistantPhase: null,
         responsesToolLoopLastResponseId: null,
         runtimeConversationKey: normalizedConversationQueueKey || getCurrentActiveConversationQueueKey(),
+        historyPromptCacheKey: normalizeResponsesPromptCacheKey(
+          chatHistoryManager?.getConversationPromptCacheKey?.()
+            || chatHistoryManager?.chatHistory?.promptCacheKey
+        ),
         completedSuccessfully: false,
         supportsStandardSteer: false,
         conversationJobId: normalizedConversationJobId || null,
@@ -7574,6 +7718,19 @@ export function createMessageSender(appContext) {
         ? applyInjectedMessages(preprocessedMessages, injectedMessages, { replaceLastUser: injectOnly })
         : preprocessedMessages;
       const finalMessages = appendPageContentToLatestUserMessage(messagesAfterInjection, pageContentResponse);
+      const latestUserOutboundContent = getLatestUserMessageContent(finalMessages);
+
+      if (!regenerateMode && (userMessageDiv || detachedUserMessageNode)) {
+        const userMessageIdForOutbound = userMessageDiv?.getAttribute?.('data-message-id')
+          || detachedUserMessageNode?.id
+          || '';
+        syncHistoryUserOutboundContent({
+          attemptState: attempt,
+          userMessageId: userMessageIdForOutbound,
+          detachedUserMessageNode,
+          outboundContent: latestUserOutboundContent
+        });
+      }
 
       // 获取API配置：仅使用外部提供（resolvedApiConfig / api 解析）或当前选中。不再做任何内部推断
       let config;
@@ -7659,6 +7816,19 @@ export function createMessageSender(appContext) {
           requestBody.instructions,
           ephemeralResponsesInstructions
         );
+      }
+      if (isOpenAIResponsesApiConfig(effectiveApiConfig)
+        && !normalizeResponsesPromptCacheKey(requestBody?.prompt_cache_key)) {
+        const autoPromptCacheKey = resolveAutoResponsesPromptCacheKey({
+          requestBody,
+          usedApiConfig: effectiveApiConfig,
+          attemptState: attempt,
+          conversationIdHint: conversationIdOverride || currentConversationId || chatHistoryUI?.getCurrentConversationId?.(),
+          runtimeConversationKeyHint: normalizedConversationQueueKey || attempt?.runtimeConversationKey
+        });
+        if (autoPromptCacheKey) {
+          requestBody.prompt_cache_key = autoPromptCacheKey;
+        }
       }
       const preparedRequestBody = prepareResponsesRequestBodyForCustomTools(requestBody, effectiveApiConfig);
 

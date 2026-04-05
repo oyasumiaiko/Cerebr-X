@@ -15,6 +15,7 @@
  * @property {string|null} [reasoning_content] OpenAI 兼容：需要原样回传的推理原文（与 thoughtSignature 配对，可选）
  * @property {Array<any>|null} [tool_calls] OpenAI 兼容：assistant.tool_calls（可能包含 thoughtSignature，可选）
  * @property {Array<any>|null} [response_input_items] Responses API：后续 turn 可直接重放的 input item 历史（可选）
+ * @property {string|Array<any>|null} [outboundContent] 当历史节点曾以“不同于显示内容”的正文发送时，这里保存稳定发送快照（可选）
  */
 
 /**
@@ -98,9 +99,13 @@ export function composeMessages(args) {
     const hasThoughtSignature = (typeof thoughtSignature === 'string') && !!thoughtSignature;
     const apiModelId = (typeof node?.apiModelId === 'string' && node.apiModelId.trim()) ? node.apiModelId.trim() : null;
 
+    const messageContent = (role === 'user' && node?.outboundContent != null)
+      ? node.outboundContent
+      : node?.content;
+
     const msg = {
       role,
-      content: sanitizeContentForSend(node?.content),
+      content: sanitizeContentForSend(messageContent),
       thoughtSignature,
       thoughtSignatureSource,
       // 记录该条历史消息生成时的模型ID快照，供下游决定是否可回传 signature（避免跨模型导致校验失败）。
@@ -188,7 +193,10 @@ export function composeMessages(args) {
     // 只发送最后一条
     if (effectiveChain.length > 0) {
       const last = effectiveChain[effectiveChain.length - 1];
-      messages.push({ role: mapRole(last.role), content: sanitizeContentForSend(last.content) });
+      const lastContent = (mapRole(last.role) === 'user' && last?.outboundContent != null)
+        ? last.outboundContent
+        : last.content;
+      messages.push({ role: mapRole(last.role), content: sanitizeContentForSend(lastContent) });
     }
   }
 

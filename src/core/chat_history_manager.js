@@ -1,8 +1,10 @@
 /**
- * @file Manages a tree-structured chat history, including creating messages, 
+ * @file Manages a tree-structured chat history, including creating messages,
  *       finding nodes, and retrieving conversation chains.
  * @since 1.0.0
  */
+
+import { normalizeResponsesPromptCacheKey } from '../utils/responses_prompt_cache.js';
 
 /**
  * 用于表示单条消息的类型
@@ -34,6 +36,7 @@
  * @property {string|null} [preprocessOriginalText] - 用户消息预处理前的原始文本（可选）
  * @property {string|null} [preprocessRenderedText] - 预处理后的文本快照（可选）
  * @property {{url: string, title: string}|null} [pageMeta] - 首条用户消息发出时的页面元数据快照（仅 url/title，用于固定会话来源）
+ * @property {string|Array<any>|null} [outboundContent] - 发送给模型时使用的稳定正文快照（例如已拼接页面内容的用户消息，可选）
  */
 
 /**
@@ -43,6 +46,7 @@
  * @property {string|null} root - 根节点ID
  * @property {string|null} currentNode - 当前节点ID
  * @property {number} conversationRevision - 线性会话的“历史修改版本号”
+ * @property {string} promptCacheKey - 当前会话绑定的 Responses prompt_cache_key
  */
 
 /**
@@ -91,6 +95,9 @@ function createMessageNode(role, content, parentId = null) {
     promptMeta: null,
     preprocessOriginalText: null,
     preprocessRenderedText: null,
+    // 当“实际发送给模型的正文”与界面展示内容不同（例如拼接了页面内容）时，
+    // 这里保存那份稳定的发送快照，供后续多轮重放时精确复现。
+    outboundContent: null,
     // --- 页面元信息（用于固定“会话来源页”，避免生成过程中切换标签页导致 URL/标题错绑）---
     // 说明：
     // - 仅在“首条用户消息”创建时写入；后续消息不重复写，避免冗余。
@@ -207,6 +214,7 @@ function clearChatHistory(chatHistory) {
   chatHistory.root = null;
   chatHistory.currentNode = null;
   chatHistory.conversationRevision = 0;
+  chatHistory.promptCacheKey = '';
 }
 
 function normalizeConversationRevision(value) {
@@ -384,7 +392,8 @@ export function createChatHistoryManager() {
     messages: [],
     root: null,
     currentNode: null,
-    conversationRevision: 0
+    conversationRevision: 0,
+    promptCacheKey: ''
   };
 
   return {
@@ -398,6 +407,16 @@ export function createChatHistoryManager() {
     insertMessageAfter: (afterMessageId, role, content, options = {}) =>
       insertMessageAfterInHistory(chatHistory, afterMessageId, role, content, options),
     getConversationRevision: () => normalizeConversationRevision(chatHistory.conversationRevision),
+    getConversationPromptCacheKey: () => normalizeResponsesPromptCacheKey(chatHistory.promptCacheKey),
+    setConversationPromptCacheKey: (value) => {
+      const nextKey = normalizeResponsesPromptCacheKey(value);
+      chatHistory.promptCacheKey = nextKey;
+      return nextKey;
+    },
+    clearConversationPromptCacheKey: () => {
+      chatHistory.promptCacheKey = '';
+      return '';
+    },
     setConversationRevision: (revision) => {
       const nextRevision = normalizeConversationRevision(revision);
       chatHistory.conversationRevision = nextRevision;

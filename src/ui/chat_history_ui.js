@@ -22,6 +22,7 @@ import { generateCandidateUrls } from '../utils/url_candidates.js';
 import { buildConversationSummaryFromMessages } from '../utils/conversation_title.js';
 import { normalizeStoredMessageContent, splitStoredMessageContent } from '../utils/message_content.js';
 import { buildApiFooterRenderData } from '../utils/api_footer_template.js';
+import { normalizeResponsesPromptCacheKey } from '../utils/responses_prompt_cache.js';
 import {
   normalizeConversationApiLock,
   mergeConversationApiLockState,
@@ -2047,7 +2048,7 @@ export function createChatHistoryUI(appContext) {
   /**
    * 保存或更新当前对话至持久存储
    * @param {boolean} [isUpdate=false] - 是否为更新操作
-   * @param {{ preserveExistingApiLock?: boolean, updateActiveState?: boolean, chatHistoryOverride?: { messages?: Array<any>, conversationRevision?: number }, conversationId?: string, apiLockOverride?: any }} [options] - 额外保存选项
+   * @param {{ preserveExistingApiLock?: boolean, updateActiveState?: boolean, chatHistoryOverride?: { messages?: Array<any>, conversationRevision?: number, promptCacheKey?: string }, conversationId?: string, apiLockOverride?: any }} [options] - 额外保存选项
    *   - preserveExistingApiLock: 当内存态未携带 apiLock 时，是否回退继承已存储会话中的 apiLock（默认 true）
    *   - updateActiveState: 是否同步更新当前激活会话状态（默认 true，后台保存可设为 false）
    *   - chatHistoryOverride: 指定要保存的历史快照（用于后台会话写库）
@@ -2073,6 +2074,7 @@ export function createChatHistoryUI(appContext) {
     const conversationRevision = Number.isFinite(Number(chatHistory?.conversationRevision))
       ? Math.max(0, Math.floor(Number(chatHistory.conversationRevision)))
       : 0;
+    const promptCacheKey = normalizeResponsesPromptCacheKey(chatHistory?.promptCacheKey);
     if (rawMessages.length === 0) {
       // 仅在“当前激活会话”的更新路径下执行删除，避免后台保存误删其它会话。
       if (isUpdate && updateActiveState && targetConversationId) {
@@ -2247,6 +2249,9 @@ export function createChatHistoryUI(appContext) {
       threadMessageCount: messageStats.threadMessageCount,
       threadCount: messageStats.threadCount
     };
+    if (promptCacheKey) {
+      conversation.promptCacheKey = promptCacheKey;
+    }
     if (summarySourceToSave) {
       conversation.summarySource = summarySourceToSave;
     }
@@ -3581,6 +3586,7 @@ export function createChatHistoryUI(appContext) {
     services.chatHistoryManager.chatHistory.conversationRevision = Number.isFinite(Number(fullConversation?.conversationRevision))
       ? Math.max(0, Math.floor(Number(fullConversation.conversationRevision)))
       : 0;
+    services.chatHistoryManager.chatHistory.promptCacheKey = normalizeResponsesPromptCacheKey(fullConversation?.promptCacheKey);
     // 保存加载的对话记录ID，用于后续更新操作
     currentConversationId = fullConversation.id;
     
@@ -13797,7 +13803,8 @@ export function createChatHistoryUI(appContext) {
         messages: [],
         root: null,
         currentNode: null,
-        conversationRevision: 0
+        conversationRevision: 0,
+        promptCacheKey: ''
       };
 
       // 说明：避免复用旧节点引用，确保分支会话内容独立。
@@ -13958,6 +13965,7 @@ export function createChatHistoryUI(appContext) {
       services.chatHistoryManager.chatHistory.root = null;
       services.chatHistoryManager.chatHistory.currentNode = null;
       services.chatHistoryManager.chatHistory.conversationRevision = 0;
+      services.chatHistoryManager.chatHistory.promptCacheKey = '';
       
       // 清空聊天容器
       chatContainer.innerHTML = '';
