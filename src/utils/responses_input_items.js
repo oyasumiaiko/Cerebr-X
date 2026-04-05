@@ -66,6 +66,13 @@ export function getResponsesReplayItemKey(item, fallbackIndex = 0) {
     return `${type}:id:${itemId}`;
   }
 
+  try {
+    const serialized = JSON.stringify(item);
+    if (serialized) {
+      return `${type}:json:${serialized}`;
+    }
+  } catch (_) {}
+
   return `${type}:idx:${fallbackIndex}`;
 }
 

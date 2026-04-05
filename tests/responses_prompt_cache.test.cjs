@@ -10,6 +10,13 @@ async function loadPromptCacheModule() {
   return import(dataUrl);
 }
 
+async function loadResponsesInputItemsModule() {
+  const filePath = path.resolve(__dirname, '../src/utils/responses_input_items.js');
+  const source = await fs.readFile(filePath, 'utf8');
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(source, 'utf8').toString('base64')}`;
+  return import(dataUrl);
+}
+
 async function loadMessageComposerModule() {
   const filePath = path.resolve(__dirname, '../src/core/message_composer.js');
   let source = await fs.readFile(filePath, 'utf8');
@@ -115,4 +122,19 @@ test('composeMessages last-user fallback path also uses outboundContent', async 
   });
 
   assert.equal(messages[0].content, '原始输入\\n\\n当前网页内容：标题：Example');
+});
+
+test('mergeResponsesInputItems de-duplicates identical reasoning items without stable ids', async () => {
+  const { mergeResponsesInputItems } = await loadResponsesInputItemsModule();
+
+  const reasoningItem = {
+    type: 'reasoning',
+    summary: [
+      { type: 'summary_text', text: 'same reasoning summary' }
+    ]
+  };
+
+  const merged = mergeResponsesInputItems([reasoningItem], [reasoningItem]);
+  assert.equal(merged.length, 1);
+  assert.deepEqual(merged[0], reasoningItem);
 });
