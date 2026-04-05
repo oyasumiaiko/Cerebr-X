@@ -390,6 +390,78 @@ class CerebrSidebar {
     this.applyDockLayout();
   }
 
+  /**
+   * 返回用于自动化 smoke / 调试的侧栏可见性快照。
+   *
+   * 设计说明：
+   * - 侧栏宿主放在 closed shadow root 中，普通页面脚本与外部自动化很难直接检查真实可见态；
+   * - 但我们做端到端验证时，不能只靠“iframe 存在且内部 input 可访问”就判定通过，
+   *   否则 display:none / opacity:0 / 未进入 visible 状态时，脚本仍可能误操作成功；
+   * - 因此这里集中给出一份只读诊断快照，专门服务于自动化与问题定位，
+   *   避免把测试逻辑建立在脆弱的 DOM 猜测上。
+   *
+   * 注意：
+   * - 这是显式的调试接口，不用于产品逻辑分支；
+   * - 只暴露简单的可见性/布局状态，不泄露任何页面敏感数据。
+   *
+   * @returns {Object}
+   */
+  getDebugState() {
+    if (!this.sidebar) {
+      return {
+        initialized: !!this.initialized,
+        exists: false,
+        isVisible: !!this.isVisible,
+        isActuallyVisible: false
+      };
+    }
+
+    const computedStyle = window.getComputedStyle(this.sidebar);
+    const rect = this.sidebar.getBoundingClientRect();
+    const inlineDisplay = (typeof this.sidebar.style?.display === 'string')
+      ? this.sidebar.style.display
+      : '';
+    const inlineTransform = (typeof this.sidebar.style?.transform === 'string')
+      ? this.sidebar.style.transform
+      : '';
+    const hasVisibleClass = this.sidebar.classList.contains('visible');
+    const hasIframe = !!this.sidebar.querySelector('.cerebr-sidebar__iframe');
+    const computedOpacity = Number.parseFloat(computedStyle.opacity || '0');
+    const isActuallyVisible = !!(
+      this.isVisible
+      && hasVisibleClass
+      && inlineDisplay !== 'none'
+      && computedStyle.display !== 'none'
+      && computedStyle.visibility !== 'hidden'
+      && computedOpacity > 0
+      && rect.width > 0
+      && rect.height > 0
+    );
+
+    return {
+      initialized: !!this.initialized,
+      exists: true,
+      isVisible: !!this.isVisible,
+      isActuallyVisible,
+      isFullscreen: !!this.isFullscreen,
+      isDocked: !!this.isDocked,
+      sidebarPosition: this.sidebarPosition || 'right',
+      hasVisibleClass,
+      hasIframe,
+      inlineDisplay,
+      inlineTransform,
+      computedDisplay: computedStyle.display,
+      computedVisibility: computedStyle.visibility,
+      computedOpacity: computedStyle.opacity,
+      rect: {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      }
+    };
+  }
+
   setDockMode(isDocked) {
     const next = !!isDocked;
     if (this.isDocked === next) {
@@ -1218,6 +1290,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'CLOSE_SIDEBAR':
         sidebar.toggle(false);  // 明确传入 false 表示关闭
         break;
+      case 'GET_SIDEBAR_DEBUG_STATE':
+        sendResponse({
+          success: true,
+          debugState: sidebar.getDebugState()
+        });
+        return true;
       case 'TOGGLE_FULLSCREEN_FROM_BACKGROUND':
         sidebar.toggleFullscreen();  // 切换全屏状态
         break;
