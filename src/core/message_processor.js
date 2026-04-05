@@ -16,6 +16,10 @@ import { enhanceMermaidDiagrams } from '../utils/mermaid_renderer.js';
 import { extractThinkingFromText, mergeThoughts } from '../utils/thoughts_parser.js';
 import { normalizeResponsesReasoningText } from '../utils/responses_activity_reasoning.js';
 import { buildApiFooterRenderData } from '../utils/api_footer_template.js';
+import {
+  formatResponsesToolOutputForDisplay,
+  hasResponsesToolOutputBody
+} from '../utils/responses_tool_output.js';
 
 /**
  * 纯函数：从 pageInfo 中提取“可持久化的页面元数据快照”（仅 url/title）。
@@ -1174,13 +1178,7 @@ export function createMessageProcessor(appContext) {
   }
 
   function formatResponseToolCallOutput(rawOutput) {
-    const text = (typeof rawOutput === 'string') ? rawOutput.trim() : '';
-    if (!text) return '';
-    try {
-      return JSON.stringify(JSON.parse(text), null, 2);
-    } catch (_) {
-      return text;
-    }
+    return formatResponsesToolOutputForDisplay(rawOutput);
   }
 
   function buildResponseActivityJsRuntimeSummaryParts(record) {
@@ -1591,7 +1589,7 @@ export function createMessageProcessor(appContext) {
     if (!entry || typeof entry !== 'object') return false;
     if (isResponseActivityJsRuntimeEntry(entry)) {
       const meta = getResponseActivityJsRuntimeMeta(entry);
-      return !!((typeof meta.code === 'string' && meta.code.trim()) || (typeof entry.output === 'string' && entry.output.trim()));
+      return !!((typeof meta.code === 'string' && meta.code.trim()) || hasResponsesToolOutputBody(entry.output));
     }
     if (String(entry?.action_type || '').toLowerCase() === 'find_in_page') {
       return false;
@@ -1769,7 +1767,7 @@ export function createMessageProcessor(appContext) {
       const searchQueryLines = renderSearchQueriesInline ? getResponseActivityToolQueryLines(entry) : [];
       const hasDetails = hasResponseActivityToolDetails(entry);
       const isInProgress = isResponseActivityEntryInProgress(entry);
-      const hasOutput = typeof entry?.output === 'string' && entry.output.trim() !== '';
+      const hasOutput = hasResponsesToolOutputBody(entry?.output);
       const shouldAutoRemainExpanded = isInProgress || (!hasOutput && isTurnRuntimeActive);
       // 工具级生命周期与面板一致：
       // - 默认只在“首次出现且尚无手动状态”时自动决定一次初始展开；

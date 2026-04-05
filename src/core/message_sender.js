@@ -28,6 +28,11 @@ import {
   normalizeResponsesPromptCacheKey,
   buildDefaultResponsesPromptCacheKey
 } from '../utils/responses_prompt_cache.js';
+import {
+  buildResponsesToolOutputContentItems,
+  RESPONSES_TOOL_OUTPUT_MAX_BYTES,
+  stringifyResponsesToolOutputValue
+} from '../utils/responses_tool_output.js';
 
 const RESPONSES_JS_RUNTIME_TOOL_NAME = 'js_runtime_execute';
 
@@ -6112,9 +6117,11 @@ export function createMessageSender(appContext) {
    *
    * 说明：
    * - 这是模型“看到”的工具面；
-   * - 代码真正执行时运行在浏览器页面上下文中；
+   * - 代码真正执行时运行在“当前侧栏绑定网页标签页”的浏览器页面上下文中；
    * - 模型在代码体里可以直接 `await` / `return`；
-   * - 执行环境只提供页面原生 JS / DOM / Web API，不额外注入宿主扩展对象。
+   * - 执行环境基于 chrome.userScripts 的 USER_SCRIPT world，只提供页面可访问的 DOM / Web API，
+   *   不额外注入宿主扩展对象，也不要假设能直接拿到页面 MAIN world 里的自定义 JS 对象/闭包；
+   * - 返回值会被序列化为文本片段回传给模型：对象/数组默认 JSON 化，超长输出会自动截断。
    *
    * @returns {Object}
    */
@@ -6123,9 +6130,10 @@ export function createMessageSender(appContext) {
       type: 'function',
       name: RESPONSES_JS_RUNTIME_TOOL_NAME,
       description: [
-        '在当前活动网页标签页中执行一次性 JavaScript。',
+        '在当前侧栏绑定网页标签页中执行一次性 JavaScript。',
         'code 字段会作为 async 函数体运行，可直接使用 await 和 return。',
-        '执行环境仅包含页面原生 JavaScript 与 DOM / Web API，不提供额外宿主对象。'
+        '执行环境运行在 chrome.userScripts 的 USER_SCRIPT world，可访问 DOM / Web API，但不要假设能直接访问页面主世界里的自定义 JS 对象。',
+        '返回值会以文本片段形式回传：对象/数组默认 JSON 序列化，过长输出会自动截断。请尽量返回紧凑、可序列化的小结果。'
       ].join(' '),
       strict: true,
       parameters: {
@@ -6134,11 +6142,11 @@ export function createMessageSender(appContext) {
         properties: {
           code: {
             type: 'string',
-            description: '要执行的 JavaScript 代码片段。它会作为 async 函数体执行，可直接使用 await 和 return。'
+            description: '要执行的 JavaScript 代码片段。它会作为 async 函数体执行，可直接使用 await 和 return。请优先返回紧凑、可 JSON 序列化的结果，避免返回 DOM 节点、函数或超大对象。'
           },
           frame_ids: {
             type: ['array', 'null'],
-            description: '可选的 frame ID 数组。省略或传空数组时，默认在顶层 frame 执行。',
+            description: '可选的 frame ID 数组。省略或传空数组时，默认在顶层 frame 执行；若要进入 iframe，请使用请求 instructions 中给出的 frame 快照里的 frame_id。',
             items: {
               type: 'integer'
             }
@@ -6276,20 +6284,20 @@ export function createMessageSender(appContext) {
   /**
    * 序列化 function_call_output 的 output 字段。
    *
-   * Responses API 要求 output 是字符串；这里优先返回 JSON 字符串，
-   * 让模型能稳定读取结构化字段。
+   * Responses API 的 function_call_output 支持文本或 content items；
+   * 对 JS 工具这里统一返回 input_text content items：
+   * - 对象/数组默认 JSON 化，避免“对象返回后 UI 一片空白”；
+   * - 长输出按接近 Codex 的 token 预算中间截断；
+   * - 再切成多段 text item，避免一个巨大的 JSON 字符串被二次转义。
    *
    * @param {any} value
-   * @returns {string}
+   * @returns {Array<{type:'input_text', text:string}>}
    */
   function serializeResponsesFunctionToolOutput(value) {
-    if (value == null) return 'null';
-    if (typeof value === 'string') return value;
     try {
-      const serialized = JSON.stringify(value);
-      return (typeof serialized === 'string') ? serialized : 'null';
+      return buildResponsesToolOutputContentItems(value);
     } catch (error) {
-      return JSON.stringify({
+      return buildResponsesToolOutputContentItems({
         ok: false,
         value: null,
         items: [],
@@ -6301,7 +6309,7 @@ export function createMessageSender(appContext) {
   const RESPONSES_JS_RUNTIME_MAX_TEXT_PREVIEW_CHARS = 4000;
   const RESPONSES_JS_RUNTIME_MAX_ARRAY_ITEMS = 12;
   const RESPONSES_JS_RUNTIME_MAX_OBJECT_KEYS = 24;
-  const RESPONSES_JS_RUNTIME_MAX_SERIALIZED_CHARS = 60000;
+  const RESPONSES_JS_RUNTIME_MAX_SERIALIZED_CHARS = RESPONSES_TOOL_OUTPUT_MAX_BYTES;
 
   function summarizeResponsesJsRuntimeString(value) {
     if (typeof value !== 'string') return value;
@@ -6406,8 +6414,8 @@ export function createMessageSender(appContext) {
       }
     }
 
-    let serialized = serializeResponsesFunctionToolOutput(compacted);
-    if (typeof serialized === 'string' && serialized.length <= RESPONSES_JS_RUNTIME_MAX_SERIALIZED_CHARS) {
+    const serialized = stringifyResponsesToolOutputValue(compacted);
+    if (serialized.length <= RESPONSES_JS_RUNTIME_MAX_SERIALIZED_CHARS) {
       return compacted;
     }
 
@@ -6519,7 +6527,7 @@ export function createMessageSender(appContext) {
    * - 未知函数：显式回一个错误对象，而不是静默吞掉，方便模型自我修正。
    *
    * @param {Object} toolCallRecord
-   * @returns {Promise<{type:'function_call_output', call_id:string, output:string}>}
+   * @returns {Promise<{type:'function_call_output', call_id:string, output:Array<{type:'input_text', text:string}>}>}
    */
   async function executeResponsesCustomFunctionToolCall(toolCallRecord) {
     const callId = (typeof toolCallRecord?.call_id === 'string' && toolCallRecord.call_id.trim())
@@ -6616,7 +6624,7 @@ export function createMessageSender(appContext) {
         return normalizeResponsesActivityTimelineEntry({
           ...entry,
           status: 'completed',
-          output: (typeof outputItem.output === 'string') ? outputItem.output : ''
+          output: cloneDataSafely(outputItem.output)
         }) || entry;
       });
 
@@ -6626,7 +6634,7 @@ export function createMessageSender(appContext) {
         type: 'function_call',
         call_id: callId,
         status: 'completed',
-        output: (typeof outputItem.output === 'string') ? outputItem.output : ''
+        output: cloneDataSafely(outputItem.output)
       }, {
         status: 'completed'
       });
