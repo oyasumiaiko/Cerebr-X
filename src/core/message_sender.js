@@ -11,7 +11,11 @@ import { mergeResponsesReasoningText, normalizeResponsesReasoningText } from '..
 import { cloneResponsesInputItems, mergeResponsesInputItems } from '../utils/responses_input_items.js';
 import { createAdaptiveUpdateThrottler } from '../utils/adaptive_update_throttler.js';
 import { extractPlainTextFromContent } from '../utils/conversation_title.js';
-import { resolveResponseHandlingMode, planStreamingRenderTransition } from './response_flow_state.js';
+import {
+  resolveResponseHandlingMode,
+  resolveReceivedResponseHandlingMode,
+  planStreamingRenderTransition
+} from './response_flow_state.js';
 import { serializeSelectionTextWithMath } from '../utils/math_selection_text.js';
 import { normalizeApiUsageMeta } from '../utils/api_footer_template.js';
 
@@ -5684,11 +5688,16 @@ export function createMessageSender(appContext) {
         attemptState
       });
 
-      const responseHandlingMode = resolveResponseHandlingMode({
+      const requestedResponseHandlingMode = resolveResponseHandlingMode({
         apiBase: usedApiConfig?.baseUrl,
         connectionType: usedApiConfig?.connectionType,
         geminiUseStreaming: usedApiConfig?.useStreaming,
         requestBodyStream: !!(currentRequestBody && currentRequestBody.stream)
+      });
+      const responseHandlingMode = resolveReceivedResponseHandlingMode({
+        requestedMode: requestedResponseHandlingMode,
+        responseContentType: response.headers?.get?.('content-type') || '',
+        hasResponseBody: !!response.body
       });
       const useStreaming = responseHandlingMode === 'stream';
 

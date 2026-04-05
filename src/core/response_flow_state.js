@@ -52,6 +52,47 @@ export function resolveResponseHandlingMode(input = {}) {
   return requestBodyStream ? 'stream' : 'non_stream';
 }
 
+function normalizeResponseContentType(value) {
+  return (typeof value === 'string') ? value.trim().toLowerCase() : '';
+}
+
+/**
+ * 根据服务端实际返回的 Content-Type 决定本次响应应如何解析。
+ *
+ * 设计目标：
+ * - “是否向服务端声明 stream=true” 只影响发送侧，不再强绑定解析侧；
+ * - 只要服务端实际返回了 SSE（text/event-stream），就统一按流式事件解析；
+ * - 若服务端返回 JSON，则统一按非流式 JSON 解析；
+ * - 其余不明确类型才回退到请求侧的期望模式。
+ *
+ * @param {{
+ *   requestedMode?: 'stream'|'non_stream',
+ *   responseContentType?: string,
+ *   hasResponseBody?: boolean
+ * }} [input]
+ * @returns {'stream'|'non_stream'}
+ */
+export function resolveReceivedResponseHandlingMode(input = {}) {
+  const requestedMode = input?.requestedMode === 'stream' ? 'stream' : 'non_stream';
+  const responseContentType = normalizeResponseContentType(input?.responseContentType);
+  const hasResponseBody = input?.hasResponseBody !== false;
+
+  if (!hasResponseBody) {
+    return 'non_stream';
+  }
+  if (responseContentType.includes('text/event-stream')) {
+    return 'stream';
+  }
+  if (
+    responseContentType.includes('application/json')
+    || responseContentType.includes('+json')
+    || responseContentType.includes('application/problem+json')
+  ) {
+    return 'non_stream';
+  }
+  return requestedMode;
+}
+
 /**
  * 统一流式渲染阶段状态机：
  * - 首帧：决定是否执行“占位升级/创建消息”；
