@@ -2577,9 +2577,13 @@ export function createMessageSender(appContext) {
       completed: '已完成',
       canceled: '已取消'
     };
-    const staleReasonText = normalizedTask.staleReason === 'history_mutated'
-      ? '历史已修改'
-      : (normalizedTask.staleReason || '');
+    const staleReasonTextMap = {
+      history_mutated: '历史已修改',
+      steered: '已被转向'
+    };
+    const staleReasonText = staleReasonTextMap[normalizedTask.staleReason]
+      || normalizedTask.staleReason
+      || '';
 
     return {
       id: normalizedTask.id,
@@ -3587,6 +3591,49 @@ export function createMessageSender(appContext) {
     return false;
   }
 
+  function getLatestRunningAttemptForConversationQueue(queueKey) {
+    const normalizedQueueKey = resolveConversationQueueKey(queueKey);
+    let latestAttempt = null;
+    for (const attemptState of activeAttempts.values()) {
+      if (!doesAttemptBelongToConversationQueueKey(attemptState, normalizedQueueKey)) continue;
+      if (!latestAttempt) {
+        latestAttempt = attemptState;
+        continue;
+      }
+      const currentStartedAt = Number(attemptState?.startedAt) || 0;
+      const latestStartedAt = Number(latestAttempt?.startedAt) || 0;
+      if (currentStartedAt >= latestStartedAt) {
+        latestAttempt = attemptState;
+      }
+    }
+    return latestAttempt;
+  }
+
+  function setConversationSteerRuntime(queueKey, steerStatePatch = {}) {
+    const normalizedQueueKey = resolveConversationQueueKey(queueKey);
+    if (!normalizedQueueKey) return null;
+    const patch = (steerStatePatch && typeof steerStatePatch === 'object') ? steerStatePatch : {};
+    return updateConversationRuntimeStateByKey(normalizedQueueKey, (draft) => {
+      draft.steer.pendingSteers = Array.isArray(patch.pendingSteers)
+        ? cloneDataSafely(patch.pendingSteers)
+        : [];
+      draft.steer.targetTurnId = (typeof patch.targetTurnId === 'string' && patch.targetTurnId.trim())
+        ? patch.targetTurnId.trim()
+        : null;
+      draft.steer.targetTurnStartedAtMs = Number.isFinite(Number(patch.targetTurnStartedAtMs))
+        ? Number(patch.targetTurnStartedAtMs)
+        : null;
+    });
+  }
+
+  function clearConversationSteerRuntime(queueKey) {
+    return setConversationSteerRuntime(queueKey, {
+      pendingSteers: [],
+      targetTurnId: null,
+      targetTurnStartedAtMs: null
+    });
+  }
+
   function markConversationQueuedJobsStale(queueKey, conversationRevision) {
     const normalizedQueueKey = resolveConversationQueueKey(queueKey);
     const nextRevision = normalizeConversationHistoryRevision(conversationRevision);
@@ -3610,6 +3657,101 @@ export function createMessageSender(appContext) {
       refreshConversationQueueState(normalizedQueueKey);
     }
     return changed;
+  }
+
+  function markConversationQueuedJobsSteered(queueKey) {
+    const normalizedQueueKey = resolveConversationQueueKey(queueKey);
+    const queue = getConversationSendQueue(normalizedQueueKey);
+    let changed = false;
+    let affectedCount = 0;
+    queue.forEach((task, index) => {
+      const normalizedTask = normalizeConversationQueuedTask(task);
+      if (isConversationJobTerminal(normalizedTask) || normalizedTask.status === 'running') return;
+      if (normalizedTask.status === 'stale' && normalizedTask.staleReason === 'steered') return;
+      queue[index] = normalizeConversationQueuedTask({
+        ...normalizedTask,
+        status: 'stale',
+        paused: true,
+        availableAt: null,
+        staleReason: 'steered'
+      });
+      changed = true;
+      affectedCount += 1;
+    });
+    if (changed) {
+      refreshConversationQueueState(normalizedQueueKey);
+    }
+    return affectedCount;
+  }
+
+  /**
+   * 直接转向当前生成中的会话：
+   * - 先中止当前正在生成的请求；
+   * - 当前会话里尚未真正发出的 queue 项统一标记为“待确认”，避免继续沿旧方向自动发送；
+   * - 再将新的用户输入立即作为最高优先级任务发出。
+   *
+   * 这与普通 Enter 的区别在于：
+   * - Enter 保持 FIFO，尊重当前生成；
+   * - Ctrl+Enter 则显式表达“别继续旧方向了，立刻按这条新意图来”。
+   */
+  async function requestConversationSteer({ queueKey, conversationId = '', queuedTask } = {}) {
+    const normalizedQueueKey = resolveConversationQueueKey(queueKey);
+    const normalizedConversationId = normalizeConversationId(conversationId)
+      || normalizeConversationId(normalizedQueueKey);
+    const nextTask = normalizeConversationQueuedTask(queuedTask);
+    if (!normalizedQueueKey || !nextTask?.payload) {
+      return { ok: false, error: new Error('invalid_steer_job') };
+    }
+
+    const targetAttempt = getLatestRunningAttemptForConversationQueue(normalizedQueueKey);
+    if (!targetAttempt) {
+      clearConversationSteerRuntime(normalizedQueueKey);
+      return dispatchConversationJob(normalizedQueueKey, nextTask, {
+        forceQueue: false,
+        ignoreQueuedMessages: true
+      });
+    }
+
+    const steerPreviewText = String(nextTask?.payload?.originalMessageText || '').trim();
+    setConversationSteerRuntime(normalizedQueueKey, {
+      pendingSteers: [{
+        id: `steer_${Date.now()}`,
+        createdAt: Date.now(),
+        textPreview: steerPreviewText.slice(0, 200),
+        hasImages: !!nextTask?.payload?.inputHasImagesSnapshot,
+        hasScreenshot: !!nextTask?.payload?.inputHasScreenshotSnapshot
+      }],
+      targetTurnId: targetAttempt.aiMessageId || targetAttempt.id || null,
+      targetTurnStartedAtMs: Number.isFinite(Number(targetAttempt.startedAt))
+        ? Number(targetAttempt.startedAt)
+        : Date.now()
+    });
+
+    // 先把现有排队项全部转成“待确认”，再去中止当前 running。
+    // 这样即便被中止的请求在 finally 里触发了一次 queue flush，前面的 stale 项也会阻止旧队列继续自动开跑。
+    const staleCount = markConversationQueuedJobsSteered(normalizedQueueKey);
+    abortRequestsForConversationQueue(normalizedQueueKey, { suppressQueueFlush: true });
+    await waitForConversationQueueIdle(normalizedQueueKey, 5000);
+    if (hasRunningAttemptForConversationQueue(normalizedQueueKey)) {
+      clearConversationSteerRuntime(normalizedQueueKey);
+      return { ok: false, error: new Error('当前生成尚未完全停止，暂时无法转向') };
+    }
+    try {
+      const result = await dispatchConversationJob(normalizedQueueKey, {
+        ...nextTask,
+        conversationId: normalizedConversationId || nextTask.conversationId
+      }, {
+        forceQueue: false,
+        ignoreQueuedMessages: true
+      });
+      return {
+        ...result,
+        steered: true,
+        staleCount
+      };
+    } finally {
+      clearConversationSteerRuntime(normalizedQueueKey);
+    }
   }
 
   async function dispatchConversationJob(queueKey, queuedTask, options = {}) {
@@ -7675,6 +7817,60 @@ export function createMessageSender(appContext) {
   }
 
   /**
+   * 基于当前输入区快照，构建一条“用户追加发送任务”。
+   *
+   * 这个 helper 的职责是把“发送前冻结输入区快照 + 组装 job 元数据”放到一起，
+   * 避免普通 Enter 发送、Ctrl+Enter steer 等路径各自复制一套冻结逻辑。
+   *
+   * @param {Object} baseOptions
+   * @param {{
+   *   baseText?: string,
+   *   conversationId?: string,
+   *   imagesHtmlSnapshot?: string,
+   *   hasImagesInInput?: boolean,
+   *   hasScreenshotSnapshot?: boolean
+   * }} [snapshot]
+   * @returns {Promise<Object>}
+   */
+  async function buildAppendConversationJob(baseOptions, snapshot = {}) {
+    const normalizedSnapshot = (snapshot && typeof snapshot === 'object') ? snapshot : {};
+    const conversationId = normalizeConversationId(normalizedSnapshot.conversationId)
+      || normalizeConversationId(currentConversationId)
+      || normalizeConversationId(chatHistoryUI?.getCurrentConversationId?.());
+    const imagesHtmlSnapshot = (typeof normalizedSnapshot.imagesHtmlSnapshot === 'string')
+      ? normalizedSnapshot.imagesHtmlSnapshot
+      : (inputController ? inputController.getImagesHTML() : imageContainer.innerHTML);
+    const hasImagesInInput = (typeof normalizedSnapshot.hasImagesInInput === 'boolean')
+      ? normalizedSnapshot.hasImagesInInput
+      : (inputController ? inputController.hasImages() : !!imageContainer.querySelector('.image-tag'));
+    const hasScreenshotSnapshot = (typeof normalizedSnapshot.hasScreenshotSnapshot === 'boolean')
+      ? normalizedSnapshot.hasScreenshotSnapshot
+      : (inputController
+        ? inputController.hasScreenshot()
+        : !!imageContainer.querySelector('img[alt="page-screenshot.png"]'));
+    const queuedOptions = await buildQueuedSendOptions(baseOptions, {
+      baseText: typeof normalizedSnapshot.baseText === 'string'
+        ? normalizedSnapshot.baseText
+        : (baseOptions?.originalMessageText ?? ''),
+      imagesHtml: imagesHtmlSnapshot,
+      hasImages: hasImagesInInput,
+      hasScreenshot: hasScreenshotSnapshot
+    });
+
+    return normalizeConversationQueuedTask({
+      kind: 'append_user_message',
+      status: 'queued',
+      paused: false,
+      conversationId,
+      conversationRevisionAtEnqueue: resolveConversationHistoryRevision(conversationId),
+      anchorMessageId: '',
+      targetAiMessageId: '',
+      payload: queuedOptions,
+      retryPolicy: buildDefaultConversationJobRetryPolicy('append_user_message')
+    });
+  }
+
+  /**
    * Public send entry:
    * - Handles slash commands and trailing control markers.
    *
@@ -7684,6 +7880,7 @@ export function createMessageSender(appContext) {
    */
   async function sendMessage(options = {}) {
     const opts = options || {};
+    const submissionBehavior = opts.__submissionBehavior === 'steer' ? 'steer' : 'default';
 
     // Resolve source text with the following precedence:
     // 1) regenerate target node data-original-text;
@@ -7770,6 +7967,7 @@ export function createMessageSender(appContext) {
     const currentConversationIdForSend = normalizeConversationId(currentConversationId)
       || normalizeConversationId(chatHistoryUI?.getCurrentConversationId?.());
     const hasPendingWorkInCurrentConversation = hasPendingWorkForConversationQueue(currentConversationQueueKey);
+    const hasRunningAttemptInCurrentConversation = hasRunningAttemptForConversationQueue(currentConversationQueueKey);
     const hasQueuedMessagesInCurrentConversation = hasQueuedMessagesForConversation(currentConversationQueueKey);
     const canQueueOrInterrupt = !!(
       singleOpts.regenerateMode
@@ -7777,6 +7975,7 @@ export function createMessageSender(appContext) {
       || baseText
       || hasImagesInInput
     );
+    const shouldSendAsSteer = submissionBehavior === 'steer' && hasRunningAttemptInCurrentConversation;
 
     if (singleOpts.regenerateMode) {
       return requestRegenerateMessage({
@@ -7789,6 +7988,11 @@ export function createMessageSender(appContext) {
         promptMeta: singleOpts.promptMeta ?? null,
         conversationId: currentConversationIdForSend
       });
+    }
+
+    if (shouldSendAsSteer && !canQueueOrInterrupt) {
+      showNotification?.({ message: '没有可用于转向的内容', type: 'warning', duration: 1800 });
+      return { ok: false, reason: 'empty_steer' };
     }
 
     if ((hasPendingWorkInCurrentConversation || hasQueuedMessagesInCurrentConversation) && canQueueOrInterrupt) {
@@ -7804,26 +8008,51 @@ export function createMessageSender(appContext) {
     const hasScreenshotSnapshot = inputController
       ? inputController.hasScreenshot()
       : !!imageContainer.querySelector('img[alt="page-screenshot.png"]');
-    const queuedOptions = await buildQueuedSendOptions(singleOpts, {
+    const nextJob = await buildAppendConversationJob(singleOpts, {
       baseText,
-      imagesHtml: imagesHtmlSnapshot,
-      hasImages: hasImagesInInput,
-      hasScreenshot: hasScreenshotSnapshot
-    });
-    const nextJob = normalizeConversationQueuedTask({
-      kind: 'append_user_message',
-      status: 'queued',
-      paused: false,
       conversationId: currentConversationIdForSend,
-      conversationRevisionAtEnqueue: resolveConversationHistoryRevision(currentConversationIdForSend),
-      anchorMessageId: '',
-      targetAiMessageId: '',
-      payload: queuedOptions,
-      retryPolicy: buildDefaultConversationJobRetryPolicy('append_user_message')
+      imagesHtmlSnapshot,
+      hasImagesInInput,
+      hasScreenshotSnapshot
     });
 
     clearInputs();
     inputController?.focusToEnd?.();
+
+    if (shouldSendAsSteer) {
+      const result = await requestConversationSteer({
+        queueKey: currentConversationQueueKey,
+        conversationId: currentConversationIdForSend,
+        queuedTask: nextJob
+      });
+      const steerSucceeded = !!(result?.ok || result?.queued);
+      if (!steerSucceeded) {
+        try {
+          restoreQueuedTaskToComposer(nextJob);
+        } catch (error) {
+          console.warn('转向失败后恢复输入区内容失败:', error);
+        }
+      }
+      if (steerSucceeded && typeof showNotification === 'function') {
+        const staleCount = Number.isFinite(Number(result?.staleCount))
+          ? Number(result.staleCount)
+          : 0;
+        showNotification({
+          message: staleCount > 0
+            ? `已直接转向当前生成，${staleCount} 条排队消息已转为待确认`
+            : '已直接转向当前生成',
+          type: 'info',
+          duration: 2200
+        });
+      } else if (result?.error && typeof showNotification === 'function') {
+        showNotification({
+          message: `转向失败：${result.error.message || '未知错误'}`,
+          type: 'warning',
+          duration: 2200
+        });
+      }
+      return result;
+    }
 
     const shouldForceQueue = hasPendingWorkInCurrentConversation || hasQueuedMessagesInCurrentConversation;
     const result = await dispatchConversationJob(currentConversationQueueKey, nextJob, {
@@ -7842,6 +8071,13 @@ export function createMessageSender(appContext) {
       });
     }
     return result;
+  }
+
+  function sendSteerMessage(options = {}) {
+    return sendMessage({
+      ...(options && typeof options === 'object' ? options : {}),
+      __submissionBehavior: 'steer'
+    });
   }
 
   // Message composition itself is delegated to composeMessages in message_composer.js.
@@ -9937,6 +10173,7 @@ export function createMessageSender(appContext) {
   // 公开的API
   return {
     sendMessage,
+    sendSteerMessage,
     sendWithApiConfig,
     performQuickSummary,
     generateConversationTitleForMessages,

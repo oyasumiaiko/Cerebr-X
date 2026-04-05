@@ -1455,6 +1455,7 @@ function setupMessageInputHandlers(appContext) {
   input.addEventListener('keydown', async function (e) {
     if (appContext.utils.handleSlashCommandKeydown?.(e)) return;
     if (e.key !== 'Enter') return;
+    // Shift+Enter 始终保留为原生换行，不进入发送/转向逻辑。
     if (e.shiftKey) return;
     if (appContext.state.isComposing) return;
     // 阻止默认行为，避免触发表单提交或换行等浏览器默认处理
@@ -1619,20 +1620,11 @@ function setupMessageInputHandlers(appContext) {
     }
 
     if (e.ctrlKey) {
-      const prompts = appContext.services.promptSettingsManager.getPrompts();
-      const selectionPromptText = prompts.selection.prompt;
-      if (selectionPromptText) {
-        const userMessageText = selectionPromptText.replace('<SELECTION>', text);
-        const apiPref = (prompts.selection?.model || '').trim();
-        const apiParam = apiPref || 'follow_current';
-        appContext.services.messageSender.sendMessage({
-          originalMessageText: userMessageText,
-          specificPromptType: 'selection',
-          promptMeta: { selectionText: text },
-          api: apiParam
-        });
-        return;
-      }
+      // Ctrl+Enter：优先用于“直接转向当前生成”。
+      // 若当前没有正在生成的请求，messageSender 内部会自动回退为普通发送，
+      // 这样快捷键语义对用户始终稳定，不需要在事件层重复判断运行态。
+      appContext.services.messageSender.sendSteerMessage();
+      return;
     }
     // 兜底保护：若仍检测到 Alt/Ctrl/Meta 修饰键，则不发送，避免误发
     if (e.altKey || hasAltGraph || e.ctrlKey || e.metaKey) {

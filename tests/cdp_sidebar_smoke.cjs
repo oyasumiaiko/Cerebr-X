@@ -212,6 +212,16 @@ function buildStorageSeed() {
 }
 
 function buildPrompt(currentScenario) {
+  if (currentScenario === 'shortcut_steer') {
+    return {
+      first: 'Please directly call js_runtime_execute on the current page, report document.title and location.href on line 1, then continue with 40 short numbered lines so the response keeps streaming for a while.',
+      queued: 'When it is your turn, reply with exactly QUEUE_ENTER_ONLY_20260405 and nothing else.',
+      steer: 'When it is your turn, reply with exactly STEER_CTRL_NOW_20260405 and nothing else.',
+      altOnly: 'UPSCREEN_ALT_ONLY_20260405',
+      shiftLine1: 'SHIFT_LINE_ONE_20260405',
+      shiftLine2: 'SHIFT_LINE_TWO_20260405'
+    };
+  }
   if (currentScenario === 'multi_queue_reorder') {
     return {
       first: 'Please directly call js_runtime_execute on the current page, report document.title and location.href on line 1, then continue with 40 short numbered lines so the response keeps streaming for a while.',
@@ -340,16 +350,144 @@ async function main() {
     await page.screenshot({ path: path.join(outputDir, '01-sidebar-visible.png'), fullPage: true });
     result.steps.push('sidebar_frame_ready');
 
-    async function sendSidebarMessage(text) {
+    async function fillSidebarInput(text, options = {}) {
       const input = sidebarFrame.locator('#message-input');
       await input.focus();
-      await page.keyboard.press('Control+A');
-      await page.keyboard.press('Backspace');
+      if (options.clear !== false) {
+        await page.keyboard.press('Control+A');
+        await page.keyboard.press('Backspace');
+      }
       await page.keyboard.type(text);
-      await page.keyboard.press('Enter');
+      return input;
+    }
+
+    async function sendSidebarMessage(text, options = {}) {
+      await fillSidebarInput(text, options);
+      await page.keyboard.press(options.submitShortcut || 'Enter');
+    }
+
+    async function getAssistantTexts() {
+      return await sidebarFrame.evaluate(() => (
+        Array.from(document.querySelectorAll('.message.ai-message'))
+          .map((el) => (el.innerText || '').trim())
+          .filter(Boolean)
+      ));
+    }
+
+    async function getUserTexts() {
+      return await sidebarFrame.evaluate(() => (
+        Array.from(document.querySelectorAll('.message.user-message'))
+          .map((el) => (el.innerText || '').trim())
+          .filter(Boolean)
+      ));
+    }
+
+    async function getQueuePanelSnapshot() {
+      return await sidebarFrame.evaluate(() => {
+        const panel = document.querySelector('.conversation-send-queue-preview');
+        if (!panel) return null;
+        return {
+          text: (panel.innerText || '').trim(),
+          items: Array.from(panel.querySelectorAll('.conversation-send-queue-preview__item')).map((item) => ({
+            text: (item.innerText || '').trim(),
+            taskId: item.getAttribute('data-queue-task-id')
+          }))
+        };
+      });
     }
 
     const prompts = buildPrompt(scenario);
+
+    if (scenario === 'shortcut_steer') {
+      result.shortcutChecks = {};
+
+      await fillSidebarInput(prompts.shiftLine1);
+      await page.keyboard.press('Shift+Enter');
+      await page.keyboard.type(prompts.shiftLine2);
+      result.shortcutChecks.shiftEnter = await sidebarFrame.evaluate(() => {
+        const input = document.querySelector('#message-input');
+        return {
+          textContent: input?.textContent || '',
+          innerText: input?.innerText || '',
+          html: input?.innerHTML || ''
+        };
+      });
+      result.steps.push('shift_enter_checked');
+
+      await sendSidebarMessage(prompts.first);
+      result.steps.push('first_message_sent');
+
+      await waitFor(async () => {
+        return await sidebarFrame.evaluate(() => {
+          const latestAi = Array.from(document.querySelectorAll('.message.ai-message')).slice(-1)[0] || null;
+          return latestAi?.classList?.contains('updating') ? true : null;
+        });
+      }, { timeoutMs: 15000, intervalMs: 200, label: 'first message streaming for steer shortcut' });
+
+      await sendSidebarMessage(prompts.queued);
+      result.steps.push('queued_message_sent_with_enter');
+
+      result.queueVisible = await waitFor(async () => {
+        const snapshot = await getQueuePanelSnapshot();
+        if (!snapshot?.items?.length) return null;
+        return snapshot.items.some((item) => item.text.includes('QUEUE_ENTER_ONLY_20260405'))
+          ? snapshot
+          : null;
+      }, { timeoutMs: 20000, intervalMs: 250, label: 'queue preview visible for steer shortcut' });
+      await page.screenshot({ path: path.join(outputDir, '02-queue-visible.png'), fullPage: true });
+      await captureRightBottomCrop(page, path.join(outputDir, '02-queue-visible-right-bottom.png'));
+      result.steps.push('queue_visible');
+
+      await sendSidebarMessage(prompts.steer, { submitShortcut: 'Control+Enter' });
+      result.steps.push('ctrl_enter_steer_sent');
+
+      result.queueAfterSteer = await waitFor(async () => {
+        const snapshot = await getQueuePanelSnapshot();
+        if (!snapshot?.items?.length) return null;
+        return snapshot.items.some((item) => item.text.includes('待确认') && item.text.includes('QUEUE_ENTER_ONLY_20260405'))
+          ? snapshot
+          : null;
+      }, { timeoutMs: 20000, intervalMs: 250, label: 'queue stale after steer' });
+      await page.screenshot({ path: path.join(outputDir, '03-after-steer.png'), fullPage: true });
+      await captureRightBottomCrop(page, path.join(outputDir, '03-after-steer-right-bottom.png'));
+      result.steps.push('queue_staled_after_steer');
+
+      const settled = await waitFor(async () => {
+        const texts = await getAssistantTexts();
+        const steerIndex = texts.findIndex((text) => text.includes('STEER_CTRL_NOW_20260405'));
+        if (steerIndex < 0) return null;
+        return {
+          assistantTexts: texts,
+          steerIndex,
+          latestText: texts[texts.length - 1] || ''
+        };
+      }, { timeoutMs: 180000, intervalMs: 500, label: 'steer assistant settled' });
+      result.assistant = settled;
+      result.steps.push('assistant_settled');
+
+      const assistantCountBeforeAlt = settled.assistantTexts.length;
+      await sendSidebarMessage(prompts.altOnly, { submitShortcut: 'Alt+Enter' });
+      result.steps.push('alt_enter_append_only');
+      result.shortcutChecks.altEnter = await waitFor(async () => {
+        const userTexts = await getUserTexts();
+        const assistantTexts = await getAssistantTexts();
+        const foundUser = userTexts.some((text) => text.includes('UPSCREEN_ALT_ONLY_20260405'));
+        if (!foundUser) return null;
+        return {
+          userTexts,
+          assistantCountBeforeAlt,
+          assistantCountAfterAlt: assistantTexts.length
+        };
+      }, { timeoutMs: 10000, intervalMs: 250, label: 'alt enter append only user message' });
+
+      result.highlightWarnings = result.console.filter((entry) => String(entry.text || '').includes('Element previously highlighted'));
+      await page.screenshot({ path: path.join(outputDir, '04-after-alt-enter.png'), fullPage: true });
+      await captureRightBottomCrop(page, path.join(outputDir, '04-after-alt-enter-right-bottom.png'));
+      result.finishedAt = new Date().toISOString();
+      await fsp.writeFile(path.join(outputDir, 'cdp-sidebar-smoke-result.json'), JSON.stringify(result, null, 2), 'utf8');
+      return;
+    }
+
     await sendSidebarMessage(prompts.first);
     result.steps.push('first_message_sent');
 
