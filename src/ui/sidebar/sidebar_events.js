@@ -398,9 +398,13 @@ function setupEmptyStateHandlers(appContext) {
         return null;
       }
       try {
+        const targetTabId = await appContext.utils.resolveBoundSidebarTargetTabId?.();
         const payload = await new Promise((resolve, reject) => {
           try {
-            chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT_FROM_SIDEBAR' }, (response) => {
+            chrome.runtime.sendMessage({
+              type: 'GET_PAGE_CONTENT_FROM_SIDEBAR',
+              tabId: Number.isFinite(Number(targetTabId)) ? Number(targetTabId) : null
+            }, (response) => {
               const runtimeError = chrome.runtime.lastError;
               if (runtimeError) {
                 reject(new Error(runtimeError.message));

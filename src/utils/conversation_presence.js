@@ -293,6 +293,21 @@ export function createConversationPresence(appContext) {
     return Number.isFinite(Number(selfTabId)) ? Number(selfTabId) : null;
   }
 
+  /**
+   * 异步解析当前侧栏实例所绑定的宿主 tabId。
+   *
+   * 为什么要有这个入口：
+   * - sidebar 运行在扩展页 iframe 中时，background 端往往拿不到 sender.tab；
+   * - 若此时退回“当前活动标签页”，一旦用户切换标签页，后续工具就会打到错误页面；
+   * - 因此这里把“解析本侧栏真正宿主 tab”作为显式能力暴露给上层，供 page-content / js runtime 统一复用。
+   *
+   * @returns {Promise<number|null>}
+   */
+  async function resolveSelfTabId() {
+    await ensureSelfTabResolved();
+    return getSelfTabId();
+  }
+
   function getConversationTabs(conversationId) {
     const convId = normalizeConversationId(conversationId);
     if (!convId) return [];
@@ -318,6 +333,7 @@ export function createConversationPresence(appContext) {
     refreshOpenConversations,
     focusConversation,
     getSelfTabId,
+    resolveSelfTabId,
     getConversationTabs,
     getOpenConversationsSnapshot,
     subscribe

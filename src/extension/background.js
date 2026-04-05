@@ -1,4 +1,5 @@
 import { createJsRuntimeManager } from './js_runtime_manager.js';
+import { resolveSidebarRequestTargetTabId } from '../utils/sidebar_target_tab.js';
 
 // 确保 Service Worker 立即激活
 self.addEventListener('install', (event) => {
@@ -372,11 +373,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
-        const explicitTabId = Number(message?.tabId);
-        const queriedTabId = Number((await chrome.tabs.query({ active: true, currentWindow: true }))?.[0]?.id);
-        const targetTabId = Number.isFinite(explicitTabId) ? explicitTabId : queriedTabId;
+        const targetTabId = resolveSidebarRequestTargetTabId({
+          explicitTabId: message?.tabId,
+          senderTabId: sender?.tab?.id
+        });
         if (!Number.isFinite(targetTabId)) {
-          sendResponse({ success: false, error: '未找到可执行的目标标签页。' });
+          sendResponse({ success: false, error: '未找到与当前侧栏实例绑定的目标标签页。' });
           return;
         }
 
@@ -410,11 +412,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
-        const explicitTabId = Number(message?.tabId);
-        const queriedTabId = Number((await chrome.tabs.query({ active: true, currentWindow: true }))?.[0]?.id);
-        const targetTabId = Number.isFinite(explicitTabId) ? explicitTabId : queriedTabId;
+        const targetTabId = resolveSidebarRequestTargetTabId({
+          explicitTabId: message?.tabId,
+          senderTabId: sender?.tab?.id
+        });
         if (!Number.isFinite(targetTabId)) {
-          sendResponse({ success: false, error: '未找到可读取 frame 快照的目标标签页。' });
+          sendResponse({ success: false, error: '未找到与当前侧栏实例绑定的目标标签页。' });
           return;
         }
 
@@ -481,12 +484,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       async function tryGetContent() {
         try {
-          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-          if (!activeTab) {
-            return null;
-          }
-
-          if (sender.tab && sender.tab.id !== activeTab.id) {
+          const targetTabId = resolveSidebarRequestTargetTabId({
+            explicitTabId: message?.tabId,
+            senderTabId: sender?.tab?.id
+          });
+          if (!Number.isFinite(targetTabId)) {
             return null;
           }
 
@@ -494,8 +496,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return null;
           }
 
-          if (await isTabConnected(activeTab.id)) {
-            return await chrome.tabs.sendMessage(activeTab.id, {
+          if (await isTabConnected(targetTabId)) {
+            return await chrome.tabs.sendMessage(targetTabId, {
               type: 'GET_PAGE_CONTENT_INTERNAL'
             });
           }

@@ -133,6 +133,24 @@ export function createSidebarAppContext(isStandalone) {
  * @param {ReturnType<typeof createSidebarAppContext>} appContext - 已初始化的上下文。
  */
 export function registerSidebarUtilities(appContext) {
+  async function resolveBoundSidebarTargetTabId() {
+    if (appContext.state.isStandalone) return null;
+
+    const fromResolver = await appContext.services.conversationPresence?.resolveSelfTabId?.();
+    if (Number.isFinite(Number(fromResolver))) {
+      return Math.trunc(Number(fromResolver));
+    }
+
+    const cached = appContext.services.conversationPresence?.getSelfTabId?.();
+    if (Number.isFinite(Number(cached))) {
+      return Math.trunc(Number(cached));
+    }
+
+    return null;
+  }
+
+  appContext.utils.resolveBoundSidebarTargetTabId = resolveBoundSidebarTargetTabId;
+
   const getDocumentZoomFactor = () => {
     const root = document.documentElement;
     if (!root) return 1;
@@ -647,7 +665,7 @@ export function registerSidebarUtilities(appContext) {
   };
 
   /**
-   * 获取当前活动网页标签页的 frame 快照。
+   * 获取当前侧栏所绑定网页标签页的 frame 快照。
    * 主要用于在发起 Responses 请求前，把 frameId/url/title 注入模型上下文。
    */
   appContext.utils.getJsRuntimeFrames = async () => {
@@ -664,7 +682,14 @@ export function registerSidebarUtilities(appContext) {
       };
     }
     try {
-      return await chrome.runtime.sendMessage({ type: 'GET_JS_RUNTIME_FRAMES' });
+      const targetTabId = await resolveBoundSidebarTargetTabId();
+      if (!Number.isFinite(targetTabId)) {
+        return {
+          success: false,
+          error: '当前侧栏尚未解析出稳定的宿主标签页，暂时无法读取 JS Runtime frame 快照。'
+        };
+      }
+      return await chrome.runtime.sendMessage({ type: 'GET_JS_RUNTIME_FRAMES', tabId: targetTabId });
     } catch (error) {
       return {
         success: false,
@@ -674,7 +699,7 @@ export function registerSidebarUtilities(appContext) {
   };
 
   /**
-   * 在当前网页标签页里执行一段基于 userScripts 的 JS 代码。
+   * 在当前侧栏所绑定的网页标签页里执行一段基于 userScripts 的 JS 代码。
    * 第一阶段先提供给调试入口与后续工具层使用，不额外引入复杂 UI。
    *
    * @param {string} code - 作为 async IIFE 函数体执行的代码片段，可直接使用 await / return
@@ -695,8 +720,16 @@ export function registerSidebarUtilities(appContext) {
       };
     }
     try {
+      const targetTabId = await resolveBoundSidebarTargetTabId();
+      if (!Number.isFinite(targetTabId)) {
+        return {
+          success: false,
+          error: '当前侧栏尚未解析出稳定的宿主标签页，暂时无法执行 JS Runtime。'
+        };
+      }
       return await chrome.runtime.sendMessage({
         type: 'EXECUTE_JS_RUNTIME',
+        tabId: targetTabId,
         code: (typeof code === 'string') ? code : '',
         frameIds: Array.isArray(options?.frameIds) ? options.frameIds : null,
         injectImmediately: options?.injectImmediately === true

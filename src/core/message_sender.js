@@ -5770,8 +5770,10 @@ export function createMessageSender(appContext) {
   async function getPageContent() {
     try {
       console.log('发送获取网页内容请求');
+      const targetTabId = await utils?.resolveBoundSidebarTargetTabId?.();
       const response = await chrome.runtime.sendMessage({
-        type: 'GET_PAGE_CONTENT_FROM_SIDEBAR'
+        type: 'GET_PAGE_CONTENT_FROM_SIDEBAR',
+        tabId: Number.isFinite(Number(targetTabId)) ? Number(targetTabId) : null
       });
       if (response) {
         state.pageInfo = response;
@@ -5784,7 +5786,7 @@ export function createMessageSender(appContext) {
   }
 
   /**
-   * 获取当前活动标签页的 JS Runtime frame 快照。
+   * 获取当前侧栏绑定网页标签页的 JS Runtime frame 快照。
    * 这里的目标不是让模型再额外调用发现工具，而是在请求发出前把 frame_id 提示直接塞进隐藏上下文。
    *
    * @returns {Promise<Array<{frameId:number, documentId:string|null, url:string, title:string, isTop:boolean}>|null>}
@@ -5837,7 +5839,7 @@ export function createMessageSender(appContext) {
       document_id: item.documentId || null
     }));
     return [
-      '以下是当前活动标签页可执行的 frame 快照，仅供 js_runtime_execute 选择 frame_ids：',
+      '以下是当前侧栏绑定网页标签页可执行的 frame 快照，仅供 js_runtime_execute 选择 frame_ids：',
       '- 若 frame_ids 省略或为空数组，则默认在顶层 frame 执行。',
       '- 若需要进入 iframe 内部，请从下面的 frame_id 中选择。',
       JSON.stringify(payload, null, 2)
