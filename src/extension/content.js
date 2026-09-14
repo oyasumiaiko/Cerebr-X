@@ -15,6 +15,7 @@ const SIDEBAR_IFRAME_HEARTBEAT_STALE_MS = 15000;
 const SIDEBAR_IFRAME_INITIAL_HEARTBEAT_GRACE_MS = 30000;
 const SIDEBAR_IFRAME_HEALTH_PROBE_TIMEOUT_MS = 2000;
 const SIDEBAR_IFRAME_AUTO_RELOAD_WINDOW_MS = 10 * 60 * 1000;
+const SCREENSHOT_CAPTURE_TIMEOUT_MS = 5000;
 const JS_RUNTIME_RUNNER_ALLOWED_MESSAGE_TYPES = new Set([
     'GET_JS_RUNTIME_STATUS',
     'GET_JS_RUNTIME_FRAMES',
@@ -3727,6 +3728,16 @@ async function extractChaptersFromPDFData(completeData, targetSidebar = null) {
  * 截图前会先隐藏侧边栏，并在等待两帧后再进行截图，最后恢复侧边栏显示。
  */
 function captureVisibleTabWhileSidebarHidden(requestMessageBuilder) {
+  // Chrome 的 captureVisibleTab 只能捕获当前前台标签页。后台标签页中的
+  // requestAnimationFrame 还可能被完全暂停；必须在进入等待链前快速失败，
+  // 否则截图工具会一直占住本轮长任务，最终触发 iframe 心跳恢复。
+  if (document.visibilityState !== 'visible') {
+    const error = new Error('当前宿主页标签页未处于前台，无法截图。');
+    error.name = 'WebpageScreenshotTabNotVisibleError';
+    error.code = 'TAB_NOT_VISIBLE';
+    return Promise.reject(error);
+  }
+
   const visibleSidebars = sidebarManager?.getVisibleSidebars?.() || [];
   const hiddenEntries = visibleSidebars
     .filter((item) => item?.sidebar)
@@ -3754,11 +3765,30 @@ function captureVisibleTabWhileSidebarHidden(requestMessageBuilder) {
    * 递归地执行 requestAnimationFrame，并在指定次数后执行截屏操作。
    * @param {number} waitFramesCount 递归层级，控制等待的帧数。
    */
+  let settled = false;
+  let timeoutId = null;
+
+  let resolveCapture;
+  let rejectCapture;
+  const capturePromise = new Promise((resolve, reject) => {
+    resolveCapture = resolve;
+    rejectCapture = reject;
+  });
+
+  function settleWithError(error) {
+    if (settled) return;
+    settled = true;
+    if (timeoutId !== null) clearTimeout(timeoutId);
+    restoreSidebarVisibility();
+    rejectCapture(error);
+  }
+
   function waitCaptureWithAnimationFrame(waitFramesCount) {
-    return new Promise((resolve, reject) => {
+    try {
       requestAnimationFrame(() => {
+        if (settled) return;
         if (waitFramesCount > 0) {
-          resolve(waitCaptureWithAnimationFrame(waitFramesCount - 1));
+          waitCaptureWithAnimationFrame(waitFramesCount - 1);
           return;
         }
 
@@ -3766,25 +3796,36 @@ function captureVisibleTabWhileSidebarHidden(requestMessageBuilder) {
           ? requestMessageBuilder()
           : null;
         if (!requestMessage || typeof requestMessage !== 'object') {
-          restoreSidebarVisibility();
-          reject(new Error('截图请求构造失败：缺少有效的 request message。'));
+          settleWithError(new Error('截图请求构造失败：缺少有效的 request message。'));
           return;
         }
 
         chrome.runtime.sendMessage(requestMessage, (response) => {
-          restoreSidebarVisibility();
+          if (settled) return;
           const lastError = chrome.runtime?.lastError;
           if (lastError) {
-            reject(new Error(lastError.message || '发送截图请求失败'));
+            settleWithError(new Error(lastError.message || '发送截图请求失败'));
             return;
           }
-          resolve(response);
+          settled = true;
+          if (timeoutId !== null) clearTimeout(timeoutId);
+          restoreSidebarVisibility();
+          resolveCapture(response);
         });
       });
-    });
+    } catch (error) {
+      settleWithError(error);
+    }
   }
 
-  return waitCaptureWithAnimationFrame(5); // 初始调用，设置递归层级为 5，实现等待五帧的效果
+  timeoutId = setTimeout(() => {
+    const error = new Error('截图等待超时：当前标签页可能未处于前台。');
+    error.name = 'WebpageScreenshotTimeoutError';
+    error.code = 'CAPTURE_TIMEOUT';
+    settleWithError(error);
+  }, SCREENSHOT_CAPTURE_TIMEOUT_MS);
+  waitCaptureWithAnimationFrame(5); // 等待五帧，避开侧栏隐藏过渡帧
+  return capturePromise;
 }
 
 function captureAndDropScreenshot(targetSidebar = null) {
